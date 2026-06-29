@@ -35,3 +35,25 @@
 - Verified:
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-06-29 00:36:04 PDT
+
+- Added a tiny-graph equivalence test in `third_party/mcpd3`:
+  exported `DualDecomposition` partition packages are solved through
+  `InProcessPartitionWorker` and compared against the existing
+  `DualDecomposition` one-iteration lower bound and disagreement count.
+- Exposed `DualDecomposition::getPartitionPackages()` and populated
+  `PartitionPackage` graph data before local solver construction.
+- Added stable per-constraint endpoint IDs while constructing existing
+  `DualDecompositionConstraintArc` records.
+- Committed the mcpd3 equivalence/export unit on branch `partition-worker-api`:
+  `aebb31a Export dual decomposition partition packages`.
+- Fixed the documented Stage 0 example build by removing an unnecessary Boost
+  hash dependency from `graph/csrgraph.h`, adding the missing `io/workdir.h`,
+  and removing the stale CMake Boost lookup.
+- Committed the mcpd3 build-fix unit:
+  `d7dfbe1 Make CSR graph build without Boost hash`.
+- Verified:
+  - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `ctest --test-dir build --output-on-failure`.
