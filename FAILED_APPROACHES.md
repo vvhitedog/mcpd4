@@ -9,3 +9,9 @@
 - Do not depend on local benchmark files from
   `/home/matt/software/graph-cuts-undirected`.
 - Do not claim exact min-cut optimality from regularized agreement alone.
+
+## 2026-06-29 00:29:46 PDT
+
+- Expected TDD red state: `partition_worker_test` initially failed to compile
+  because `decomp/partition_worker.h` did not exist. This was resolved by
+  mcpd3 commit `02c28fc`.
