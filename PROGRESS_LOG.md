@@ -111,6 +111,26 @@
   - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
   - `ctest --test-dir build --output-on-failure`.
 
+## 2026-06-29 02:58 PDT
+
+- Tried to find cases where the committed one-sided lexicographic
+  regularization is required for convergence.
+- Search results found no strict-need cases:
+  - 500k random one-boundary, two-node partition-pair traces;
+  - 1M random two-boundary coupled partition-pair traces;
+  - 1M random local source-endpoint subproblems checking whether
+    lexicographic regularization changes labels;
+  - 1M random mixed source/target local subproblems checking whether
+    lexicographic regularization changes labels.
+- Found a hand-derived low-scale cycle:
+  source terminal `-10`, target terminal `+8`, step size `10`.
+  Unregularized DD cycles, and the current sink-penalizing regularizer also
+  cycles. An exact tie-break in the opposite direction on the tied source copy
+  would resolve that case.
+- Conclusion: the current `M * F(x) + R(x)` machinery is exact, but the
+  current one-sided placement toward source is not yet a convincing useful
+  convergence mechanism.
+
 ## 2026-06-29 02:47 PDT
 
 - Reworked low-scale regularization into an exact lexicographic local solve:

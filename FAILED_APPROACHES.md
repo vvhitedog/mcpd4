@@ -64,3 +64,15 @@
 - Do not restore the old additive local regularization path as a certificate:
   it can perturb strict local optima. The hardened path must keep
   `M > max(R)` and report the unregularized lower-bound term.
+
+## 2026-06-29 02:58 PDT
+
+- The committed exact one-sided lexicographic regularizer has not produced a
+  case where it is required for convergence. Random searches over simple local
+  and two-partition traces found zero strict-need cases.
+- Do not treat "sink-penalizing anchors" as validated. A concrete low-scale
+  cycle with source terminal `-10`, target terminal `+8`, and step size `10`
+  remains a cycle with the current placement.
+- Likely next direction: make lexicographic placement direction-aware, then
+  require tests where unregularized low-scale DD cycles but the exact
+  direction-aware tie-break reaches agreement.

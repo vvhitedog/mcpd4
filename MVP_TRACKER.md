@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 02:47 PDT
+Last updated: 2026-06-29 02:58 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -78,6 +78,10 @@ The MVP is complete when:
   - preserve strict local optima;
   - report unregularized lower-bound terms;
   - treat lexicographic regularized agreement as optimal.
+- [ ] Find and test at least one real convergence case where low-scale
+  lexicographic regularization succeeds and the same low-scale unregularized
+  schedule does not. Current source-biased placement has not demonstrated
+  this.
 - [ ] Decide and implement how optional primal upper-bound decoding maps to
   workers. MVP may keep it disabled, but behavior must be explicit.
 - [ ] Support one worker object/process owning multiple partition packages.
@@ -164,6 +168,9 @@ The MVP is complete when:
 - Source-side lexicographic regularization can be redundant in simple local
   ties because the current maxflow implementation already chooses source in
   those cases.
+- A hand-derived one-node cycle (`source=-10`, `target=+8`, step `10`) is not
+  resolved by the current sink-penalizing placement; it would need an
+  opposite-direction tie-break on the tied source copy.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator
   path.
 
