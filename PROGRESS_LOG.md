@@ -83,3 +83,30 @@
 - Added `MVP_TRACKER.md` to track the overall path from the current
   network-free checkpoint to a localhost distributed MVP.
 - Linked the tracker from `README.md`.
+
+## 2026-06-29 00:57:34 PDT
+
+- Implemented the first unchecked Stage 2 tracker item: extended
+  `PartitionWorkerCoordinator` from a single-round primitive to a full
+  network-free solve loop.
+- Added coordinator result/status types for:
+  - overall optimization status;
+  - stop reason;
+  - per-iteration progress records;
+  - per-scale results;
+  - final lower-bound, disagreement, and regularization diagnostics.
+- Added scripted-worker tests covering solve-loop branches:
+  - unregularized agreement as exact optimality;
+  - regularized agreement as non-exact no-further-progress;
+  - iteration cap;
+  - modern patience/no-improvement stopping;
+  - legacy patience stopping;
+  - group stopping;
+  - continuation across scales.
+- Committed the mcpd3 unit:
+  `9e2d530 Add full partition coordinator solve loop`.
+- Marked the corresponding `MVP_TRACKER.md` checklist item complete.
+- Verified:
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
+  - `ctest --test-dir build --output-on-failure`.

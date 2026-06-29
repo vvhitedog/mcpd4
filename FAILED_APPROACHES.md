@@ -38,3 +38,12 @@
 - Current coordinator limitation: `PartitionWorkerCoordinator` supports the
   MVP shape of one package per worker object and sends all alpha records each
   round. Multi-package workers and changed-alpha deltas remain future work.
+
+## 2026-06-29 00:57:34 PDT
+
+- Expected TDD red state: full-solve tests initially failed to compile because
+  `PartitionWorkerCoordinator` had no `solve()` API, no solve-loop options, no
+  optimization status enum, and no stop-reason enum. This was resolved by
+  mcpd3 commit `9e2d530`.
+- Still out of scope for this step: primal upper-bound decoding is not mapped
+  to the worker-coordinator path. That remains the next tracker item.

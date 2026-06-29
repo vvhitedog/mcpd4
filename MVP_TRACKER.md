@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 00:50 PDT
+Last updated: 2026-06-29 00:57 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -11,7 +11,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
-- Current submodule checkpoint: `e65eaa4 Add partition worker coordinator round loop`
+- Current submodule checkpoint: `9e2d530 Add full partition coordinator solve loop`
 
 ## MVP Definition
 
@@ -64,7 +64,7 @@ The MVP is complete when:
   `DualDecomposition`.
 - [x] Test two coordinator rounds against existing `DualDecomposition` on a
   tiny graph.
-- [ ] Extend coordinator from round primitive to full solve loop:
+- [x] Extend coordinator from round primitive to full solve loop:
   - scale loop;
   - best lower bound tracking;
   - iteration caps;
@@ -153,8 +153,6 @@ The MVP is complete when:
 - No product serialization exists yet.
 - `PartitionWorkerCoordinator` currently sends all alpha records every round.
 - `PartitionWorkerCoordinator` currently has one package per worker object.
-- Full `DualDecomposition` stopping semantics are not yet implemented in the
-  worker-coordinator path.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator
   path.
 
