@@ -111,26 +111,6 @@
   - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
   - `ctest --test-dir build --output-on-failure`.
 
-## 2026-06-29 02:58 PDT
-
-- Tried to find cases where the committed one-sided lexicographic
-  regularization is required for convergence.
-- Search results found no strict-need cases:
-  - 500k random one-boundary, two-node partition-pair traces;
-  - 1M random two-boundary coupled partition-pair traces;
-  - 1M random local source-endpoint subproblems checking whether
-    lexicographic regularization changes labels;
-  - 1M random mixed source/target local subproblems checking whether
-    lexicographic regularization changes labels.
-- Found a hand-derived low-scale cycle:
-  source terminal `-10`, target terminal `+8`, step size `10`.
-  Unregularized DD cycles, and the current sink-penalizing regularizer also
-  cycles. An exact tie-break in the opposite direction on the tied source copy
-  would resolve that case.
-- Conclusion: the current `M * F(x) + R(x)` machinery is exact, but the
-  current one-sided placement toward source is not yet a convincing useful
-  convergence mechanism.
-
 ## 2026-06-29 02:47 PDT
 
 - Reworked low-scale regularization into an exact lexicographic local solve:
@@ -154,3 +134,50 @@
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-06-29 02:58 PDT
+
+- Tried to find cases where the committed one-sided lexicographic
+  regularization is required for convergence.
+- Search results found no strict-need cases:
+  - 500k random one-boundary, two-node partition-pair traces;
+  - 1M random two-boundary coupled partition-pair traces;
+  - 1M random local source-endpoint subproblems checking whether
+    lexicographic regularization changes labels;
+  - 1M random mixed source/target local subproblems checking whether
+    lexicographic regularization changes labels.
+- Found a hand-derived low-scale cycle:
+  source terminal `-10`, target terminal `+8`, step size `10`.
+  Scale `10` cycles, but scale `1` resolves it.
+- Corrected follow-up: this case validates the scaling schedule, not
+  regularization necessity. A forced-unregularized `10 -> 1` schedule also
+  reaches agreement.
+- The previous additive regularization scheme at commit `9e2d530` was tested
+  in a temporary worktree on this same case. With the coordinator's immediate
+  low-scale regularization, it did not reach agreement for checked
+  full-schedule iteration budgets `12`, `20`, or `30`.
+- Delayed old-additive variants confirm the nuance: if scale `1`
+  regularization is delayed until after the unregularized scale-`1` path has
+  already agreed, the case succeeds, but regularization was not needed for
+  that success.
+- Conclusion: the current `M * F(x) + R(x)` machinery avoids the old additive
+  scheme's failure on this case, but this case is still not a strict
+  regularization-required example.
+
+## 2026-06-29 08:57 PDT
+
+- Added a second coordinator regularization scheme:
+  `SYMMETRIC_ALPHA_SHIFT`.
+- The scheme leaves local solver regularization disabled and instead applies a
+  symmetric DD alpha pullback to each nonzero alpha update. With
+  `symmetric_alpha_shift = 1`, a step-`10` disagreement update of `+/-10`
+  becomes `+/-9`; step-`1` updates are unchanged because no smaller positive
+  integer shift exists.
+- Added tests on three one-node cycle variants:
+  source terminal `-10`, target terminals `{2, 5, 8}`.
+  At fixed step `10`, the default local lexicographic scheme remains
+  disagreeing, while symmetric alpha shift reaches agreement in the second
+  round with zero local regularization budget.
+- This is the first committed test evidence that a symmetric DD-style
+  regularization can resolve fixed-scale cycling while avoiding the local
+  `M * F(x) + R(x)` solve path.

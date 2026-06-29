@@ -70,9 +70,25 @@
 - The committed exact one-sided lexicographic regularizer has not produced a
   case where it is required for convergence. Random searches over simple local
   and two-partition traces found zero strict-need cases.
-- Do not treat "sink-penalizing anchors" as validated. A concrete low-scale
-  cycle with source terminal `-10`, target terminal `+8`, and step size `10`
-  remains a cycle with the current placement.
-- Likely next direction: make lexicographic placement direction-aware, then
-  require tests where unregularized low-scale DD cycles but the exact
-  direction-aware tie-break reaches agreement.
+- Do not test regularization convergence only at scale `10`. A concrete cycle
+  with source terminal `-10`, target terminal `+8`, and step size `10` is
+  resolved by continuing to scale `1`.
+- Do not treat that concrete cycle as a strict regularization-required case:
+  forced-unregularized scale `1` also reaches agreement.
+- The previous additive regularization scheme at commit `9e2d530` still fails
+  this full-schedule case for checked iteration budgets `12`, `20`, and `30`
+  when low-scale regularization is active immediately.
+- If old additive regularization is delayed until after the unregularized
+  scale-`1` path has already agreed, this case succeeds, but that does not
+  validate the old regularizer.
+
+## 2026-06-29 08:57 PDT
+
+- Symmetric DD-style regularization should not be lumped in with local unary
+  regularization failures. It changes alpha updates symmetrically and cancels
+  on agreement.
+- Early positive result: `SYMMETRIC_ALPHA_SHIFT` resolves fixed step-`10`
+  one-node cycle variants where local lexicographic regularization remains
+  disagreeing.
+- Still not validated broadly: do not make symmetric alpha-shift the default
+  without stress tests beyond the committed tiny synthetic cases.

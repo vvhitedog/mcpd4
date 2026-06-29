@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 02:58 PDT
+Last updated: 2026-06-29 08:57 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -11,7 +11,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
-- Current submodule checkpoint: `9eda49c Add exact lexicographic regularization`
+- Current submodule checkpoint: `c676af3 Add symmetric alpha shift regularization`
 
 ## MVP Definition
 
@@ -82,6 +82,12 @@ The MVP is complete when:
   lexicographic regularization succeeds and the same low-scale unregularized
   schedule does not. Current source-biased placement has not demonstrated
   this.
+- [x] Add an experimental symmetric DD alpha-shift scheme and test it on
+  fixed-scale cycle cases where local lexicographic regularization remains
+  disagreeing.
+- [ ] Decide whether symmetric alpha-shift should replace local
+  lexicographic regularization as the coordinator default after broader
+  stress testing.
 - [ ] Decide and implement how optional primal upper-bound decoding maps to
   workers. MVP may keep it disabled, but behavior must be explicit.
 - [ ] Support one worker object/process owning multiple partition packages.
@@ -168,9 +174,13 @@ The MVP is complete when:
 - Source-side lexicographic regularization can be redundant in simple local
   ties because the current maxflow implementation already chooses source in
   those cases.
-- A hand-derived one-node cycle (`source=-10`, `target=+8`, step `10`) is not
-  resolved by the current sink-penalizing placement; it would need an
-  opposite-direction tie-break on the tied source copy.
+- A hand-derived one-node cycle (`source=-10`, `target=+8`, step `10`) is a
+  scale-schedule case: step `10` cycles, but continuing to step `1` reaches
+  agreement. This is not a strict regularization-required example because a
+  forced-unregularized step `1` run also reaches agreement.
+- Experimental `SYMMETRIC_ALPHA_SHIFT` resolves fixed step-`10` variants of
+  that cycle by making `+/-10` alpha updates into `+/-9` updates. It has only
+  been tested on committed tiny synthetic cases so far.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator
   path.
 
