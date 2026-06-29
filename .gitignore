@@ -1,0 +1,12 @@
+build/
+cmake-build-*/
+*.o
+*.so
+*.a
+*.dylib
+*.exe
+*.log
+*.jsonl
+*.csv
+benchmark_results/
+data/

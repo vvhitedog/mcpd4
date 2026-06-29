@@ -1,0 +1,4 @@
+[submodule "third_party/mcpd3"]
+	path = third_party/mcpd3
+	url = https://github.com/vvhitedog/mcpd3.git
+	branch = distributed-mvp-start
