@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 08:57 PDT
+Last updated: 2026-06-29 14:50 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -11,7 +11,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
-- Current submodule checkpoint: `c676af3 Add symmetric alpha shift regularization`
+- Current submodule checkpoint: `fb311f4 Add randomized alpha initialization option`
 
 ## MVP Definition
 
@@ -85,8 +85,11 @@ The MVP is complete when:
 - [x] Add an experimental symmetric DD alpha-shift scheme and test it on
   fixed-scale cycle cases where local lexicographic regularization remains
   disagreeing.
+- [x] Add an experimental seedable randomized initial-alpha option and test
+  both a hit seed and a miss seed on fixed-scale cycle cases.
 - [ ] Decide whether symmetric alpha-shift should replace local
-  lexicographic regularization as the coordinator default after broader
+  lexicographic regularization as the coordinator default, and whether
+  randomized initial alphas should remain diagnostic-only, after broader
   stress testing.
 - [ ] Decide and implement how optional primal upper-bound decoding maps to
   workers. MVP may keep it disabled, but behavior must be explicit.
@@ -181,6 +184,10 @@ The MVP is complete when:
 - Experimental `SYMMETRIC_ALPHA_SHIFT` resolves fixed step-`10` variants of
   that cycle by making `+/-10` alpha updates into `+/-9` updates. It has only
   been tested on committed tiny synthetic cases so far.
+- Experimental randomized initial alphas can also resolve those fixed
+  step-`10` variants when the seed lands in a useful multiplier region, but a
+  tested miss seed remains disagreeing. This is a one-shot perturbation, not a
+  replacement for an adaptive regularizer.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator
   path.
 

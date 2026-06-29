@@ -92,3 +92,12 @@
   disagreeing.
 - Still not validated broadly: do not make symmetric alpha-shift the default
   without stress tests beyond the committed tiny synthetic cases.
+
+## 2026-06-29 14:50 PDT
+
+- Randomized initial Lagrange multipliers should not be treated as a stronger
+  regularization scheme. Committed tests show both outcomes on the same fixed
+  step-`10` cycle family: one seed reaches first-round unregularized
+  agreement, while another seed misses and remains disagreeing.
+- Use randomized initial alphas as diagnostic/experimental evidence for
+  alpha-offset behavior, not as an MVP default or an optimality argument.

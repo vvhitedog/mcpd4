@@ -181,3 +181,28 @@
 - This is the first committed test evidence that a symmetric DD-style
   regularization can resolve fixed-scale cycling while avoiding the local
   `M * F(x) + R(x)` solve path.
+
+## 2026-06-29 14:50 PDT
+
+- Added an experimental seedable randomized initial-alpha option to
+  `PartitionWorkerCoordinator`.
+- Added `PartitionWorkerRegularizationScheme::NONE` so tests can isolate
+  unregularized coordinator behavior from both local lexicographic
+  regularization and symmetric alpha-shift updates.
+- Added tests on the same fixed step-`10` one-node cycle variants:
+  source terminal `-10`, target terminals `{2, 5, 8}`.
+  - With no regularization and no randomized alpha, the fixed-scale schedule
+    remains disagreeing.
+  - With a seed that misses the useful multiplier region, randomized
+    initialization also remains disagreeing.
+  - With a seed that starts in the useful multiplier region, randomized
+    initialization reaches unregularized agreement in the first round with
+    zero local regularization budget.
+- Conclusion: randomized initialization is useful diagnostic evidence for the
+  alpha-offset interpretation, but it is weaker than an adaptive regularizer
+  because it is a one-shot start perturbation.
+- Committed the mcpd3 unit:
+  `fb311f4 Add randomized alpha initialization option`.
+- Verified:
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`.
