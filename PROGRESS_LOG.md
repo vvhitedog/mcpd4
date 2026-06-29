@@ -110,3 +110,27 @@
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-06-29 02:47 PDT
+
+- Reworked low-scale regularization into an exact lexicographic local solve:
+  each regularized local subproblem now solves `M * F(x) + R(x)` with
+  `M = regularization_budget + 1`, then reports the unregularized local
+  optimum `F(x)` as the lower-bound term.
+- Preserved strict local optima under regularization and limited the
+  one-sided term to tie-breaking among existing local optima.
+- Updated coordinator and legacy `DualDecomposition` stop semantics so
+  lexicographic regularized agreement reports `OPTIMAL` instead of
+  `NO_FURTHER_PROGRESS`.
+- Added tests for:
+  - no-anchor regularization behavior;
+  - strict-optimum preservation;
+  - local tie-breaking with unregularized lower-bound reporting;
+  - low-scale schedule activation at step sizes `10` and `1`;
+  - coordinator optimal stop on lexicographic regularized agreement.
+- Committed the mcpd3 unit:
+  `9eda49c Add exact lexicographic regularization`.
+- Verified:
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
+  - `ctest --test-dir build --output-on-failure`.

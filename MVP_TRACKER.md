@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 00:57 PDT
+Last updated: 2026-06-29 02:47 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -11,7 +11,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
-- Current submodule checkpoint: `9e2d530 Add full partition coordinator solve loop`
+- Current submodule checkpoint: `9eda49c Add exact lexicographic regularization`
 
 ## MVP Definition
 
@@ -26,8 +26,8 @@ The MVP is complete when:
   resending graph structure;
 - localhost integration tests show distributed results match current
   in-process mcpd3 behavior on committed tiny and small fixtures;
-- stopping output does not claim exact min-cut optimality for regularized
-  agreement or no-progress stops.
+- stopping output distinguishes exact unregularized agreement, exact
+  lexicographic regularized agreement, and non-certificate no-progress stops.
 
 ## Progress Checklist
 
@@ -72,6 +72,12 @@ The MVP is complete when:
   - group stopping;
   - regularization diagnostics;
   - progress output parity.
+- [x] Harden low-scale regularization as an exact lexicographic tie-break:
+  - no regularization above step size `10`;
+  - solve regularized local subproblems as `M * F(x) + R(x)`;
+  - preserve strict local optima;
+  - report unregularized lower-bound terms;
+  - treat lexicographic regularized agreement as optimal.
 - [ ] Decide and implement how optional primal upper-bound decoding maps to
   workers. MVP may keep it disabled, but behavior must be explicit.
 - [ ] Support one worker object/process owning multiple partition packages.
@@ -143,7 +149,9 @@ The MVP is complete when:
 - [ ] Document current MVP limitations.
 - [ ] Document exactness semantics:
   - zero disagreement with zero regularization can be exact;
-  - regularized agreement is not an exact certificate;
+  - lexicographic regularized agreement can be exact when local workers solve
+    `M * F(x) + R(x)` and report `F(x)`;
+  - heuristic/additive regularized agreement is not an exact certificate;
   - patience, group stopping, timeout, and no-progress stops are not exact
     certificates.
 
@@ -153,6 +161,9 @@ The MVP is complete when:
 - No product serialization exists yet.
 - `PartitionWorkerCoordinator` currently sends all alpha records every round.
 - `PartitionWorkerCoordinator` currently has one package per worker object.
+- Source-side lexicographic regularization can be redundant in simple local
+  ties because the current maxflow implementation already chooses source in
+  those cases.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator
   path.
 

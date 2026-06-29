@@ -8,7 +8,9 @@
 - Do not reintroduce the removed Polyak step policy.
 - Do not depend on local benchmark files from
   `/home/matt/software/graph-cuts-undirected`.
-- Do not claim exact min-cut optimality from regularized agreement alone.
+- Do not claim exact min-cut optimality from heuristic/non-lexicographic
+  regularized agreement. Exact claims require local subproblems to report the
+  unregularized optimum after a lexicographic `M * F(x) + R(x)` tie-break.
 
 ## 2026-06-29 00:29:46 PDT
 
@@ -47,3 +49,18 @@
   mcpd3 commit `9e2d530`.
 - Still out of scope for this step: primal upper-bound decoding is not mapped
   to the worker-coordinator path. That remains the next tracker item.
+
+## 2026-06-29 02:47 PDT
+
+- Discarded the unregularized-confirmation idea for lexicographic
+  regularization: a plain unregularized re-solve can select a different
+  optimizer among tied local optima, so it is not the right certificate for
+  the chosen regularized labels.
+- Important caveat found while testing: simple source-side local ties already
+  choose source under the current maxflow implementation, so one-sided
+  lexicographic regularization may be redundant in those cases. Tests now
+  cover the exactness contract rather than claiming every small tie case needs
+  the regularizer.
+- Do not restore the old additive local regularization path as a certificate:
+  it can perturb strict local optima. The hardened path must keep
+  `M > max(R)` and report the unregularized lower-bound term.
