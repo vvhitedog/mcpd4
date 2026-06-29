@@ -9,9 +9,9 @@ cut/benchmark/proof workspace.
 Start with:
 
 - [AGENT_HANDOFF.md](AGENT_HANDOFF.md)
+- [MVP_TRACKER.md](MVP_TRACKER.md)
 
 The solver dependency is pinned as a submodule:
 
 - `third_party/mcpd3`
 - public branch: `https://github.com/vvhitedog/mcpd3/tree/distributed-mvp-start`
-

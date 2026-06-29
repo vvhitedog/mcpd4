@@ -77,3 +77,9 @@
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-06-29 00:50:30 PDT
+
+- Added `MVP_TRACKER.md` to track the overall path from the current
+  network-free checkpoint to a localhost distributed MVP.
+- Linked the tracker from `README.md`.
