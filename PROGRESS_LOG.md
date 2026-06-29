@@ -57,3 +57,23 @@
   - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-06-29 00:39:30 PDT
+
+- Started Stage 2 without adding networking.
+- Added `PartitionWorkerCoordinator`, a network-free controller that:
+  - owns coordinator-side constraint alpha/momentum state;
+  - sends alpha records to partition workers each round;
+  - gathers lower-bound and regularization terms;
+  - gathers constrained labels;
+  - computes disagreement diagnostics;
+  - applies the same fixed-step alpha update math as `DualDecomposition`.
+- Added a two-round tiny-graph test comparing `PartitionWorkerCoordinator`
+  against the existing `DualDecomposition` loop for best lower bound,
+  disagreement count, and disagreement norm.
+- Committed the mcpd3 coordinator unit:
+  `e65eaa4 Add partition worker coordinator round loop`.
+- Verified:
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
+  - `ctest --test-dir build --output-on-failure`.

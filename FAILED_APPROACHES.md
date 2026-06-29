@@ -29,3 +29,12 @@
   build failed on missing `io/workdir.h`. The helper existed only in the
   experimental compatibility tree; resolved by adding it to mcpd3 in commit
   `d7dfbe1`.
+
+## 2026-06-29 00:39:30 PDT
+
+- Expected TDD red state: the two-round coordinator test initially failed to
+  compile because `decomp/partition_coordinator.h` did not exist. This was
+  resolved by mcpd3 commit `e65eaa4`.
+- Current coordinator limitation: `PartitionWorkerCoordinator` supports the
+  MVP shape of one package per worker object and sends all alpha records each
+  round. Multi-package workers and changed-alpha deltas remain future work.
