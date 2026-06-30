@@ -514,3 +514,26 @@
   - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-06-29 23:12 PDT
+
+- Rechecked the opposite-direction cycle with a low objective scale
+  (`M=10`).
+- Confirmed the earlier failing temporary variant was under-provisioned: after
+  promotion from `M=10` to `M=100`, the schedule also needs enough scale
+  levels and unit-scale iterations to finish.
+- Preserved the original high-`M` cycle test and added a separate regression
+  where:
+  - `initial_step_size=10`;
+  - `objective_scale=10`;
+  - `num_optimization_scales=3`;
+  - `max_iteration_count=100`;
+  - promotion is enabled;
+  - the cycle promotes once to `M=100`, reaches agreement, and finishes with
+    active budget below the promoted scale.
+- Committed and pushed the mcpd3 test unit on branch `partition-worker-api`:
+  `cae055f Test low scale cycle promotion`.
+- Verified:
+  - `cmake --build third_party/mcpd3/build --target partition_worker_test -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `ctest --test-dir build --output-on-failure`.

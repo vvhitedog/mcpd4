@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 22:58 PDT
+Last updated: 2026-06-29 23:12 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -12,7 +12,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
 - Current submodule checkpoint:
-  `0d699c8 Promote coordinator scale on reg overbudget`
+  `cae055f Test low scale cycle promotion`
 
 ## MVP Definition
 
@@ -257,6 +257,10 @@ The MVP is complete when:
   `PartitionWorkerCoordinator` for in-process workers. The future distributed
   protocol will still need an explicit rescale/promotion message to preserve
   remote worker residual graphs and coordinator alpha state across promotion.
+- The opposite-direction cycle has explicit coverage for starting at low
+  objective scale: with `M=10`, enough promoted schedule depth, and sufficient
+  unit-scale iterations, the coordinator promotes once to `M=100` and reaches
+  agreement under budget.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator
   path.
 

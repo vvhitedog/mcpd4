@@ -237,3 +237,13 @@
   `scaleObjective(long factor)`, but the future TCP protocol still needs an
   explicit rescale message before remote workers can preserve live solver
   state across promotion.
+
+## 2026-06-29 23:12 PDT
+
+- Do not interpret the low-`M` opposite-direction cycle failure with
+  `num_optimization_scales=2` as a regularization failure. That setup was
+  artificially under-provisioned after promotion: starting at `M=10` promotes
+  to `M=100`, and the restarted schedule needs enough scale levels and
+  low-scale iterations to reach agreement.
+- The corrected low-`M` cycle regression uses `num_optimization_scales=3` and
+  `max_iteration_count=100`, and it passes with one promotion to `M=100`.
