@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 18:14 PDT
+Last updated: 2026-06-29 19:31 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -100,6 +100,9 @@ The MVP is complete when:
 - [x] Screen Waterloo `babyface.n6c10` under unscaled and compatibility scaled
   settings. It did not produce a clean regularization-required case in the
   checked runs.
+- [x] Compare `babyface.n6c10` against the original `early_experiments`
+  branch. The original branch converges with zero disagreement, so the current
+  exact regularization path needs follow-up.
 - [ ] Decide whether symmetric alpha-shift should replace local
   lexicographic regularization as the coordinator default, and whether
   randomized initial alphas should remain diagnostic-only, after broader
@@ -205,10 +208,11 @@ The MVP is complete when:
   failure under the checked directed-streaming, 10-partition basic setup:
   no-reg reached gap zero and zero disagreement; randomized initial alpha and
   symmetric alpha shift were worse in the checked runs.
-- Waterloo `babyface.n6c10` also did not reproduce the desired case under
-  checked settings. Unscaled no-reg stalls far below the provided optimum;
-  compatibility scaled no-reg gets near the optimum but retains disagreement,
-  and the checked symmetric/local-partition variants were worse.
+- Waterloo `babyface.n6c10` is now confirmed as an original-code convergence
+  case: `early_experiments` reaches `19448` with zero disagreement. Current
+  no-reg gets near the lower bound but leaves disagreement, while the current
+  exact lexicographic regularizer is too slow and did not reproduce the
+  original behavior in the checked window.
 - `adhead.n6c10` is available locally but has not been solved because the
   current machine is memory constrained for a graph that size.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator

@@ -312,3 +312,40 @@
   about `7.4GB` available with swap full. A full adhead solve is likely to
   OOM unless memory is reduced, for example by disabling upper-bound tracking
   or running on a larger machine.
+
+## 2026-06-29 19:31 PDT
+
+- Checked the original `early_experiments` branch at commit
+  `e5d48b2 Introduce regularization on constrainied nodes` in a detached
+  worktree. To build it on this machine, added temporary uncommitted compile
+  shims for the removed Boost hash dependency and missing `io/workdir.h`.
+- Ran the original `dimacs_dual_decomp_example` on `babyface.n6c10` with
+  10 partitions. The original branch uses the general `read_dimacs()` path,
+  premultiplies capacities by `10000`, and has the old additive low-scale
+  regularizer always enabled.
+- Original branch result:
+  - reached `lower_bound=19448.000000`;
+  - reached `num_disagreeing=0`;
+  - stopped on no disagreement;
+  - max raw lower bound `194480000`;
+  - wall time `2:31.91`;
+  - max RSS `3283160 kbytes`.
+- Re-ran the current branch with the same general-reader input path,
+  `--capacity-multiplier 10000`, and no regularization:
+  - `best_lower_bound_raw=194479585`;
+  - `best_lower_bound_unscaled=19447`;
+  - `best_gap=1049.04`;
+  - `final_disagreement_count=510`;
+  - wall time `2:07.59`.
+- Re-ran the current branch with the same general-reader input path and exact
+  local lexicographic regularization. This did not reproduce the original
+  behavior within the same runtime window: at step size `10`, iterations were
+  taking about `13-14s` each and still had hundreds of disagreements. The run
+  was stopped after iteration `10` of the step-`10` scale with
+  `best_lower_bound=19446.812`, `gap=3381.188`, and
+  `num_disagreeing=625`.
+- Conclusion: the original branch does converge on `babyface.n6c10`. The
+  current exact lexicographic regularization path is a practical regression
+  for this case relative to the old additive regularizer. The earlier
+  `babyface` note was incomplete because it did not compare against
+  `early_experiments`.

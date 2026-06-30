@@ -145,3 +145,17 @@
 - Do not launch `adhead.n6c10` blindly in the current 15GB RAM environment.
   It is much larger than babyface, swap is already full, and babyface used
   about `5.3GB` RSS.
+
+## 2026-06-29 19:31 PDT
+
+- Do not conclude that `babyface.n6c10` is not a regularization/convergence
+  case. The original `early_experiments` branch converges to
+  `lower_bound=19448` with zero disagreement on this instance.
+- Do not treat the current exact lexicographic regularizer as a drop-in
+  replacement for the old additive low-scale regularizer. On
+  `babyface.n6c10`, the current exact path becomes orders of magnitude slower
+  at step size `10` and did not reach agreement in the checked window.
+- Do not compare current branch regularization experiments only through
+  `--stream-directed-input`. The original branch used the general
+  `read_dimacs()` path. Directed streaming changes the decomposition surface
+  and should be validated separately before using it as benchmark evidence.
