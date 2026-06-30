@@ -537,3 +537,34 @@
   - `cmake --build third_party/mcpd3/build --target partition_worker_test -j`;
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-06-29 23:30 PDT
+
+- Finished the remaining network-free Stage 2 ownership work.
+- Decided the MVP worker path will not keep persistent primal upper-bound
+  state. If the coordinator needs primal information later, it should issue an
+  explicit worker compute request rather than enabling always-on worker
+  tracking.
+- Extended the in-process worker API so a solve request names its target
+  `partition_id`.
+- Reworked `InProcessPartitionWorker` to own multiple loaded partitions, each
+  with its own live `PrimalDualMinCutSolver`, constraint arcs, and constraint
+  map.
+- Updated `PartitionWorkerCoordinator` to assign packages round-robin across
+  the supplied worker objects and issue one solve request per package per
+  round. This keeps graph structure loaded once while allowing one worker
+  object/process to own several partitions.
+- Kept objective-scale promotion compatible with multi-package ownership by
+  scaling only workers that actually received packages.
+- Added tests for:
+  - scripted one-worker/two-package routing, including per-partition alpha
+    update delivery;
+  - real `InProcessPartitionWorker` solving both partition packages from one
+    worker object.
+- Committed and pushed the mcpd3 unit on branch `partition-worker-api`:
+  `27ff756 Support multi-package partition workers`.
+- Verified:
+  - `cmake --build third_party/mcpd3/build --target partition_worker_test -j`;
+  - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `ctest --test-dir build --output-on-failure`.

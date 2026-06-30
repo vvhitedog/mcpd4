@@ -247,3 +247,12 @@
   low-scale iterations to reach agreement.
 - The corrected low-`M` cycle regression uses `num_optimization_scales=3` and
   `max_iteration_count=100`, and it passes with one promotion to `M=100`.
+
+## 2026-06-29 23:30 PDT
+
+- Do not model primal upper-bound decoding as persistent worker state for the
+  MVP. The coordinator can request explicit worker-side computation later if
+  it needs primal information.
+- Do not assume one package per worker object. The in-process worker API now
+  supports multiple loaded packages per worker, and solve requests must carry
+  a `partition_id` when a worker owns more than one partition.

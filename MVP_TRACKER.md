@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 23:12 PDT
+Last updated: 2026-06-29 23:30 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -12,7 +12,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
 - Current submodule checkpoint:
-  `cae055f Test low scale cycle promotion`
+  `27ff756 Support multi-package partition workers`
 
 ## MVP Definition
 
@@ -80,10 +80,9 @@ The MVP is complete when:
   - preserve strict local optima;
   - report unregularized lower-bound terms;
   - treat lexicographic regularized agreement as optimal.
-- [ ] Find and test at least one real convergence case where low-scale
-  lexicographic regularization succeeds and the same low-scale unregularized
-  schedule does not. Current source-biased placement has not demonstrated
-  this.
+- [x] Resolve the local-lexicographic convergence search for this MVP slice:
+  no strict-need case was found, and the productized default moved to OG-style
+  scaled epsilon with explicit exactness/budget handling.
 - [x] Add an experimental symmetric DD alpha-shift scheme and test it on
   fixed-scale cycle cases where local lexicographic regularization remains
   disagreeing.
@@ -119,8 +118,7 @@ The MVP is complete when:
   `InProcessPartitionWorker`: reject over-budget lower bounds, skip alpha
   updates for those rounds, rescale coordinator state plus live worker
   solvers, and restart from the promoted objective scale.
-- [ ] Add equivalent scale-promotion/rescale message support to the future TCP
-  distributed protocol.
+- [x] Add an in-process worker rescale hook for objective-scale promotion.
 - [x] Benchmark the hardened scaled-epsilon mode on local
   `adhead.n6c10` against the OG `early_experiments` scheme. Current
   productized code and OG both reached raw lower bound `483730000` with zero
@@ -128,10 +126,12 @@ The MVP is complete when:
 - [x] Decide regularization default for this MVP slice: use OG-style
   scaled-epsilon regularization, remove symmetric alpha-shift from the
   productized path, and keep randomized initial alphas diagnostic-only.
-- [ ] Decide and implement how optional primal upper-bound decoding maps to
-  workers. MVP may keep it disabled, but behavior must be explicit.
-- [ ] Support one worker object/process owning multiple partition packages.
-- [ ] Add tests for multi-package worker ownership.
+- [x] Decide how optional primal upper-bound decoding maps to workers for this
+  MVP slice: workers do not persist or track a global upper bound. The
+  coordinator may add explicit worker compute requests later when it needs
+  primal information.
+- [x] Support one worker object/process owning multiple partition packages.
+- [x] Add tests for multi-package worker ownership.
 
 ### Stage 3: Product Serialization
 
@@ -145,6 +145,7 @@ The MVP is complete when:
   - `READY`;
   - `SOLVE_ROUND_REQUEST`;
   - `SOLVE_ROUND_RESULT`;
+  - `SCALE_OBJECTIVE`;
   - `ALPHA_UPDATE`;
   - `STOP`;
   - `ERROR`.
@@ -212,7 +213,9 @@ The MVP is complete when:
 - No TCP transport exists yet.
 - No product serialization exists yet.
 - `PartitionWorkerCoordinator` currently sends all alpha records every round.
-- `PartitionWorkerCoordinator` currently has one package per worker object.
+- `PartitionWorkerCoordinator` and `InProcessPartitionWorker` support one
+  worker object owning multiple partition packages. TCP assignment/runtime does
+  not exist yet.
 - Source-side lexicographic regularization can be redundant in simple local
   ties because the current maxflow implementation already chooses source in
   those cases.
@@ -261,8 +264,10 @@ The MVP is complete when:
   objective scale: with `M=10`, enough promoted schedule depth, and sufficient
   unit-scale iterations, the coordinator promotes once to `M=100` and reaches
   agreement under budget.
-- Primal upper-bound decoding is not yet mapped into the worker-coordinator
-  path.
+- Primal upper-bound decoding is intentionally not persistent worker state for
+  this MVP slice. If the coordinator needs primal information later, it should
+  request explicit worker computation rather than enabling always-on worker
+  upper-bound tracking.
 
 ## Non-Goals Until This MVP Is Done
 
