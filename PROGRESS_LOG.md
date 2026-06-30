@@ -764,3 +764,67 @@
   - `ctest --test-dir build --output-on-failure`;
   - `MCPD3_PROGRESS_EVERY=1` adhead saturated smoke via
     `scripts/run_local_process_benchmark.sh`.
+
+## 2026-06-30 09:33 PDT
+
+- Compared monolithic and distributed/TCP `adhead.n6c10` behavior.
+- Confirmed why the prior monolithic `M=10000` result was correct despite
+  unchecked overflow:
+  - adhead has `328844` arc records above the safe `M=10000` 32-bit limit;
+  - those records all have raw capacity `999999`;
+  - unchecked 32-bit-style multiplication maps `999999 * 10000` to the large
+    positive value `1410055408`, not a negative value;
+  - saturation maps those arcs to `2147483647`;
+  - both values are larger than the scaled optimum, so on this instance those
+    arcs behave as effectively infinite either way. This is not a correctness
+    guarantee.
+- Fixed the monolithic benchmark driver to reject initial capacity multiplier
+  overflow instead of relying on unchecked `int` wraparound. Verified
+  `adhead.n6c10 --capacity-multiplier 10000` now exits with:
+  `capacity multiplier exceeds int range`.
+- Established the exact mono/distributed comparison path:
+  `--capacity-multiplier 100` with objective-scale promotion to `1000`.
+- Baseline exact distributed/TCP run before the optimization:
+  - command used 10 workers for 10 partitions;
+  - `capacity_scale_overflow_mode strict`;
+  - `capacity_scale_saturation_count 0`;
+  - `best_lower_bound 48373`;
+  - `best_lower_bound_raw 48373000`;
+  - `objective_scale 1000`;
+  - `objective_scale_promotions 1`;
+  - `final_disagreement_count 0`;
+  - wall time `3:57.62`;
+  - `timing_solve_wall_us 150154294`;
+  - `timing_worker_rpc_overhead_us 87912105`.
+- Fixed two distributed overhead sources:
+  - `PartitionWorkerCoordinator` now keeps only coordinator metadata instead
+    of retaining full graph payloads after workers load partitions;
+  - `PartitionWorkerCoordinator` now sends alpha updates only for dirty
+    constraints, while still sending the one-round `last_alpha` catch-up
+    needed by scaled-epsilon regularization.
+- Added regression coverage proving dirty-alpha requests:
+  - do not resend initial zero alpha state;
+  - send changed alpha on the next request;
+  - send the `last_alpha` catch-up exactly once after agreement;
+  - stop sending once synchronized.
+- Exact distributed/TCP run after the optimization:
+  - output:
+    `benchmark_results/adhead-distributed-exact-w10-moved-packages-20260630-092747.out`;
+  - `best_lower_bound 48373`;
+  - `best_lower_bound_raw 48373000`;
+  - `objective_scale 1000`;
+  - `objective_scale_promotions 1`;
+  - `final_disagreement_count 0`;
+  - `capacity_scale_saturation_count 0`;
+  - wall time `3:31.71`;
+  - `timing_solve_wall_us 137512497`;
+  - `timing_worker_rpc_overhead_us 28968042`.
+- The optimized distributed/TCP result is now close to the monolithic exact
+  `M=100` promoted run (`3:26.77`) and remains exact.
+- Verified:
+  - `cmake --build third_party/mcpd3/build -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - monolithic overflow guard on adhead `M=10000`;
+  - exact distributed/TCP adhead run with 10 workers and no saturation.

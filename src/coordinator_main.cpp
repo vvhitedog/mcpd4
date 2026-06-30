@@ -391,7 +391,7 @@ int main(int argc, char **argv) {
     }
 
     const auto partition_start = std::chrono::steady_clock::now();
-    const auto packages = makePartitionPackages(
+    auto packages = makePartitionPackages(
         config.partition_count, std::move(graph), config.capacity_multiplier);
     timing.partition_wall_us = elapsedUs(partition_start);
 
@@ -424,7 +424,8 @@ int main(int argc, char **argv) {
           printProgress(record, remote_workers);
         };
     const auto coordinator_setup_start = std::chrono::steady_clock::now();
-    mcpd3::PartitionWorkerCoordinator coordinator(packages, std::move(workers),
+    mcpd3::PartitionWorkerCoordinator coordinator(std::move(packages),
+                                                  std::move(workers),
                                                   solve_options);
     timing.coordinator_setup_wall_us = elapsedUs(coordinator_setup_start);
     const auto solve_start = std::chrono::steady_clock::now();

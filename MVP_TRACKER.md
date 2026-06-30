@@ -225,13 +225,19 @@ The MVP is complete when:
   user-supplied DIMACS path.
 - `mcpd3_coordinator` now exposes `--accept-timeout-ms`, but it still has no
   worker reconnect, replacement, heartbeat, or partial-progress recovery.
-- `PartitionWorkerCoordinator` currently sends all alpha records every round.
+- `PartitionWorkerCoordinator` now sends dirty alpha records only, including
+  the one-round `last_alpha` catch-up needed by scaled-epsilon
+  regularization.
 - `PartitionWorkerCoordinator`, `InProcessPartitionWorker`, and
   `TcpPartitionWorker` support one worker object/process owning multiple
   partition packages.
 - Product coordinator solves are dispatched concurrently across active worker
   processes. If one worker owns multiple packages, that worker still solves
   its own package stream sequentially.
+- For local performance parity with the monolithic thread-pool path, use one
+  worker process per partition for now. The current protocol does not yet
+  implement work stealing or a batched multi-partition request that lets one
+  worker solve several owned partitions concurrently.
 - `mcpd3_coordinator --progress-every N` streams per-round optimizer health
   and per-worker timing. On `adhead.n6c10`, this exposed severe static
   partition load imbalance: the first saturated telemetry-smoke round spent
@@ -274,13 +280,21 @@ The MVP is complete when:
   scale when allowed.
 - `adhead.n6c10` is the current benchmark comparison target. With
   `--capacity-multiplier 10000`, current scaled epsilon reached the known
-  optimum `48373` with zero disagreement and active budget `40 < 10000`.
+  optimum `48373` with zero disagreement and active budget `40 < 10000`; that
+  old benchmark path used unchecked initial `int` scaling and is no longer an
+  exact overflow-safe comparison.
 - Dynamic objective-scale promotion lets the monolithic benchmark path start
   `adhead.n6c10` at `--capacity-multiplier 100`, detect
   `budget=9840 >= 100`, promote to objective scale `1000`, and finish with
   `best_lower_bound_unscaled=48373`, `final_disagreement_count=0`, and
-  `final_regularization_budget_raw=180 < 1000`. This was correct but slower
-  than starting at `10000`.
+  `final_regularization_budget_raw=180 < 1000`. This is the exact comparison
+  path now that initial multiplier overflow is checked.
+- The distributed/TCP path matches that exact `adhead.n6c10` result with 10
+  workers for 10 partitions: `best_lower_bound=48373`,
+  `final_disagreement_count=0`, `objective_scale=1000`,
+  `capacity_scale_saturation_count=0`, and wall time `3:31.71` after
+  dirty-alpha and coordinator package-retention fixes. The comparable
+  monolithic exact run was `3:26.77`.
 - Dynamic objective-scale promotion is implemented in
   `PartitionWorkerCoordinator` for both in-process workers and TCP workers via
   the `SCALE_OBJECTIVE` message, preserving remote live solver state across

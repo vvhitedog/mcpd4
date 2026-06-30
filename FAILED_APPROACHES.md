@@ -323,3 +323,20 @@
 - Do not treat the current `M=10000` saturated adhead telemetry smoke as an
   exact benchmark. It clipped `328844` capacities before solving; the smoke was
   only to validate health telemetry and identify load imbalance.
+
+## 2026-06-30 09:33 PDT
+
+- Do not use the old monolithic `adhead.n6c10 --capacity-multiplier 10000`
+  result as an exact overflow-safe benchmark. It happened to reach the correct
+  cut because `999999 * 10000` wrapped to a large positive value
+  (`1410055408`) and those arcs still behaved as effectively infinite on this
+  instance.
+- Do not compare distributed/TCP with fewer workers than partitions and expect
+  monolithic-like timing. With 4 workers and 10 partitions, multiple expensive
+  partitions can be pinned behind one worker connection and solved
+  sequentially. The exact local comparison should use 10 workers for 10
+  partitions until there is a real dynamic work-stealing or batched
+  multi-partition worker protocol.
+- Do not resend full alpha state every round. Most alpha records are unchanged
+  after early iterations; dirty-only alpha sync reduced exact adhead cumulative
+  worker RPC overhead from `87912105 us` to `28968042 us`.
