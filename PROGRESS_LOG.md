@@ -1112,3 +1112,21 @@
   `682da28 Clean user-facing documentation set (#1)`.
 - Confirmed clean `origin/main` has only `README.md` as Markdown outside
   ignored build/benchmark and submodule paths.
+
+## 2026-06-30 14:43 PDT
+
+- Updated the mcpd3 productized branch `partition-worker-api` with a
+  user-facing README explaining:
+  - standalone min-cut/max-flow use;
+  - the dual-decomposition approach;
+  - the partition-worker API;
+  - how mcpd3 is used independently and as the solver core for mcpd4.
+- Pushed mcpd3 commit `8328d73 Document productized solver usage`.
+- Opened mcpd3 PR: `https://github.com/vvhitedog/mcpd3/pull/1`.
+- Verified in `third_party/mcpd3`:
+  - `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `./build/simple_example`;
+  - `./build/dimacs_example ../../tests/fixtures/hand_bottleneck.max`;
+  - `./build/dimacs_dual_decomp_example ../../tests/fixtures/hand_bottleneck.max --partitions 2 --max-iterations 100 --threads 2 --capacity-multiplier 10000 --disable-primal-upper-bound --quiet`.
