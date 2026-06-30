@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 17:15 PDT
+Last updated: 2026-06-29 18:14 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -11,7 +11,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
-- Current submodule checkpoint: `5147815 Add directed streaming DIMACS reader`
+- Current submodule checkpoint: `c398487 Decouple objective scale from DD step size`
 
 ## MVP Definition
 
@@ -95,6 +95,11 @@ The MVP is complete when:
   modes. In the checked 10-partition basic setup, no-reg already reached
   exact agreement and matched the `.sol` value after adding the reader's
   terminal imbalance offset.
+- [x] Remove default benchmark capacity premultiplication and add objective
+  scale tests so reported values are independent of DD step size.
+- [x] Screen Waterloo `babyface.n6c10` under unscaled and compatibility scaled
+  settings. It did not produce a clean regularization-required case in the
+  checked runs.
 - [ ] Decide whether symmetric alpha-shift should replace local
   lexicographic regularization as the coordinator default, and whether
   randomized initial alphas should remain diagnostic-only, after broader
@@ -200,6 +205,12 @@ The MVP is complete when:
   failure under the checked directed-streaming, 10-partition basic setup:
   no-reg reached gap zero and zero disagreement; randomized initial alpha and
   symmetric alpha shift were worse in the checked runs.
+- Waterloo `babyface.n6c10` also did not reproduce the desired case under
+  checked settings. Unscaled no-reg stalls far below the provided optimum;
+  compatibility scaled no-reg gets near the optimum but retains disagreement,
+  and the checked symmetric/local-partition variants were worse.
+- `adhead.n6c10` is available locally but has not been solved because the
+  current machine is memory constrained for a graph that size.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator
   path.
 

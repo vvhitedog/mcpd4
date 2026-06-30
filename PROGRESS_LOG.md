@@ -258,3 +258,57 @@
   partitioning, and default fixed-step schedule is not a reproduced
   regularization-required case. Randomized initial alpha and symmetric alpha
   shift were worse than no-reg in the checked runs.
+
+## 2026-06-29 18:14 PDT
+
+- Removed the benchmark binary's unconditional DIMACS capacity premultiply:
+  `dimacs_dual_decomp_example` now defaults to `capacity_multiplier=1`.
+  Historical behavior can still be requested explicitly with
+  `--capacity-multiplier 10000`.
+- Decoupled objective/reporting scale from the DD step-size schedule:
+  - `DualDecompositionOptions::objective_scale`;
+  - `PartitionWorkerCoordinatorOptions::objective_scale`;
+  - positive-scale validation in both paths;
+  - `getScale()` now reports the objective scale instead of
+    `initial_step_size`.
+- Added tests proving that objective reporting scale is independent of DD
+  step size and that explicit objective scales control reported lower bounds
+  in both `DualDecomposition` and `PartitionWorkerCoordinator`.
+- Committed the mcpd3 unit:
+  `c398487 Decouple objective scale from DD step size`.
+- Downloaded and extracted Waterloo `babyface.n6c10` and `adhead.n6c10`
+  locally under ignored `data/maxflow/`.
+- Ran directed `babyface.n6c10` checks with 10 partitions:
+  - unscaled, no regularization, `--max-step 10`:
+    `best_lower_bound_raw=1373`, `.sol=19448`,
+    `best_gap=1.785e+06`, `final_disagreement_count=325411`;
+  - unscaled, no regularization, `--max-step 1`:
+    `best_lower_bound_raw=1373`, `.sol=19448`,
+    `best_gap=1.7218e+06`, `final_disagreement_count=339274`;
+  - compatibility scaled no-reg from the earlier run:
+    `best_lower_bound_raw=194479585`,
+    `best_lower_bound_unscaled=19447`, `best_gap=1049.04`,
+    `final_disagreement_count=510`;
+  - compatibility scaled symmetric alpha shift:
+    `best_lower_bound_raw=194479315`,
+    `best_lower_bound_unscaled=19447`, `best_gap=1589.07`,
+    `final_disagreement_count=615`;
+  - compatibility scaled local-search partitioner with no regularization:
+    `best_lower_bound_raw=194475049`,
+    `best_lower_bound_unscaled=19447`, `best_gap=2388.5`,
+    `final_disagreement_count=814`.
+- A compatibility scaled local-lexicographic run was stopped after it became a
+  slow screening path: at step size `10`, local solves were taking about
+  19-20 seconds per iteration and after 26 low-scale iterations it still had
+  `best_lower_bound=19447.442`, `gap=3228.558`, and
+  `num_disagreeing=569`.
+- Conclusion: `babyface.n6c10` did not provide the clean target case under
+  checked settings. Without capacity premultiplication it stalls far below the
+  known optimum; with compatibility scaling it approaches the optimum but
+  neither symmetric alpha shift nor local partitioning improved over the
+  basic no-reg baseline.
+- Did not run `adhead.n6c10` DD solve in this environment: babyface used about
+  `5.3GB` RSS, adhead has roughly `2.5x` the nodes/arcs, and the machine had
+  about `7.4GB` available with swap full. A full adhead solve is likely to
+  OOM unless memory is reduced, for example by disabling upper-bound tracking
+  or running on a larger machine.

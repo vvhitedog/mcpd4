@@ -122,3 +122,26 @@
   it closed at step size `100` with zero regularization budget. This is a
   useful regression check, not evidence that lexicographic recovery is needed
   on this instance.
+
+## 2026-06-29 18:14 PDT
+
+- Do not leave `dimacs_dual_decomp_example` premultiplying all DIMACS
+  capacities by `10000` by default. That was historical compatibility for the
+  old approximate regularization scheme and also changed alpha resolution.
+  The benchmark binary now defaults to `capacity_multiplier=1`.
+- Do not compare unscaled benchmark logs until objective/reporting scale is
+  decoupled from DD step size. Before commit `c398487`, reported
+  `*_unscaled` values were only meaningful because the example also
+  premultiplied capacities by the same value as the initial step.
+- `babyface.n6c10` is not currently a clean regularization-required example:
+  unscaled no-reg runs stalled at lower bound `1373` versus `.sol=19448`;
+  compatibility scaled symmetric alpha shift was worse than scaled no-reg;
+  compatibility scaled local-search partitioning was also worse than scaled
+  no-reg.
+- Do not use local lexicographic regularization as a broad benchmark
+  screening mode on `babyface.n6c10` without tighter controls. The checked
+  compatibility scaled run reached step size `10` but each local solve took
+  about 19-20 seconds and still had hundreds of disagreements when stopped.
+- Do not launch `adhead.n6c10` blindly in the current 15GB RAM environment.
+  It is much larger than babyface, swap is already full, and babyface used
+  about `5.3GB` RSS.
