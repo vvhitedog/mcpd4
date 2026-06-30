@@ -1083,3 +1083,22 @@
   - `ctest --test-dir build --output-on-failure`;
   - README quick-start helper command on `tests/fixtures/hand_bottleneck.max`
     with two workers and four partitions.
+
+## 2026-06-30 12:49 PDT
+
+- Renamed the product remote/default branch from `network-free-worker-api` to
+  `working`.
+- Preserved internal project-management Markdown on `working`:
+  `AGENT_HANDOFF.md`, `MVP_TRACKER.md`, `PROGRESS_LOG.md`,
+  `FAILED_APPROACHES.md`, and `REGULARIZATION_EXACTNESS_PROOF.md`.
+- Created remote `main` at the same product checkpoint as the working branch.
+- Created cleanup branch `main-cleanup` for the user-facing main PR:
+  - removed non-user-facing Markdown;
+  - kept `README.md` as the single user-facing Markdown runbook;
+  - removed README links to the internal Markdown files.
+- Opened PR: `https://github.com/vvhitedog/mcpd4/pull/1`.
+- Verified cleanup branch before opening PR:
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - Markdown scan showed only `README.md` outside ignored build/benchmark and
+    submodule paths.
