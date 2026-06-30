@@ -349,3 +349,27 @@
   for this case relative to the old additive regularizer. The earlier
   `babyface` note was incomplete because it did not compare against
   `early_experiments`.
+
+## 2026-06-29 19:57 PDT
+
+- Added `REGULARIZATION_EXACTNESS_PROOF.md` with the lattice proof for the
+  original scaled low-strength regularization scheme.
+- Formalized the exactness condition as:
+  `agreement + global_regularization_budget < objective_scale => optimal`.
+- Clarified that "below the scale" means the total regularization range over
+  all local subproblem copies in the summed DD solve, not the final paid
+  contribution and not a per-partition budget.
+- Reviewed the OG `early_experiments` implementation at `e5d48b2` against the
+  proof obligations. It has the intended mathematical shape: capacities are
+  scaled by `10000`, low-scale regularization is nonnegative and one-sided,
+  reported lower bounds exclude regularization, and alpha terms cancel under
+  agreement.
+- Found that the OG implementation does not fully enforce the proof condition:
+  the budget check is per local solver, warning-only, hardcoded to `10000`,
+  uses `>` instead of rejecting `>=`, and does not export a summed global
+  effective perturbation budget.
+- Also found that incremental local terminal updates can leave stale
+  regularization in the maxflow graph when alpha is unchanged or when the
+  regularization strength changes between step sizes. A hardened version must
+  track the actual effective perturbation used in the solve or force a full
+  terminal recomputation when regularization state changes.

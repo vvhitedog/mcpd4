@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 19:31 PDT
+Last updated: 2026-06-29 19:57 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -103,6 +103,11 @@ The MVP is complete when:
 - [x] Compare `babyface.n6c10` against the original `early_experiments`
   branch. The original branch converges with zero disagreement, so the current
   exact regularization path needs follow-up.
+- [x] Write the exactness proof for the original scaled epsilon regularization
+  idea and review the OG implementation against it.
+- [ ] Implement a hardened OG-style regularization mode with an explicit
+  summed global budget check:
+  `global_regularization_budget < objective_scale`.
 - [ ] Decide whether symmetric alpha-shift should replace local
   lexicographic regularization as the coordinator default, and whether
   randomized initial alphas should remain diagnostic-only, after broader
@@ -213,6 +218,11 @@ The MVP is complete when:
   no-reg gets near the lower bound but leaves disagreement, while the current
   exact lexicographic regularizer is too slow and did not reproduce the
   original behavior in the checked window.
+- The OG regularization idea is exact under the lattice proof when agreement
+  holds and the summed effective regularization range is below the objective
+  scale. The OG implementation has the right shape but does not fully enforce
+  this condition because the budget check is local, warning-only, and can miss
+  stale incremental perturbations.
 - `adhead.n6c10` is available locally but has not been solved because the
   current machine is memory constrained for a graph that size.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator

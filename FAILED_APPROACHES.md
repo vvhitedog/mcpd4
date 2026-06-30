@@ -159,3 +159,16 @@
   `--stream-directed-input`. The original branch used the general
   `read_dimacs()` path. Directed streaming changes the decomposition surface
   and should be validated separately before using it as benchmark evidence.
+
+## 2026-06-29 19:57 PDT
+
+- Do not treat the OG regularization warning as an exactness certificate. The
+  proof requires a summed global effective regularization range below the
+  objective scale; the OG check is per local solver and warning-only.
+- Do not use final regularization contribution as the budget for the proof.
+  The required budget is the maximum possible regularization swing in the
+  local solves whose lower bounds are summed.
+- Do not assume the OG incremental budget variable measures the actual
+  perturbation in the maxflow graph. Skipped constrained nodes can retain stale
+  terminal perturbations, and changing low-scale regularization strength does
+  not force a full terminal recomputation.
