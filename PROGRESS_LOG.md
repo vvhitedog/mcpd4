@@ -1102,3 +1102,13 @@
   - `ctest --test-dir build --output-on-failure`;
   - Markdown scan showed only `README.md` outside ignored build/benchmark and
     submodule paths.
+
+## 2026-06-30 14:38 PDT
+
+- Corrected the GitHub default branch to `main`.
+- Updated local `origin/HEAD` to point at `origin/main`.
+- Fast-forwarded local `main` to track `origin/main`.
+- Confirmed PR `https://github.com/vvhitedog/mcpd4/pull/1` is merged as
+  `682da28 Clean user-facing documentation set (#1)`.
+- Confirmed clean `origin/main` has only `README.md` as Markdown outside
+  ignored build/benchmark and submodule paths.
