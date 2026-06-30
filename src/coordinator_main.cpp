@@ -324,6 +324,9 @@ void printProgress(
             << " iteration " << record.iteration
             << " lower_bound " << record.lower_bound
             << " best_lower_bound " << record.best_lower_bound
+            << " regularized_objective " << record.regularized_objective
+            << " best_regularized_objective "
+            << record.best_regularized_objective
             << " disagreement_count " << record.disagreement_count
             << " disagreement_norm_sq " << record.disagreement_norm_sq
             << " step_size " << record.step_size
@@ -436,6 +439,10 @@ int main(int argc, char **argv) {
     std::cout << "stop_reason " << static_cast<int>(result.stop_reason) << "\n";
     std::cout << "best_lower_bound " << result.best_lower_bound << "\n";
     std::cout << "best_lower_bound_raw " << result.best_lower_bound_raw << "\n";
+    std::cout << "best_regularized_objective "
+              << result.best_regularized_objective << "\n";
+    std::cout << "best_regularized_objective_raw "
+              << result.best_regularized_objective_raw << "\n";
     std::cout << "objective_scale " << result.scale << "\n";
     std::cout << "objective_scale_promotions "
               << result.objective_scale_promotion_count << "\n";

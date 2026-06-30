@@ -340,3 +340,16 @@
 - Do not resend full alpha state every round. Most alpha records are unchanged
   after early iterations; dirty-only alpha sync reduced exact adhead cumulative
   worker RPC overhead from `87912105 us` to `28968042 us`.
+
+## 2026-06-30 10:10 PDT
+
+- Do not treat the selected unregularized value from a regularized local solve
+  as a certified original-problem lower bound. The local solver selects
+  `argmin(F + r)` but reports `F(x_selected)`, which can be above the true
+  local minimum of `F`.
+- The conservative certificate for an accepted regularized round is:
+  `F(x_selected) + r(x_selected) - R`, where `R` is the active regularization
+  budget and `r(x_selected)` is the actual regularization contribution paid by
+  the selected solution. Subtracting `R` directly from `F(x_selected)` is safe
+  but unnecessarily pessimistic; not subtracting the slack at all can overstate
+  the lower bound.

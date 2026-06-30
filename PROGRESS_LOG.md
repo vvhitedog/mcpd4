@@ -828,3 +828,35 @@
   - `ctest --test-dir build --output-on-failure`;
   - monolithic overflow guard on adhead `M=10000`;
   - exact distributed/TCP adhead run with 10 workers and no saturation.
+
+## 2026-06-30 10:10 PDT
+
+- Fixed regularized lower-bound accounting in an isolated worktree
+  (`certified-lb-lower-bound`).
+- Clarified and implemented the certificate arithmetic used by both
+  monolithic `DualDecomposition` and distributed `PartitionWorkerCoordinator`:
+  - local solvers report the selected solution's unregularized value;
+  - accepted regularized objective is `selected + contribution`;
+  - certified original-problem lower bound is
+    `selected + contribution - budget`.
+- `best_lower_bound_raw` and progress `lower_bound` now store/report the
+  certified original-problem lower bound instead of the selected value from
+  the regularized solve.
+- Added `regularized_objective` / `best_regularized_objective` diagnostics to
+  coordinator progress and final distributed output, plus matching monolithic
+  example/getter diagnostics.
+- Added tests for:
+  - certificate arithmetic, including overflow/underflow detection;
+  - regularized round accounting with nonzero contribution and budget;
+  - unregularized round accounting remaining unchanged;
+  - progress callback fields;
+  - regularized agreement storing certified LB and regularized objective
+    separately;
+  - objective-scale promotion preserving the certified bound and diagnostic;
+  - process/TCP output comparing the new diagnostic against the in-process
+    reference.
+- Verified:
+  - `cmake --build third_party/mcpd3/build -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure` with loopback permission.
