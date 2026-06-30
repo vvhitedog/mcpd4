@@ -199,10 +199,26 @@
 
 ## 2026-06-29 21:43 PDT
 
-- Do not use `--capacity-multiplier 100` for the current scaled-epsilon
-  `adhead.n6c10` benchmark. It reached zero disagreement, but the active
-  regularization budget exceeded the strict limit by orders of magnitude
-  (`11036 >= 100`), so the run is non-certifying and the reported lower bound
-  rose above the known optimum.
-- Lowering the multiplier from `10000` to `100` did not improve performance on
-  `adhead.n6c10`; wall time increased from `1:24.18` to `3:31.91`.
+- Do not use `--capacity-multiplier 100` without objective-scale promotion for
+  the scaled-epsilon `adhead.n6c10` benchmark. It reached zero disagreement,
+  but the active regularization budget exceeded the strict limit by orders of
+  magnitude (`11036 >= 100`), so the run was non-certifying and the reported
+  lower bound rose above the known optimum.
+- Lowering the multiplier from `10000` to `100` without handling over-budget
+  regularization did not improve performance on `adhead.n6c10`; wall time
+  increased from `1:24.18` to `3:31.91`.
+
+## 2026-06-29 22:43 PDT
+
+- Do not accept a lower bound from an iteration whose scaled-epsilon active
+  regularization budget is greater than or equal to the objective scale. The
+  dynamic-promotion implementation now detects this before updating the best
+  lower bound, then promotes the objective scale and restarts the schedule.
+- Do not assume a smaller initial multiplier is faster. With dynamic
+  promotion, `adhead.n6c10 --capacity-multiplier 100` became certifying by
+  promoting to `1000`, but still took `3:26.77` versus `1:24.18` for starting
+  directly at `10000`.
+- Objective-scale promotion is currently implemented for the legacy
+  `DualDecomposition` benchmark path. The network-free worker coordinator and
+  future distributed protocol still need an equivalent promotion/rescale
+  mechanism before they can use the same over-budget handling strategy.

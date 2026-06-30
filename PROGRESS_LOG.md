@@ -443,3 +443,40 @@
     `best_lower_bound_raw=4855590` versus expected `4837300`.
   - It was slower than the `10000` multiplier run:
     wall time `3:31.91` versus `1:24.18`.
+
+## 2026-06-29 22:43 PDT
+
+- Implemented dynamic objective-scale promotion for the legacy
+  `DualDecomposition` path when scaled-epsilon regularization exceeds the
+  strict active-budget condition.
+- New behavior:
+  - detects `regularization_budget >= objective_scale` before accepting a
+    regularized lower bound;
+  - scales the current objective by `10x`;
+  - preserves local residual graphs, DD alphas, local capacities, and tracked
+    bounds by scaling them in place;
+  - restarts the capacity-scaling schedule from the promoted objective scale;
+  - limits promotion count through `max_objective_scale_promotions`;
+  - exposes benchmark flags `--disable-scale-promotion` and
+    `--max-scale-promotions`.
+- Added a regression test where a tiny scaled-epsilon solve exceeds the
+  initial budget, promotes from scale `10` to `100`, reaches agreement, and
+  proves that the over-budget regularized lower bound was not accepted.
+- Committed and pushed the mcpd3 unit on branch `partition-worker-api`:
+  `8290cd8 Promote objective scale on reg overbudget`.
+- Re-ran `adhead.n6c10` with the previously non-certifying
+  `--capacity-multiplier 100` setup and default scale promotion:
+  - first low-scale regularized iteration exceeded the budget:
+    `budget=9840`, `limit=100`;
+  - promoted once from objective scale `100` to `1000`;
+  - reached `best_lower_bound_raw=48373000`,
+    `best_lower_bound_unscaled=48373`;
+  - reached `final_disagreement_count=0`;
+  - final active budget was certifying:
+    `final_regularization_budget_raw=180 < 1000`;
+  - wall time `3:26.77`, max RSS `6049328 KB`.
+- Verified:
+  - `cmake --build third_party/mcpd3/build --target partition_worker_test -j`;
+  - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `ctest --test-dir build --output-on-failure`.

@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 20:45 PDT
+Last updated: 2026-06-29 22:43 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -11,7 +11,8 @@ usable localhost distributed MVP. Chronological implementation notes live in
 
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
-- Current submodule checkpoint: `7e5caea Harden scaled epsilon regularization`
+- Current submodule checkpoint:
+  `8290cd8 Promote objective scale on reg overbudget`
 
 ## MVP Definition
 
@@ -109,9 +110,14 @@ The MVP is complete when:
 - [x] Implement a hardened OG-style scaled-epsilon regularization mode with an
   explicit summed global active-budget diagnostic:
   `global_regularization_budget < objective_scale`.
-- [ ] Replace the current over-budget warning with a real handling strategy:
-  reject the regularized certificate, reduce/redistribute epsilon, increase a
-  safe objective scale, or continue without claiming optimality.
+- [x] Replace warning-only over-budget behavior in the legacy
+  `DualDecomposition` path with objective-scale promotion: reject the
+  over-budget iteration's lower bound, scale the objective by `10x`, preserve
+  residual graphs and alphas, and restart the capacity-scaling schedule from
+  the promoted scale.
+- [ ] Add equivalent over-budget handling to `PartitionWorkerCoordinator` and
+  the future distributed protocol. The current promotion code is benchmark
+  path only.
 - [x] Benchmark the hardened scaled-epsilon mode on local
   `adhead.n6c10` against the OG `early_experiments` scheme. Current
   productized code and OG both reached raw lower bound `483730000` with zero
@@ -237,6 +243,16 @@ The MVP is complete when:
 - `adhead.n6c10` is the current benchmark comparison target. With
   `--capacity-multiplier 10000`, current scaled epsilon reached the known
   optimum `48373` with zero disagreement and active budget `40 < 10000`.
+- Dynamic objective-scale promotion lets the legacy benchmark path start
+  `adhead.n6c10` at `--capacity-multiplier 100`, detect
+  `budget=9840 >= 100`, promote to objective scale `1000`, and finish with
+  `best_lower_bound_unscaled=48373`, `final_disagreement_count=0`, and
+  `final_regularization_budget_raw=180 < 1000`. This was correct but slower
+  than starting at `10000`.
+- Dynamic objective-scale promotion is not yet implemented in
+  `PartitionWorkerCoordinator`; the distributed protocol will need an explicit
+  rescale/promotion step to preserve worker residual graphs and coordinator
+  alpha state across promotion.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator
   path.
 
