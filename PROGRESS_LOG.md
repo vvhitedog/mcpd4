@@ -1130,3 +1130,18 @@
   - `./build/simple_example`;
   - `./build/dimacs_example ../../tests/fixtures/hand_bottleneck.max`;
   - `./build/dimacs_dual_decomp_example ../../tests/fixtures/hand_bottleneck.max --partitions 2 --max-iterations 100 --threads 2 --capacity-multiplier 10000 --disable-primal-upper-bound --quiet`.
+
+## 2026-06-30 16:13 PDT
+
+- Ran the first two-machine LAN `adhead.n6c10` trial with the coordinator on
+  `192.168.1.87` and one remote worker `wifi-worker-1` on `192.168.1.175`.
+- Confirmed the distributed TCP path solved across machines:
+  - `final_objective 48373`;
+  - `final_disagreement_count 0`;
+  - `objective_scale 1000`;
+  - `objective_scale_promotions 1`;
+  - `partition_solve_call_count_total 1820`.
+- Captured the post-trial follow-up plan in `MVP_TRACKER.md`, covering
+  queryable coordinator/worker status, terminology cleanup, RPC transfer
+  telemetry, coordinator-host worker participation, worker wait policy, and
+  load-balancing improvements.

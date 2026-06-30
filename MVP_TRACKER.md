@@ -227,6 +227,61 @@ The MVP is complete when:
   - patience, group stopping, timeout, and no-progress stops are not exact
     certificates.
 
+### Post-LAN Trial Follow-Up Plan
+
+- [ ] Add a queryable distributed status surface for both coordinator and
+  workers.
+  - Coordinator status should report accepted workers, worker names/resources,
+    partition ownership, current solve phase, current iteration/scale state,
+    objective-scale state, disagreement counts, lower-bound progress,
+    regularization diagnostics, per-worker solve counts, per-worker elapsed
+    compute time, per-worker wait time, and recent errors.
+  - Worker status should report connection/session identity, assigned
+    partitions, currently executing request type, active partition ids, local
+    solve counts, local solve time, bytes received/sent, memory footprint, and
+    recent errors.
+  - The first implementation can be a local status file or log stream; a later
+    implementation should support explicit status queries without attaching a
+    debugger or tailing opaque logs.
+- [ ] Standardize terminology across CLI flags, logs, docs, and code.
+  - Use `objective_scale` for the proof/budget capacity multiplier `M`.
+  - Keep `--capacity-multiplier` only as a compatibility alias or remove it
+    before the public API stabilizes.
+  - Rename progress `scale` to `schedule_scale` or `dd_step_scale`, because it
+    is the dual-decomposition step schedule, not the objective scale.
+  - Revisit `--initial-step` plus `--num-scales`: `--num-scales 5` currently
+    means a base-10 schedule such as `10000 -> 1000 -> 100 -> 10 -> 1`, so the
+    CLI should express either the explicit schedule or a start/end policy
+    without redundant or misleading knobs.
+- [ ] Add RPC transfer telemetry and use it to prioritize transport
+  optimization.
+  - Measure bytes sent/received by message type: partition load, solve batch
+    request, solve batch result, objective-scale promotion, stop, and errors.
+  - Measure serialization/deserialization time separately from socket I/O and
+    worker maxflow compute time.
+  - Report payload counts and byte totals per worker and per round batch.
+  - Use this telemetry to evaluate less wasteful encodings, result deltas,
+    compression, smaller label/result payloads, batching boundaries, and
+    avoiding unnecessary resend/copy paths.
+- [ ] Improve worker participation and waiting policy.
+  - Document that the coordinator host can also volunteer compute by starting a
+    local `mcpd4_worker` and including it in `--workers`.
+  - Consider an optional coordinator-owned local worker mode so users do not
+    need to launch a second process just to use local CPUs.
+  - Define how the coordinator decides when to start solving: fixed
+    `--workers`, minimum worker count plus timeout, resource target
+    CPU/RAM/partition coverage, or manual start signal.
+  - Report pending/accepted worker state clearly while waiting so the operator
+    knows whether to start more workers or continue with the current pool.
+- [ ] Improve static load balancing and future rebalancing.
+  - Keep initial partition ownership mostly static after setup because moving a
+    loaded partition between workers is expensive.
+  - Use handshake CPU/RAM and partition size estimates for initial weighted
+    packing.
+  - Extend telemetry so slow partitions and idle workers are visible.
+  - Defer dynamic migration/work stealing until telemetry identifies when the
+    benefit outweighs the partition-transfer cost.
+
 ## Current Limitations
 
 - TCP runtime exists for the localhost/IPv4 MVP and exposes an explicit bind
