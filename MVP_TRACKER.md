@@ -177,6 +177,12 @@ The MVP is complete when:
 - [x] Add TCP loopback tests for framing, invalid handshakes, worker resource
   propagation, worker errors, objective scaling, regularized agreement, and
   objective-scale promotion.
+- [x] Add UDP discovery tooling:
+  - coordinator `--discovery-port`/`--discovery-token` discovery mode;
+  - worker `--discover` connection path;
+  - `mcpd4_discovery list` for finding visible coordinators;
+  - `mcpd4_discovery close` for operator-controlled transition from worker
+    discovery to solving.
 
 ### Stage 5: Correctness And Integration Tests
 
@@ -197,6 +203,9 @@ The MVP is complete when:
   processes than partitions using batched requests.
 - [x] Validate exact `adhead.n6c10` distributed/TCP run with fewer worker
   processes than partitions using static weighted initial assignment.
+- [x] Add process-level discovery integration coverage: list a waiting
+  coordinator, connect a discovered worker, close discovery, solve a fixture,
+  and compare the distributed result to the in-process reference.
 
 ### Stage 6: Failure Handling And Operational Readiness
 

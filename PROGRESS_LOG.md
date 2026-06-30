@@ -1145,3 +1145,18 @@
   queryable coordinator/worker status, terminology cleanup, RPC transfer
   telemetry, coordinator-host worker participation, worker wait policy, and
   load-balancing improvements.
+
+## 2026-06-30 16:34 PDT
+
+- Implemented first-pass coordinator discovery tooling:
+  - coordinator `--discovery-port PORT` and `--discovery-token TOKEN` start a
+    UDP discovery listener while waiting for workers;
+  - workers can use `mcpd4_worker --discover` with discovery host/port/token
+    instead of explicit TCP host/port;
+  - new `mcpd4_discovery list` command lists visible waiting coordinators;
+  - new `mcpd4_discovery close` command tells the coordinator to stop
+    discovery and proceed once the minimum `--workers` count is connected.
+- Added process-level TDD coverage for discovery mode: list coordinator,
+  connect a discovered worker, close discovery, solve `hand_bottleneck.max`,
+  and compare against the in-process reference.
+- Updated `README.md` with the discovery-mode LAN workflow and CLI options.

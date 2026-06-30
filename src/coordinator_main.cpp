@@ -1,9 +1,12 @@
+#include <mcpd4/discovery.h>
 #include <mcpd4/runtime.h>
 
 #include <decomp/dualdecomp.h>
 #include <decomp/partition_coordinator.h>
 #include <graph/dimacs.h>
 
+#include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -12,6 +15,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <poll.h>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -54,6 +58,9 @@ struct Config {
   long accept_timeout_ms = 24L * 60L * 60L * 1000L;
   int progress_every = 0;
   std::string ready_file;
+  std::uint16_t discovery_port = 0;
+  std::string discovery_token = mcpd4::kDefaultDiscoveryToken;
+  std::string advertise_host;
   bool saturate_capacity_overflow = false;
   bool directed = false;
 };
@@ -100,6 +107,8 @@ void usage(const char *argv0) {
       << "       [--max-iterations N] [--num-scales N] [--initial-step N]\n"
       << "       [--capacity-multiplier N] [--accept-timeout-ms N]\n"
       << "       [--progress-every N] [--ready-file PATH]\n"
+      << "       [--discovery-port PORT] [--discovery-token TOKEN]\n"
+      << "       [--advertise-host HOST]\n"
       << "       [--saturate-capacity-overflow]\n"
       << "       [--directed]\n";
 }
@@ -141,6 +150,12 @@ Config parseArgs(int argc, char **argv) {
       config.progress_every = parseNonNegativeInt(require_value(arg), arg);
     } else if (arg == "--ready-file") {
       config.ready_file = require_value(arg);
+    } else if (arg == "--discovery-port") {
+      config.discovery_port = parsePort(require_value(arg));
+    } else if (arg == "--discovery-token") {
+      config.discovery_token = require_value(arg);
+    } else if (arg == "--advertise-host") {
+      config.advertise_host = require_value(arg);
     } else if (arg == "--saturate-capacity-overflow" ||
                arg == "--truncate-capacity-overflow") {
       config.saturate_capacity_overflow = true;
@@ -212,6 +227,104 @@ void writeReadyFile(const std::string &path, std::uint16_t port) {
     throw std::runtime_error("failed to open ready file for writing: " + path);
   }
   out << port << "\n";
+}
+
+std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptFixedWorkers(
+    mcpd4::SocketHandle *listener, const Config &config,
+    std::vector<mcpd4::TcpPartitionWorker *> *remote_workers) {
+  std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
+  for (int i = 0; i < config.worker_count; ++i) {
+    auto worker = mcpd4::acceptTcpPartitionWorker(
+        listener, std::chrono::milliseconds(config.accept_timeout_ms));
+    std::cout << "accepted worker " << worker->hello().worker_name << "\n";
+    std::cout.flush();
+    remote_workers->push_back(worker.get());
+    workers.push_back(std::move(worker));
+  }
+  return workers;
+}
+
+std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptDiscoveredWorkers(
+    mcpd4::SocketHandle *listener, const mcpd4::SocketHandle &discovery_socket,
+    const Config &config, std::uint16_t tcp_port,
+    std::vector<mcpd4::TcpPartitionWorker *> *remote_workers) {
+  std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
+  bool close_requested = false;
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(config.accept_timeout_ms);
+
+  auto discovery_info = [&]() {
+    mcpd4::DiscoveryCoordinatorInfo info;
+    info.host = config.advertise_host;
+    info.tcp_port = tcp_port;
+    info.discovery_port = mcpd4::localPort(discovery_socket);
+    info.worker_count = static_cast<int>(workers.size());
+    info.min_worker_count = config.worker_count;
+    info.closed = close_requested;
+    return info;
+  };
+
+  while (!close_requested ||
+         static_cast<int>(workers.size()) < config.worker_count) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
+      throw std::runtime_error(
+          "timed out waiting for discovery close or worker connections");
+    }
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - now);
+    const int poll_timeout_ms =
+        std::max(1, std::min<int>(250, static_cast<int>(remaining.count())));
+
+    pollfd fds[2]{};
+    fds[0].fd = listener->get();
+    fds[0].events = POLLIN;
+    fds[1].fd = discovery_socket.get();
+    fds[1].events = POLLIN;
+    const int rc = ::poll(fds, 2, poll_timeout_ms);
+    if (rc < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      throw std::runtime_error("poll failed during discovery accept");
+    }
+    if (rc == 0) {
+      continue;
+    }
+
+    if ((fds[1].revents & POLLIN) != 0) {
+      const auto request =
+          mcpd4::receiveDiscoveryRequest(discovery_socket);
+      if (request.token != config.discovery_token) {
+        continue;
+      }
+      if (request.type == mcpd4::DiscoveryRequestType::QUERY) {
+        mcpd4::sendDiscoveryCoordinatorResponse(discovery_socket, request,
+                                                discovery_info());
+      } else if (request.type == mcpd4::DiscoveryRequestType::CLOSE) {
+        close_requested = true;
+        mcpd4::DiscoveryCloseResult result;
+        result.accepted = true;
+        result.worker_count = static_cast<int>(workers.size());
+        result.min_worker_count = config.worker_count;
+        mcpd4::sendDiscoveryCloseAck(discovery_socket, request, result);
+      }
+    }
+
+    if ((fds[0].revents & POLLIN) != 0) {
+      auto worker = mcpd4::acceptTcpPartitionWorker(
+          listener, std::chrono::milliseconds(1));
+      std::cout << "accepted worker " << worker->hello().worker_name << "\n";
+      std::cout.flush();
+      remote_workers->push_back(worker.get());
+      workers.push_back(std::move(worker));
+    }
+  }
+
+  std::cout << "discovery_closed worker_count " << workers.size()
+            << " min_worker_count " << config.worker_count << "\n";
+  std::cout.flush();
+  return workers;
 }
 
 std::vector<mcpd3::PartitionPackage> makePartitionPackages(
@@ -453,17 +566,27 @@ int main(int argc, char **argv) {
         mcpd4::listenTcp(config.bind_host, config.port);
     std::cout << "listening " << config.bind_host << ":"
               << mcpd4::localPort(listener) << "\n";
+    std::cout.flush();
+    mcpd4::SocketHandle discovery_socket;
+    if (config.discovery_port != 0) {
+      discovery_socket =
+          mcpd4::bindDiscoveryUdp(config.bind_host, config.discovery_port);
+      std::cout << "discovery_listening port "
+                << mcpd4::localPort(discovery_socket)
+                << " min_worker_count " << config.worker_count << "\n";
+      std::cout.flush();
+    }
     writeReadyFile(config.ready_file, mcpd4::localPort(listener));
 
     std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
     std::vector<mcpd4::TcpPartitionWorker *> remote_workers;
     const auto accept_start = std::chrono::steady_clock::now();
-    for (int i = 0; i < config.worker_count; ++i) {
-      auto worker = mcpd4::acceptTcpPartitionWorker(
-          &listener, std::chrono::milliseconds(config.accept_timeout_ms));
-      std::cout << "accepted worker " << worker->hello().worker_name << "\n";
-      remote_workers.push_back(worker.get());
-      workers.push_back(std::move(worker));
+    if (config.discovery_port == 0) {
+      workers = acceptFixedWorkers(&listener, config, &remote_workers);
+    } else {
+      workers = acceptDiscoveredWorkers(&listener, discovery_socket, config,
+                                        mcpd4::localPort(listener),
+                                        &remote_workers);
     }
     timing.accept_workers_wall_us = elapsedUs(accept_start);
 

@@ -15,6 +15,8 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -196,6 +198,35 @@ void killIfRunning(ChildProcess *child) {
 std::uint16_t reservePort() {
   auto socket = mcpd4::listenTcpLoopback(/*port=*/0);
   return mcpd4::localPort(socket);
+}
+
+std::uint16_t reserveUdpPort() {
+  const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+  if (fd < 0) {
+    throw std::runtime_error("failed to create UDP reserve socket: " +
+                             std::string(std::strerror(errno)));
+  }
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0;
+  if (::bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+    const std::string message =
+        "failed to bind UDP reserve socket: " + std::string(std::strerror(errno));
+    ::close(fd);
+    throw std::runtime_error(message);
+  }
+  socklen_t len = sizeof(addr);
+  if (::getsockname(fd, reinterpret_cast<sockaddr *>(&addr), &len) != 0) {
+    const std::string message =
+        "failed to inspect UDP reserve socket: " +
+        std::string(std::strerror(errno));
+    ::close(fd);
+    throw std::runtime_error(message);
+  }
+  const auto port = ntohs(addr.sin_port);
+  ::close(fd);
+  return port;
 }
 
 void waitForReadyFile(const std::string &path,
@@ -647,18 +678,146 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
               run.output);
 }
 
+void discoveryModeAcceptsDiscoveredWorkersAndClose(
+    const std::string &coordinator_bin, const std::string &worker_bin,
+    const std::string &discovery_bin, const std::string &fixture_dir) {
+  const CaseConfig config{/*name=*/"discovery",
+                          /*fixture=*/"hand_bottleneck.max",
+                          /*worker_count=*/1,
+                          /*partition_count=*/2,
+                          /*max_iterations=*/80,
+                          /*num_scales=*/5,
+                          /*initial_step_size=*/10000,
+                          /*capacity_multiplier=*/10000};
+  const auto reference = runInProcessReference(fixture_dir, config);
+  const auto tcp_port = reservePort();
+  const auto discovery_port = reserveUdpPort();
+  const std::string token =
+      "process-test-" + std::to_string(::getpid()) + "-discovery";
+  const std::string ready_file =
+      "/tmp/mcpd4-discovery-" + std::to_string(::getpid()) + ".ready";
+  std::remove(ready_file.c_str());
+
+  ChildProcess coordinator;
+  ChildProcess worker;
+  try {
+    coordinator = spawnProcess({coordinator_bin,
+                                fixture_dir + "/" + config.fixture,
+                                "--port",
+                                std::to_string(tcp_port),
+                                "--workers",
+                                std::to_string(config.worker_count),
+                                "--partitions",
+                                std::to_string(config.partition_count),
+                                "--max-iterations",
+                                std::to_string(config.max_iterations),
+                                "--num-scales",
+                                std::to_string(config.num_scales),
+                                "--initial-step",
+                                std::to_string(config.initial_step_size),
+                                "--capacity-multiplier",
+                                std::to_string(config.capacity_multiplier),
+                                "--accept-timeout-ms",
+                                "5000",
+                                "--ready-file",
+                                ready_file,
+                                "--discovery-port",
+                                std::to_string(discovery_port),
+                                "--discovery-token",
+                                token});
+    waitForReadyFile(ready_file, 5s);
+
+    auto list = spawnProcess({discovery_bin,
+                              "list",
+                              "--host",
+                              "127.0.0.1",
+                              "--port",
+                              std::to_string(discovery_port),
+                              "--token",
+                              token,
+                              "--timeout-ms",
+                              "2000"});
+    const int list_exit = waitForExit(&list, 5s);
+    require(list_exit == 0, "discovery list failed\n" + list.output);
+    require(list.output.find("coordinator host 127.0.0.1") !=
+                std::string::npos,
+            "discovery list should report coordinator host\n" + list.output);
+    require(list.output.find(" tcp_port " + std::to_string(tcp_port)) !=
+                std::string::npos,
+            "discovery list should report coordinator TCP port\n" +
+                list.output);
+
+    worker = spawnProcess({worker_bin,
+                           "--discover",
+                           "--discovery-host",
+                           "127.0.0.1",
+                           "--discovery-port",
+                           std::to_string(discovery_port),
+                           "--discovery-token",
+                           token,
+                           "--discovery-timeout-ms",
+                           "2000",
+                           "--name",
+                           "discovered-worker"});
+
+    auto close = spawnProcess({discovery_bin,
+                               "close",
+                               "--host",
+                               "127.0.0.1",
+                               "--port",
+                               std::to_string(discovery_port),
+                               "--token",
+                               token,
+                               "--timeout-ms",
+                               "2000"});
+    const int close_exit = waitForExit(&close, 5s);
+    require(close_exit == 0, "discovery close failed\n" + close.output);
+    require(close.output.find("closed accepted 1") != std::string::npos,
+            "discovery close should be accepted\n" + close.output);
+
+    const int coordinator_exit = waitForExit(&coordinator, 20s);
+    require(coordinator_exit == 0,
+            "discovery coordinator failed\n" + coordinator.output);
+    const int worker_exit = waitForExit(&worker, 5s);
+    require(worker_exit == 0, "discovery worker failed\n" + worker.output);
+    require(coordinator.output.find("discovery_listening port " +
+                                    std::to_string(discovery_port)) !=
+                std::string::npos,
+            "coordinator should report discovery listener\n" +
+                coordinator.output);
+    require(coordinator.output.find("accepted worker discovered-worker") !=
+                std::string::npos,
+            "coordinator should accept discovered worker\n" +
+                coordinator.output);
+    require(coordinator.output.find("discovery_closed worker_count 1") !=
+                std::string::npos,
+            "coordinator should report discovery close\n" +
+                coordinator.output);
+
+    const auto distributed = parseCoordinatorOutput(coordinator.output);
+    requireEqual(distributed, reference, "discovery");
+    std::remove(ready_file.c_str());
+  } catch (...) {
+    killIfRunning(&coordinator);
+    killIfRunning(&worker);
+    std::remove(ready_file.c_str());
+    throw;
+  }
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
   try {
-    require(argc == 4,
+    require(argc == 5,
             "usage: process_integration_test COORDINATOR_BIN WORKER_BIN "
-            "FIXTURE_DIR");
+            "DISCOVERY_BIN FIXTURE_DIR");
     setenv("MCPD3_PARTITIONER", "basic", /*overwrite=*/1);
 
     const std::string coordinator_bin = argv[1];
     const std::string worker_bin = argv[2];
-    const std::string fixture_dir = argv[3];
+    const std::string discovery_bin = argv[3];
+    const std::string fixture_dir = argv[4];
 
     fixtureProcessMatchesInProcessReference(
         coordinator_bin, worker_bin, fixture_dir,
@@ -677,6 +836,8 @@ int main(int argc, char **argv) {
     capacityOverflowSaturationIsOptIn(coordinator_bin, worker_bin,
                                       fixture_dir);
     progressTelemetryIsStreamed(coordinator_bin, worker_bin, fixture_dir);
+    discoveryModeAcceptsDiscoveredWorkersAndClose(
+        coordinator_bin, worker_bin, discovery_bin, fixture_dir);
   } catch (const std::exception &e) {
     std::cerr << "process_integration_test failed: " << e.what() << "\n";
     return EXIT_FAILURE;

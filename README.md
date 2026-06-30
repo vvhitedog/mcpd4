@@ -34,8 +34,7 @@ encryption, so run it on a trusted network or behind an SSH/VPN tunnel.
 Clone the product repo and initialize the solver submodule:
 
 ```bash
-git clone --branch network-free-worker-api --recurse-submodules \
-  https://github.com/vvhitedog/mcpd4.git
+git clone --recurse-submodules https://github.com/vvhitedog/mcpd4.git
 cd mcpd4
 git submodule update --init --recursive
 ```
@@ -64,6 +63,7 @@ The important outputs are:
 
 - `build/mcpd4_coordinator`
 - `build/mcpd4_worker`
+- `build/mcpd4_discovery`
 
 Run the product test suite:
 
@@ -199,6 +199,71 @@ For directed DIMACS inputs, add `--directed` to the coordinator command:
   --capacity-multiplier 10000
 ```
 
+## Discovery Mode
+
+Discovery mode lets workers find a waiting coordinator without manually typing
+the TCP host/port on every machine. The coordinator answers UDP discovery
+queries until an operator sends a close command. Closing discovery tells the
+coordinator to proceed once at least `--workers N` workers have connected.
+
+Start the coordinator with a UDP discovery port:
+
+```bash
+./build/mcpd4_coordinator /data/graph.max \
+  --bind 0.0.0.0 \
+  --port 50051 \
+  --workers 2 \
+  --partitions 10 \
+  --max-iterations 10000 \
+  --num-scales 5 \
+  --initial-step 10000 \
+  --capacity-multiplier 10000 \
+  --accept-timeout-ms 600000 \
+  --progress-every 50 \
+  --discovery-port 50052 \
+  --discovery-token lab-run-1
+```
+
+List visible coordinators from another machine:
+
+```bash
+./build/mcpd4_discovery list \
+  --host 255.255.255.255 \
+  --port 50052 \
+  --token lab-run-1
+```
+
+If broadcast is blocked, query the coordinator machine directly:
+
+```bash
+./build/mcpd4_discovery list \
+  --host 10.0.0.10 \
+  --port 50052 \
+  --token lab-run-1
+```
+
+Start workers in discovery mode:
+
+```bash
+./build/mcpd4_worker --discover \
+  --discovery-host 255.255.255.255 \
+  --discovery-port 50052 \
+  --discovery-token lab-run-1 \
+  --name worker-a
+```
+
+After enough workers have connected, close discovery and start the solve:
+
+```bash
+./build/mcpd4_discovery close \
+  --host 10.0.0.10 \
+  --port 50052 \
+  --token lab-run-1
+```
+
+Use `--advertise-host HOST` on the coordinator if workers should connect to a
+specific DNS name or interface address instead of the UDP reply source.
+
 ## Coordinator Options
 
 ```text
@@ -206,6 +271,8 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
        [--partitions N] [--max-iterations N] [--num-scales N]
        [--initial-step N] [--capacity-multiplier N]
        [--accept-timeout-ms N] [--progress-every N] [--ready-file PATH]
+       [--discovery-port PORT] [--discovery-token TOKEN]
+       [--advertise-host HOST]
        [--saturate-capacity-overflow] [--directed]
 ```
 
@@ -213,7 +280,9 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
 - `--bind HOST`: local bind address. Default is `127.0.0.1`; use `0.0.0.0` or
   an interface IP for remote workers.
 - `--port PORT`: required TCP port.
-- `--workers N`: number of worker processes the coordinator must accept.
+- `--workers N`: number of worker processes the coordinator must accept. In
+  discovery mode this is the minimum worker count required before a close
+  command can let the solve proceed.
 - `--partitions N`: number of local subproblems to build.
 - `--max-iterations N`: maximum optimizer iterations.
 - `--num-scales N`: number of capacity-scaling levels.
@@ -224,6 +293,11 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
 - `--progress-every N`: print optimizer health every N total iterations. Use
   `0` to disable progress streaming.
 - `--ready-file PATH`: write the listening port after the socket is ready.
+- `--discovery-port PORT`: enable UDP discovery mode on this port.
+- `--discovery-token TOKEN`: require matching worker/list/close discovery
+  tokens. Default is `mcpd4`.
+- `--advertise-host HOST`: host or IP workers should use for the TCP
+  connection. If omitted, workers use the UDP response source address.
 - `--saturate-capacity-overflow`: opt-in overflow compatibility mode. This
   clips overflowing scaled capacities and solves the clipped problem, not the
   exact original problem.
@@ -233,14 +307,42 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
 
 ```text
 usage: mcpd4_worker HOST PORT [--name NAME]
+       mcpd4_worker --discover [--discovery-host HOST]
+       [--discovery-port PORT] [--discovery-token TOKEN]
+       [--discovery-timeout-ms N] [--name NAME]
 ```
 
 - `HOST`: coordinator host or IP.
 - `PORT`: coordinator port.
+- `--discover`: find one coordinator through UDP discovery, then connect to
+  its TCP port.
+- `--discovery-host HOST`: UDP destination for discovery. Default is
+  `255.255.255.255`; use an explicit coordinator IP if broadcast is blocked.
+- `--discovery-port PORT`: UDP discovery port. Default is `50052`.
+- `--discovery-token TOKEN`: token that must match the coordinator.
+- `--discovery-timeout-ms N`: discovery wait timeout.
 - `--name NAME`: optional worker name used in logs and progress output.
 
 Workers receive all partition data from the coordinator after connecting. They
 do not need the DIMACS file.
+
+## Discovery Tool Options
+
+```text
+usage: mcpd4_discovery list [--host HOST] [--port PORT] [--token TOKEN]
+       [--timeout-ms N]
+       mcpd4_discovery close --host HOST [--port PORT] [--token TOKEN]
+       [--timeout-ms N]
+```
+
+- `list`: send a UDP discovery query and print visible coordinators.
+- `close`: send a UDP close command. A valid close command stops discovery and
+  lets the coordinator proceed once the minimum worker count is connected.
+- `--host HOST`: UDP destination. `list` defaults to broadcast; `close`
+  requires an explicit host.
+- `--port PORT`: UDP discovery port. Default is `50052`.
+- `--token TOKEN`: discovery token. Default is `mcpd4`.
+- `--timeout-ms N`: wait timeout for replies.
 
 ## Interpreting Output
 
