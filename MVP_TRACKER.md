@@ -1,6 +1,6 @@
-# Distributed mcpd3 MVP Tracker
+# mcpd4 MVP Tracker
 
-Last updated: 2026-06-30 10:31 PDT
+Last updated: 2026-06-30 11:46 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -12,7 +12,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
 - Current submodule checkpoint:
-  `6415ec7 Balance initial partition worker assignment`
+  `95391f5 Remove selected objective public reporting`
 
 ## MVP Definition
 
@@ -36,6 +36,8 @@ The MVP is complete when:
 ### Stage 0: Build And Project Baseline
 
 - [x] Create product branch for network-free/distributed MVP work.
+- [x] Rebrand the product wrapper as `mcpd4` while keeping the solver
+  dependency and API namespace as `mcpd3`.
 - [x] Create upstreamable mcpd3 branch from `distributed-mvp-start`.
 - [x] Add durable progress and failed-approaches logs.
 - [x] Verify `dimacs_dual_decomp_example` builds from this repo.
@@ -156,8 +158,8 @@ The MVP is complete when:
 
 ### Stage 4: TCP Loopback Runtime
 
-- [x] Add `mcpd3_coordinator` binary in this product repo.
-- [x] Add `mcpd3_worker` binary in this product repo.
+- [x] Add `mcpd4_coordinator` binary in this product repo.
+- [x] Add `mcpd4_worker` binary in this product repo.
 - [x] Implement worker `HELLO` with protocol version, worker name, CPU count,
   RAM GB, feature bits, temp path, and debug build/endianness fields.
 - [x] Implement coordinator wait-for-workers and accept-timeout behavior.
@@ -235,7 +237,7 @@ The MVP is complete when:
   DIMACS fixtures, but no committed medium benchmark fixture exists. Local
   benchmark runs should use `scripts/run_local_process_benchmark.sh` with a
   user-supplied DIMACS path.
-- `mcpd3_coordinator` now exposes `--accept-timeout-ms`, but it still has no
+- `mcpd4_coordinator` now exposes `--accept-timeout-ms`, but it still has no
   worker reconnect, replacement, heartbeat, or partial-progress recovery.
 - `PartitionWorkerCoordinator` now sends dirty alpha records only, including
   the one-round `last_alpha` catch-up needed by scaled-epsilon
@@ -254,7 +256,7 @@ The MVP is complete when:
 - Worker ownership is still static after setup. The current protocol does not
   implement dynamic work stealing, repartitioning, or migration of a slow
   worker's partitions to another process.
-- `mcpd3_coordinator --progress-every N` streams per-round optimizer health
+- `mcpd4_coordinator --progress-every N` streams per-round optimizer health
   and per-worker timing, including solve counts and batch RPC counts. On
   `adhead.n6c10`, the current exact 4-worker/10-partition statically balanced
   batched path reaches agreement and improved wall time from `3:45.06` to

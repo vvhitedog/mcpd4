@@ -1,4 +1,4 @@
-# Agent Handoff: Distributed mcpd3 Product MVP
+# Agent Handoff: mcpd4 Product MVP
 
 This document is the starting point for a new Codex/agent session in this
 repository. It deliberately condenses the previous experimental context so the
@@ -22,9 +22,9 @@ There are three distinct codebases/concepts:
    - Should receive only narrow, upstreamable API extraction changes.
    - Should not absorb product deployment/runtime concerns unless unavoidable.
 
-3. `mcpd3-distributed`
+3. `mcpd4`
    - This repository.
-   - Role: product layer for distributed mcpd3.
+   - Role: product layer for distributed mcpd3, branded as mcpd4.
    - Owns coordinator/worker binaries, TCP protocol, config/deployment,
      product docs, integration tests.
 
@@ -149,7 +149,7 @@ mcpd3:
   alpha/momentum update math
   in-process worker API
 
-mcpd3-distributed:
+mcpd4:
   coordinator executable
   worker executable
   binary protocol
@@ -331,14 +331,14 @@ Messages:
 Add binaries in this repo:
 
 ```text
-src/mcpd3_coordinator.cpp
-src/mcpd3_worker.cpp
+src/mcpd4_coordinator.cpp
+src/mcpd4_worker.cpp
 ```
 
 Suggested CLI:
 
 ```bash
-mcpd3_coordinator \
+mcpd4_coordinator \
   --input graph.max \
   --partitions 4 \
   --listen 127.0.0.1:50051 \
@@ -348,7 +348,7 @@ mcpd3_coordinator \
   --max-iterations 10000 \
   --disable-primal-upper-bound
 
-mcpd3_worker \
+mcpd4_worker \
   --connect 127.0.0.1:50051 \
   --worker-name w0 \
   --ram-gb 64 \
@@ -525,8 +525,9 @@ We are in /home/matt/software/mcpd3-distributed.
 
 Read AGENT_HANDOFF.md completely first.
 
-This repo is the product layer for distributed mcpd3. The experimental cut repo
-is /home/matt/software/graph-cuts-undirected and should remain experimental.
+This repo is the product layer for distributed mcpd3, branded as mcpd4.
+The experimental cut repo is /home/matt/software/graph-cuts-undirected and
+should remain experimental.
 
 mcpd3 is a submodule at third_party/mcpd3 on public branch
 distributed-mvp-start:
@@ -558,4 +559,3 @@ The next useful checkpoint is:
 3. The product repo has a test or example invoking that API through the
    submodule.
 4. No TCP yet.
-

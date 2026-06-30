@@ -1,4 +1,4 @@
-#include <mcpd3_distributed/runtime.h>
+#include <mcpd4/runtime.h>
 
 #include <cstdlib>
 #include <exception>
@@ -44,10 +44,10 @@ int main(int argc, char **argv) {
       }
     }
 
-    mcpd3_distributed::runWorkerClient(
-        host, port, mcpd3_distributed::makeDefaultHello(worker_name));
+    mcpd4::runWorkerClient(
+        host, port, mcpd4::makeDefaultHello(worker_name));
   } catch (const std::exception &e) {
-    std::cerr << "mcpd3_worker failed: " << e.what() << "\n";
+    std::cerr << "mcpd4_worker failed: " << e.what() << "\n";
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;

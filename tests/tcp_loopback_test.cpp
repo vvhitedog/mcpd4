@@ -1,5 +1,5 @@
-#include <mcpd3_distributed/runtime.h>
-#include <mcpd3_distributed/tcp.h>
+#include <mcpd4/runtime.h>
+#include <mcpd4/tcp.h>
 
 #include <chrono>
 #include <cstdlib>
@@ -46,17 +46,17 @@ void sendRawAll(int fd, const std::uint8_t *data, std::size_t size) {
 }
 
 struct ConnectedPair {
-  mcpd3_distributed::SocketHandle server;
-  mcpd3_distributed::SocketHandle client;
+  mcpd4::SocketHandle server;
+  mcpd4::SocketHandle client;
 };
 
 ConnectedPair makeConnectedPair() {
-  auto listener = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
-  const auto port = mcpd3_distributed::localPort(listener);
-  mcpd3_distributed::SocketHandle client;
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  const auto port = mcpd4::localPort(listener);
+  mcpd4::SocketHandle client;
   std::thread connector(
-      [&] { client = mcpd3_distributed::connectTcp("127.0.0.1", port); });
-  auto server = mcpd3_distributed::acceptTcp(&listener, 2s);
+      [&] { client = mcpd4::connectTcp("127.0.0.1", port); });
+  auto server = mcpd4::acceptTcp(&listener, 2s);
   connector.join();
   return ConnectedPair{std::move(server), std::move(client)};
 }
@@ -64,10 +64,10 @@ ConnectedPair makeConnectedPair() {
 class WorkerClientThread {
 public:
   WorkerClientThread(std::uint16_t port,
-                     mcpd3_distributed::HelloMessage hello)
+                     mcpd4::HelloMessage hello)
       : thread_([this, port, hello] {
           try {
-            mcpd3_distributed::runWorkerClient("127.0.0.1", port, hello);
+            mcpd4::runWorkerClient("127.0.0.1", port, hello);
           } catch (...) {
             exception_ = std::current_exception();
           }
@@ -93,8 +93,8 @@ private:
   std::exception_ptr exception_;
 };
 
-mcpd3_distributed::HelloMessage makeHello(const std::string &name) {
-  auto hello = mcpd3_distributed::makeDefaultHello(name);
+mcpd4::HelloMessage makeHello(const std::string &name) {
+  auto hello = mcpd4::makeDefaultHello(name);
   hello.cpu_count = 1;
   hello.ram_gb = 1;
   hello.temp_path = "/tmp";
@@ -133,16 +133,16 @@ std::vector<mcpd3::PartitionPackage> makeTieBreakRegularizationPackages() {
   return {source, target};
 }
 
-std::unique_ptr<mcpd3_distributed::TcpPartitionWorker> startRemoteWorker(
-    mcpd3_distributed::SocketHandle *listener, WorkerClientThread **client,
+std::unique_ptr<mcpd4::TcpPartitionWorker> startRemoteWorker(
+    mcpd4::SocketHandle *listener, WorkerClientThread **client,
     const std::string &worker_name) {
-  const auto port = mcpd3_distributed::localPort(*listener);
+  const auto port = mcpd4::localPort(*listener);
   auto hello = makeHello(worker_name);
   *client = new WorkerClientThread(port, hello);
-  return mcpd3_distributed::acceptTcpPartitionWorker(listener, 2s);
+  return mcpd4::acceptTcpPartitionWorker(listener, 2s);
 }
 
-void stopAndJoin(mcpd3_distributed::TcpPartitionWorker *worker,
+void stopAndJoin(mcpd4::TcpPartitionWorker *worker,
                  WorkerClientThread *client) {
   if (worker != nullptr) {
     worker->stop(/*reason=*/0, "test complete");
@@ -155,15 +155,15 @@ void stopAndJoin(mcpd3_distributed::TcpPartitionWorker *worker,
 
 void receivesFrameSplitAcrossTcpPackets() {
   auto pair = makeConnectedPair();
-  mcpd3_distributed::ReadyMessage ready;
+  mcpd4::ReadyMessage ready;
   ready.worker_name = "partial";
-  const auto frame = mcpd3_distributed::encodeReady(ready);
+  const auto frame = mcpd4::encodeReady(ready);
 
   sendRawAll(pair.client.get(), frame.data(), 5);
   sendRawAll(pair.client.get(), frame.data() + 5, frame.size() - 5);
 
-  const auto received = mcpd3_distributed::receiveFrameBytes(pair.server);
-  const auto decoded = mcpd3_distributed::decodeReady(received);
+  const auto received = mcpd4::receiveFrameBytes(pair.server);
+  const auto decoded = mcpd4::decodeReady(received);
   require(decoded.worker_name == ready.worker_name,
           "split TCP frame should decode after full receive");
 }
@@ -171,40 +171,40 @@ void receivesFrameSplitAcrossTcpPackets() {
 void rejectsOversizedPayloadBeforeReadingBody() {
   auto pair = makeConnectedPair();
   const std::vector<std::uint8_t> payload{1, 2, 3, 4};
-  const auto frame = mcpd3_distributed::encodeFrame(
-      mcpd3_distributed::MessageType::READY, payload);
-  mcpd3_distributed::sendFrameBytes(pair.client, frame);
+  const auto frame = mcpd4::encodeFrame(
+      mcpd4::MessageType::READY, payload);
+  mcpd4::sendFrameBytes(pair.client, frame);
   requireThrows(
-      [&] { (void)mcpd3_distributed::receiveFrameBytes(pair.server, 3); },
+      [&] { (void)mcpd4::receiveFrameBytes(pair.server, 3); },
       "oversized TCP frame should be rejected");
 }
 
 void rejectsInvalidWorkerHello() {
-  auto listener = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
-  const auto port = mcpd3_distributed::localPort(listener);
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  const auto port = mcpd4::localPort(listener);
   std::thread client([&] {
-    auto socket = mcpd3_distributed::connectTcp("127.0.0.1", port);
+    auto socket = mcpd4::connectTcp("127.0.0.1", port);
     auto hello = makeHello("bad-hello");
-    hello.protocol_version = mcpd3_distributed::kProtocolVersion + 1;
-    mcpd3_distributed::sendFrameBytes(socket,
-                                      mcpd3_distributed::encodeHello(hello));
+    hello.protocol_version = mcpd4::kProtocolVersion + 1;
+    mcpd4::sendFrameBytes(socket,
+                                      mcpd4::encodeHello(hello));
   });
   requireThrows(
       [&] {
-        (void)mcpd3_distributed::acceptTcpPartitionWorker(&listener, 2s);
+        (void)mcpd4::acceptTcpPartitionWorker(&listener, 2s);
       },
       "coordinator should reject unsupported worker protocol versions");
   client.join();
 }
 
 void remoteWorkerExposesHandshakeResources() {
-  auto listener = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
-  const auto port = mcpd3_distributed::localPort(listener);
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  const auto port = mcpd4::localPort(listener);
   auto hello = makeHello("resource-worker");
   hello.cpu_count = 7;
   hello.ram_gb = 48;
   auto client = std::make_unique<WorkerClientThread>(port, hello);
-  auto worker = mcpd3_distributed::acceptTcpPartitionWorker(&listener, 2s);
+  auto worker = mcpd4::acceptTcpPartitionWorker(&listener, 2s);
   try {
     const auto resources = worker->resourceEstimate();
     require(resources.cpu_count == 7,
@@ -219,7 +219,7 @@ void remoteWorkerExposesHandshakeResources() {
 }
 
 void remoteWorkerReportsErrorsAsExceptions() {
-  auto listener = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
   auto worker = startRemoteWorker(&listener, &client, "error-worker");
   try {
@@ -236,7 +236,7 @@ void remoteWorkerReportsErrorsAsExceptions() {
 }
 
 void remoteWorkerScalesLoadedObjective() {
-  auto listener = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
   auto worker = startRemoteWorker(&listener, &client, "scale-worker");
   try {
@@ -286,7 +286,7 @@ void remoteWorkerScalesLoadedObjective() {
 }
 
 void remoteWorkerSolvesExplicitBatch() {
-  auto listener = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
   auto worker = startRemoteWorker(&listener, &client, "batch-worker");
   try {
@@ -325,7 +325,7 @@ void remoteWorkerSolvesExplicitBatch() {
 }
 
 void remoteWorkerCoordinatorSolvesRegularizedAgreement() {
-  auto listener = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
   auto remote = startRemoteWorker(&listener, &client, "coordinator-worker");
   auto *remote_ptr = remote.get();
@@ -376,7 +376,7 @@ void remoteWorkerCoordinatorSolvesRegularizedAgreement() {
 }
 
 void remoteWorkerCoordinatorPromotesObjectiveScale() {
-  auto listener = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
   auto remote = startRemoteWorker(&listener, &client, "promotion-worker");
   auto *remote_ptr = remote.get();

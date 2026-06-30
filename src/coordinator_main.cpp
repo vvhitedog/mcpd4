@@ -1,4 +1,4 @@
-#include <mcpd3_distributed/runtime.h>
+#include <mcpd4/runtime.h>
 
 #include <decomp/dualdecomp.h>
 #include <decomp/partition_coordinator.h>
@@ -241,7 +241,7 @@ struct SolveCounterStats {
 };
 
 SolveCounterStats gatherSolveCounters(
-    const std::vector<mcpd3_distributed::TcpPartitionWorker *>
+    const std::vector<mcpd4::TcpPartitionWorker *>
         &remote_workers) {
   SolveCounterStats counters;
   for (const auto *worker : remote_workers) {
@@ -259,7 +259,7 @@ SolveCounterStats gatherSolveCounters(
 }
 
 void printTiming(const RuntimeTiming &timing,
-                 const std::vector<mcpd3_distributed::TcpPartitionWorker *>
+                 const std::vector<mcpd4::TcpPartitionWorker *>
                      &remote_workers) {
   std::uint64_t load_rpc_us = 0;
   std::uint64_t solve_rpc_us = 0;
@@ -337,7 +337,7 @@ void printCapacityScaleStats(const Config &config,
 
 void printProgress(
     const mcpd3::PartitionWorkerProgressRecord &record,
-    const std::vector<mcpd3_distributed::TcpPartitionWorker *>
+    const std::vector<mcpd4::TcpPartitionWorker *>
         &remote_workers) {
   std::uint64_t solve_rpc_us = 0;
   std::uint64_t worker_solve_us = 0;
@@ -450,16 +450,16 @@ int main(int argc, char **argv) {
     timing.partition_wall_us = elapsedUs(partition_start);
 
     auto listener =
-        mcpd3_distributed::listenTcp(config.bind_host, config.port);
+        mcpd4::listenTcp(config.bind_host, config.port);
     std::cout << "listening " << config.bind_host << ":"
-              << mcpd3_distributed::localPort(listener) << "\n";
-    writeReadyFile(config.ready_file, mcpd3_distributed::localPort(listener));
+              << mcpd4::localPort(listener) << "\n";
+    writeReadyFile(config.ready_file, mcpd4::localPort(listener));
 
     std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
-    std::vector<mcpd3_distributed::TcpPartitionWorker *> remote_workers;
+    std::vector<mcpd4::TcpPartitionWorker *> remote_workers;
     const auto accept_start = std::chrono::steady_clock::now();
     for (int i = 0; i < config.worker_count; ++i) {
-      auto worker = mcpd3_distributed::acceptTcpPartitionWorker(
+      auto worker = mcpd4::acceptTcpPartitionWorker(
           &listener, std::chrono::milliseconds(config.accept_timeout_ms));
       std::cout << "accepted worker " << worker->hello().worker_name << "\n";
       remote_workers.push_back(worker.get());
@@ -531,7 +531,7 @@ int main(int argc, char **argv) {
     timing.total_wall_us = elapsedUs(total_start);
     printTiming(timing, remote_workers);
   } catch (const std::exception &e) {
-    std::cerr << "mcpd3_coordinator failed: " << e.what() << "\n";
+    std::cerr << "mcpd4_coordinator failed: " << e.what() << "\n";
     usage(argv[0]);
     return EXIT_FAILURE;
   }

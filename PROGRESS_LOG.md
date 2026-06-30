@@ -1059,3 +1059,13 @@
   - `cmake --build build -j`;
   - `ctest --test-dir build --output-on-failure` with loopback permission;
   - exact balanced adhead local process benchmark.
+
+## 2026-06-30 11:46 PDT
+
+- Rebranded the product wrapper from `mcpd3-distributed` to `mcpd4` while
+  keeping the solver dependency and API namespace as `mcpd3`.
+- Renamed product CMake targets, public include path, protocol/runtime
+  namespace, coordinator/worker binaries, temp-file prefixes, and docs to use
+  `mcpd4`.
+- Updated the local benchmark helper to prefer `MCPD4_*` environment variables
+  while accepting legacy `MCPD3_*` aliases for existing local run scripts.

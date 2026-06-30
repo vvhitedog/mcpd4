@@ -1,4 +1,4 @@
-#include <mcpd3_distributed/tcp.h>
+#include <mcpd4/tcp.h>
 
 #include <decomp/dualdecomp.h>
 #include <decomp/partition_coordinator.h>
@@ -194,8 +194,8 @@ void killIfRunning(ChildProcess *child) {
 }
 
 std::uint16_t reservePort() {
-  auto socket = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
-  return mcpd3_distributed::localPort(socket);
+  auto socket = mcpd4::listenTcpLoopback(/*port=*/0);
+  return mcpd4::localPort(socket);
 }
 
 void waitForReadyFile(const std::string &path,
@@ -384,7 +384,7 @@ DistributedRun runDistributedProcess(const std::string &coordinator_bin,
   const auto port = reservePort();
   const std::string port_string = std::to_string(port);
   const std::string ready_file =
-      "/tmp/mcpd3-stage5-" + std::to_string(::getpid()) + "-" + config.name +
+      "/tmp/mcpd4-stage5-" + std::to_string(::getpid()) + "-" + config.name +
       ".ready";
   std::remove(ready_file.c_str());
 
@@ -510,7 +510,7 @@ void coordinatorAcceptTimeoutIsExposed(const std::string &coordinator_bin,
                                        const std::string &fixture_dir) {
   const auto port = reservePort();
   const std::string ready_file =
-      "/tmp/mcpd3-stage5-timeout-" + std::to_string(::getpid()) + ".ready";
+      "/tmp/mcpd4-stage5-timeout-" + std::to_string(::getpid()) + ".ready";
   std::remove(ready_file.c_str());
 
   auto coordinator = spawnProcess({coordinator_bin,

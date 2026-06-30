@@ -1,6 +1,6 @@
-#include <mcpd3_distributed/tcp.h>
+#include <mcpd4/tcp.h>
 
-#include <mcpd3_distributed/protocol.h>
+#include <mcpd4/protocol.h>
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -13,7 +13,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-namespace mcpd3_distributed {
+namespace mcpd4 {
 namespace {
 
 std::runtime_error socketError(const std::string &message) {
@@ -218,4 +218,4 @@ std::vector<std::uint8_t> receiveFrameBytes(
   return frame;
 }
 
-} // namespace mcpd3_distributed
+} // namespace mcpd4

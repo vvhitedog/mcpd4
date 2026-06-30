@@ -1,6 +1,6 @@
-# mcpd3-distributed
+# mcpd4
 
-Product-layer project for distributed mcpd3.
+Product-layer project for distributed mcpd3, branded as mcpd4.
 
 This repository is intentionally separate from
 `/home/matt/software/graph-cuts-undirected`, which remains the experimental

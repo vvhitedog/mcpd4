@@ -1,4 +1,4 @@
-#include <mcpd3_distributed/protocol.h>
+#include <mcpd4/protocol.h>
 
 #include <cstddef>
 #include <cstring>
@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <type_traits>
 
-namespace mcpd3_distributed {
+namespace mcpd4 {
 namespace {
 
 constexpr std::size_t kFrameHeaderBytes = 12;
@@ -611,4 +611,4 @@ ErrorMessage decodeError(const std::vector<std::uint8_t> &frame) {
   return message;
 }
 
-} // namespace mcpd3_distributed
+} // namespace mcpd4

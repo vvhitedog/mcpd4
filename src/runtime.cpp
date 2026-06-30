@@ -1,4 +1,4 @@
-#include <mcpd3_distributed/runtime.h>
+#include <mcpd4/runtime.h>
 
 #include <algorithm>
 #include <chrono>
@@ -10,7 +10,7 @@
 #include <thread>
 #include <unistd.h>
 
-namespace mcpd3_distributed {
+namespace mcpd4 {
 namespace {
 
 bool hostIsLittleEndian() {
@@ -198,7 +198,7 @@ void TcpPartitionWorker::stop(std::uint32_t reason,
 HelloMessage makeDefaultHello(const std::string &worker_name) {
   HelloMessage hello;
   hello.protocol_version = kProtocolVersion;
-  hello.worker_name = worker_name.empty() ? "mcpd3-worker" : worker_name;
+  hello.worker_name = worker_name.empty() ? "mcpd4-worker" : worker_name;
   hello.cpu_count = hostCpuCount();
   hello.ram_gb = hostRamGb();
   hello.feature_bits = 0;
@@ -278,4 +278,4 @@ std::unique_ptr<TcpPartitionWorker> acceptTcpPartitionWorker(
                                               std::move(hello));
 }
 
-} // namespace mcpd3_distributed
+} // namespace mcpd4

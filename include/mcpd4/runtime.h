@@ -6,10 +6,10 @@
 #include <string>
 
 #include <decomp/partition_worker.h>
-#include <mcpd3_distributed/protocol.h>
-#include <mcpd3_distributed/tcp.h>
+#include <mcpd4/protocol.h>
+#include <mcpd4/tcp.h>
 
-namespace mcpd3_distributed {
+namespace mcpd4 {
 
 constexpr std::uint32_t kProtocolVersion = 2;
 
@@ -55,4 +55,4 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
 std::unique_ptr<TcpPartitionWorker> acceptTcpPartitionWorker(
     SocketHandle *listener, std::chrono::milliseconds timeout);
 
-} // namespace mcpd3_distributed
+} // namespace mcpd4

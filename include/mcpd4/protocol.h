@@ -6,7 +6,7 @@
 
 #include <decomp/partition_worker.h>
 
-namespace mcpd3_distributed {
+namespace mcpd4 {
 
 enum class MessageType : std::uint32_t {
   HELLO = 1,
@@ -129,4 +129,4 @@ StopMessage decodeStop(const std::vector<std::uint8_t> &frame);
 std::vector<std::uint8_t> encodeError(const ErrorMessage &message);
 ErrorMessage decodeError(const std::vector<std::uint8_t> &frame);
 
-} // namespace mcpd3_distributed
+} // namespace mcpd4

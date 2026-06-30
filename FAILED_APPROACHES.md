@@ -5,6 +5,9 @@
 - Do not add TCP, MPI, or serialization before the in-process partition-worker
   API has an equivalence test.
 - Do not move product deployment/runtime concerns into `third_party/mcpd3`.
+- Do not rename the `third_party/mcpd3` solver, its public `mcpd3::` API
+  namespace, or upstream branch as part of the product rebrand. The product
+  wrapper is `mcpd4`; the solver dependency remains `mcpd3`.
 - Do not reintroduce the removed Polyak step policy.
 - Do not depend on local benchmark files from
   `/home/matt/software/graph-cuts-undirected`.

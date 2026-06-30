@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include <mcpd3_distributed/protocol.h>
+#include <mcpd4/protocol.h>
 
 namespace {
 
@@ -108,8 +108,8 @@ mcpd3::PartitionPackage makePackage() {
 
 void frameHeaderIsLittleEndian() {
   const std::vector<std::uint8_t> payload{0xaa, 0xbb};
-  const auto frame = mcpd3_distributed::encodeFrame(
-      mcpd3_distributed::MessageType::PARTITION_PACKAGE, payload);
+  const auto frame = mcpd4::encodeFrame(
+      mcpd4::MessageType::PARTITION_PACKAGE, payload);
 
   require(frame.size() == 14, "frame size mismatch");
   require(frame[0] == 2 && frame[1] == 0 && frame[2] == 0 && frame[3] == 0,
@@ -119,25 +119,25 @@ void frameHeaderIsLittleEndian() {
               frame[11] == 0,
           "payload length should be little-endian uint64");
 
-  const auto decoded = mcpd3_distributed::decodeFrame(frame);
-  require(decoded.type == mcpd3_distributed::MessageType::PARTITION_PACKAGE,
+  const auto decoded = mcpd4::decodeFrame(frame);
+  require(decoded.type == mcpd4::MessageType::PARTITION_PACKAGE,
           "decoded frame type mismatch");
   require(decoded.payload == payload, "decoded frame payload mismatch");
 }
 
 void roundTripsHello() {
-  mcpd3_distributed::HelloMessage message;
+  mcpd4::HelloMessage message;
   message.protocol_version = 3;
   message.worker_name = "worker-a";
   message.cpu_count = 16;
   message.ram_gb = 64;
   message.feature_bits = 0x1020;
-  message.temp_path = "/tmp/mcpd3";
+  message.temp_path = "/tmp/mcpd4";
   message.debug_build = true;
   message.little_endian = true;
 
-  const auto decoded = mcpd3_distributed::decodeHello(
-      mcpd3_distributed::encodeHello(message));
+  const auto decoded = mcpd4::decodeHello(
+      mcpd4::encodeHello(message));
   require(decoded.protocol_version == message.protocol_version,
           "hello protocol version mismatch");
   require(decoded.worker_name == message.worker_name,
@@ -155,16 +155,16 @@ void roundTripsHello() {
 
 void roundTripsPartitionPackage() {
   const auto message = makePackage();
-  const auto decoded = mcpd3_distributed::decodePartitionPackage(
-      mcpd3_distributed::encodePartitionPackage(message));
+  const auto decoded = mcpd4::decodePartitionPackage(
+      mcpd4::encodePartitionPackage(message));
   requirePackageEqual(decoded, message);
 }
 
 void roundTripsReady() {
-  mcpd3_distributed::ReadyMessage message;
+  mcpd4::ReadyMessage message;
   message.worker_name = "worker-ready";
-  const auto decoded = mcpd3_distributed::decodeReady(
-      mcpd3_distributed::encodeReady(message));
+  const auto decoded = mcpd4::decodeReady(
+      mcpd4::encodeReady(message));
   require(decoded.worker_name == message.worker_name, "ready mismatch");
 }
 
@@ -185,8 +185,8 @@ void roundTripsSolveRoundRequest() {
                           /*last_alpha=*/-6,
                           /*alpha_momentum=*/-1.5f});
 
-  const auto decoded = mcpd3_distributed::decodeSolveRoundRequest(
-      mcpd3_distributed::encodeSolveRoundRequest(message));
+  const auto decoded = mcpd4::decodeSolveRoundRequest(
+      mcpd4::encodeSolveRoundRequest(message));
   require(decoded.round_id == message.round_id, "request round mismatch");
   require(decoded.partition_id == message.partition_id,
           "request partition mismatch");
@@ -224,8 +224,8 @@ void roundTripsSolveRoundBatchRequest() {
                           /*alpha_momentum=*/-1.5f});
 
   const std::vector<mcpd3::PartitionSolveRequest> messages{first, second};
-  const auto decoded = mcpd3_distributed::decodeSolveRoundBatchRequest(
-      mcpd3_distributed::encodeSolveRoundBatchRequest(messages));
+  const auto decoded = mcpd4::decodeSolveRoundBatchRequest(
+      mcpd4::encodeSolveRoundBatchRequest(messages));
 
   require(decoded.size() == messages.size(),
           "batch request count mismatch");
@@ -269,8 +269,8 @@ void roundTripsSolveRoundResult() {
                               /*local_index=*/2,
                               /*label=*/1});
 
-  const auto decoded = mcpd3_distributed::decodeSolveRoundResult(
-      mcpd3_distributed::encodeSolveRoundResult(message));
+  const auto decoded = mcpd4::decodeSolveRoundResult(
+      mcpd4::encodeSolveRoundResult(message));
   require(decoded.round_id == message.round_id, "result round mismatch");
   require(decoded.partition_id == message.partition_id,
           "result partition mismatch");
@@ -296,13 +296,13 @@ void roundTripsSolveRoundResult() {
   }
 
   const auto decoded_default_timing =
-      mcpd3_distributed::decodeTimedSolveRoundResult(
-          mcpd3_distributed::encodeSolveRoundResult(message));
+      mcpd4::decodeTimedSolveRoundResult(
+          mcpd4::encodeSolveRoundResult(message));
   require(decoded_default_timing.worker_solve_wall_us == 0,
           "default result timing should be zero");
 
-  const auto decoded_timed = mcpd3_distributed::decodeTimedSolveRoundResult(
-      mcpd3_distributed::encodeSolveRoundResultWithTiming(
+  const auto decoded_timed = mcpd4::decodeTimedSolveRoundResult(
+      mcpd4::encodeSolveRoundResultWithTiming(
           message, /*worker_solve_wall_us=*/12345));
   require(decoded_timed.result.round_id == message.round_id,
           "timed result round mismatch");
@@ -340,8 +340,8 @@ void roundTripsSolveRoundBatchResult() {
                               /*label=*/1});
 
   const std::vector<mcpd3::PartitionSolveResult> messages{first, second};
-  const auto decoded = mcpd3_distributed::decodeSolveRoundBatchResult(
-      mcpd3_distributed::encodeSolveRoundBatchResult(messages));
+  const auto decoded = mcpd4::decodeSolveRoundBatchResult(
+      mcpd4::encodeSolveRoundBatchResult(messages));
   require(decoded.size() == messages.size(), "batch result count mismatch");
   for (size_t i = 0; i < messages.size(); ++i) {
     require(decoded[i].round_id == messages[i].round_id,
@@ -372,14 +372,14 @@ void roundTripsSolveRoundBatchResult() {
   }
 
   const auto decoded_default_timing =
-      mcpd3_distributed::decodeTimedSolveRoundBatchResult(
-          mcpd3_distributed::encodeSolveRoundBatchResult(messages));
+      mcpd4::decodeTimedSolveRoundBatchResult(
+          mcpd4::encodeSolveRoundBatchResult(messages));
   require(decoded_default_timing.worker_solve_wall_us == 0,
           "default batch timing should be zero");
 
   const auto decoded_timed =
-      mcpd3_distributed::decodeTimedSolveRoundBatchResult(
-          mcpd3_distributed::encodeSolveRoundBatchResultWithTiming(
+      mcpd4::decodeTimedSolveRoundBatchResult(
+          mcpd4::encodeSolveRoundBatchResultWithTiming(
               messages, /*worker_solve_wall_us=*/56789));
   require(decoded_timed.results.size() == messages.size(),
           "timed batch result count mismatch");
@@ -390,23 +390,23 @@ void roundTripsSolveRoundBatchResult() {
 }
 
 void roundTripsScaleObjective() {
-  mcpd3_distributed::ScaleObjectiveMessage message;
+  mcpd4::ScaleObjectiveMessage message;
   message.factor = 10;
-  const auto decoded = mcpd3_distributed::decodeScaleObjective(
-      mcpd3_distributed::encodeScaleObjective(message));
+  const auto decoded = mcpd4::decodeScaleObjective(
+      mcpd4::encodeScaleObjective(message));
   require(decoded.factor == message.factor, "scale objective factor mismatch");
 }
 
 void roundTripsAlphaUpdate() {
-  mcpd3_distributed::AlphaUpdateMessage message;
+  mcpd4::AlphaUpdateMessage message;
   message.partition_id = 5;
   message.alpha_updates.push_back(
       mcpd3::AlphaUpdate{/*constraint_id=*/6,
                           /*alpha=*/7,
                           /*last_alpha=*/8,
                           /*alpha_momentum=*/2.25f});
-  const auto decoded = mcpd3_distributed::decodeAlphaUpdate(
-      mcpd3_distributed::encodeAlphaUpdate(message));
+  const auto decoded = mcpd4::decodeAlphaUpdate(
+      mcpd4::encodeAlphaUpdate(message));
   require(decoded.partition_id == message.partition_id,
           "alpha message partition mismatch");
   require(decoded.alpha_updates.size() == 1, "alpha message count mismatch");
@@ -414,60 +414,60 @@ void roundTripsAlphaUpdate() {
 }
 
 void roundTripsStop() {
-  mcpd3_distributed::StopMessage message;
+  mcpd4::StopMessage message;
   message.reason = 12;
   message.message = "done";
-  const auto decoded = mcpd3_distributed::decodeStop(
-      mcpd3_distributed::encodeStop(message));
+  const auto decoded = mcpd4::decodeStop(
+      mcpd4::encodeStop(message));
   require(decoded.reason == message.reason, "stop reason mismatch");
   require(decoded.message == message.message, "stop message mismatch");
 }
 
 void roundTripsError() {
-  mcpd3_distributed::ErrorMessage message;
+  mcpd4::ErrorMessage message;
   message.code = 99;
   message.message = "bad frame";
-  const auto decoded = mcpd3_distributed::decodeError(
-      mcpd3_distributed::encodeError(message));
+  const auto decoded = mcpd4::decodeError(
+      mcpd4::encodeError(message));
   require(decoded.code == message.code, "error code mismatch");
   require(decoded.message == message.message, "error message mismatch");
 }
 
 void rejectsMalformedFrames() {
-  requireThrows([] { mcpd3_distributed::decodeFrame({1, 0, 0}); },
+  requireThrows([] { mcpd4::decodeFrame({1, 0, 0}); },
                 "truncated frame header should fail");
 
-  auto unknown = mcpd3_distributed::encodeFrame(
-      mcpd3_distributed::MessageType::HELLO, {});
+  auto unknown = mcpd4::encodeFrame(
+      mcpd4::MessageType::HELLO, {});
   unknown[0] = 250;
-  requireThrows([&] { mcpd3_distributed::decodeFrame(unknown); },
+  requireThrows([&] { mcpd4::decodeFrame(unknown); },
                 "unknown message type should fail");
 
-  auto size_mismatch = mcpd3_distributed::encodeFrame(
-      mcpd3_distributed::MessageType::READY, {1, 2, 3});
+  auto size_mismatch = mcpd4::encodeFrame(
+      mcpd4::MessageType::READY, {1, 2, 3});
   size_mismatch.pop_back();
-  requireThrows([&] { mcpd3_distributed::decodeFrame(size_mismatch); },
+  requireThrows([&] { mcpd4::decodeFrame(size_mismatch); },
                 "payload size mismatch should fail");
 
   requireThrows(
       [] {
-        mcpd3_distributed::decodeReady(
-            mcpd3_distributed::encodeFrame(
-                mcpd3_distributed::MessageType::ERROR, {}));
+        mcpd4::decodeReady(
+            mcpd4::encodeFrame(
+                mcpd4::MessageType::ERROR, {}));
       },
       "wrong message type should fail");
 
-  auto truncated_payload = mcpd3_distributed::encodeReady(
-      mcpd3_distributed::ReadyMessage{"worker"});
+  auto truncated_payload = mcpd4::encodeReady(
+      mcpd4::ReadyMessage{"worker"});
   truncated_payload[12] = 200;
-  requireThrows([&] { mcpd3_distributed::decodeReady(truncated_payload); },
+  requireThrows([&] { mcpd4::decodeReady(truncated_payload); },
                 "truncated payload should fail");
 
-  auto trailing_payload = mcpd3_distributed::encodeFrame(
-      mcpd3_distributed::MessageType::SCALE_OBJECTIVE,
+  auto trailing_payload = mcpd4::encodeFrame(
+      mcpd4::MessageType::SCALE_OBJECTIVE,
       std::vector<std::uint8_t>{1, 0, 0, 0, 0, 0, 0, 0, 99});
   requireThrows([&] {
-    mcpd3_distributed::decodeScaleObjective(trailing_payload);
+    mcpd4::decodeScaleObjective(trailing_payload);
   }, "trailing payload bytes should fail");
 }
 

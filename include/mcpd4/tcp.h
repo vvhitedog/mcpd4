@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace mcpd3_distributed {
+namespace mcpd4 {
 
 class SocketHandle {
 public:
@@ -42,4 +42,4 @@ std::vector<std::uint8_t> receiveFrameBytes(
     const SocketHandle &socket,
     std::size_t max_payload_bytes = 256ULL * 1024ULL * 1024ULL);
 
-} // namespace mcpd3_distributed
+} // namespace mcpd4
