@@ -629,8 +629,16 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
   require(run.output.find(" worker_solve_wall_us ") != std::string::npos,
           "progress telemetry should include worker solve timing\n" +
               run.output);
-  require(run.output.find(" solve_round_batch_count ") != std::string::npos,
-          "progress telemetry should include batch solve count\n" +
+  require(run.output.find(" solve_batch_rpc_count_total ") !=
+              std::string::npos,
+          "progress telemetry should include batch RPC count\n" + run.output);
+  require(run.output.find(" partition_solves_per_iteration ") !=
+              std::string::npos,
+          "progress telemetry should include partition solve factor\n" +
+              run.output);
+  require(run.output.find(" solve_batch_rpcs_per_iteration ") !=
+              std::string::npos,
+          "progress telemetry should include batch RPC factor\n" +
               run.output);
   require(run.output.find("progress_worker total_iteration ") !=
               std::string::npos,
@@ -638,9 +646,13 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
               run.output);
   require(run.output.find(" name progress-worker-0 ") != std::string::npos,
           "progress telemetry should include worker names\n" + run.output);
-  require(run.output.find("timing_solve_round_batch_count ") !=
+  require(run.output.find("solve_batch_rpc_count_total ") !=
               std::string::npos,
-          "final timing should include batch solve count\n" + run.output);
+          "final telemetry should include batch RPC count\n" + run.output);
+  require(run.output.find("timing_solve_round_batch_count ") ==
+              std::string::npos,
+          "final telemetry should not use timing prefix for counts\n" +
+              run.output);
 }
 
 } // namespace

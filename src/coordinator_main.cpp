@@ -232,6 +232,32 @@ std::uint64_t saturatedSubtract(std::uint64_t lhs, std::uint64_t rhs) {
   return lhs > rhs ? lhs - rhs : 0;
 }
 
+struct SolveCounterStats {
+  long assigned_partition_count = 0;
+  long active_worker_count = 0;
+  long partition_solve_call_count_total = 0;
+  long solve_batch_rpc_count_total = 0;
+  long scale_objective_rpc_count = 0;
+};
+
+SolveCounterStats gatherSolveCounters(
+    const std::vector<mcpd3_distributed::TcpPartitionWorker *>
+        &remote_workers) {
+  SolveCounterStats counters;
+  for (const auto *worker : remote_workers) {
+    const auto &stats = worker->timingStats();
+    counters.assigned_partition_count += stats.load_partition_rpc_count;
+    if (stats.load_partition_rpc_count > 0) {
+      ++counters.active_worker_count;
+    }
+    counters.partition_solve_call_count_total +=
+        stats.partition_solve_call_count;
+    counters.solve_batch_rpc_count_total += stats.solve_batch_rpc_count;
+    counters.scale_objective_rpc_count += stats.scale_objective_rpc_count;
+  }
+  return counters;
+}
+
 void printTiming(const RuntimeTiming &timing,
                  const std::vector<mcpd3_distributed::TcpPartitionWorker *>
                      &remote_workers) {
@@ -239,21 +265,14 @@ void printTiming(const RuntimeTiming &timing,
   std::uint64_t solve_rpc_us = 0;
   std::uint64_t worker_solve_us = 0;
   std::uint64_t scale_rpc_us = 0;
-  long load_count = 0;
-  long solve_count = 0;
-  long solve_batch_count = 0;
-  long scale_count = 0;
   for (const auto *worker : remote_workers) {
     const auto &stats = worker->timingStats();
     load_rpc_us += stats.load_partition_rpc_wall_us;
     solve_rpc_us += stats.solve_round_rpc_wall_us;
     worker_solve_us += stats.solve_round_worker_wall_us;
     scale_rpc_us += stats.scale_objective_rpc_wall_us;
-    load_count += stats.load_partition_count;
-    solve_count += stats.solve_round_count;
-    solve_batch_count += stats.solve_round_batch_count;
-    scale_count += stats.scale_objective_count;
   }
+  const auto counters = gatherSolveCounters(remote_workers);
 
   const auto coordinator_compute_us =
       saturatedSubtract(timing.solve_wall_us, solve_rpc_us);
@@ -282,11 +301,21 @@ void printTiming(const RuntimeTiming &timing,
   std::cout << "timing_scale_objective_rpc_us " << scale_rpc_us << "\n";
   std::cout << "timing_stop_workers_wall_us " << timing.stop_workers_wall_us
             << "\n";
-  std::cout << "timing_load_partition_count " << load_count << "\n";
-  std::cout << "timing_solve_round_count " << solve_count << "\n";
-  std::cout << "timing_solve_round_batch_count " << solve_batch_count
-            << "\n";
-  std::cout << "timing_scale_objective_count " << scale_count << "\n";
+  std::cout << "assigned_partition_count "
+            << counters.assigned_partition_count << "\n";
+  std::cout << "active_worker_count " << counters.active_worker_count << "\n";
+  std::cout << "partition_solves_per_iteration "
+            << counters.assigned_partition_count << "\n";
+  std::cout << "solve_batch_rpcs_per_iteration "
+            << counters.active_worker_count << "\n";
+  std::cout << "load_partition_rpc_count "
+            << counters.assigned_partition_count << "\n";
+  std::cout << "partition_solve_call_count_total "
+            << counters.partition_solve_call_count_total << "\n";
+  std::cout << "solve_batch_rpc_count_total "
+            << counters.solve_batch_rpc_count_total << "\n";
+  std::cout << "scale_objective_rpc_count "
+            << counters.scale_objective_rpc_count << "\n";
 }
 
 void printCapacityScaleStats(const Config &config,
@@ -312,15 +341,12 @@ void printProgress(
         &remote_workers) {
   std::uint64_t solve_rpc_us = 0;
   std::uint64_t worker_solve_us = 0;
-  long solve_count = 0;
-  long solve_batch_count = 0;
   for (const auto *worker : remote_workers) {
     const auto &stats = worker->timingStats();
     solve_rpc_us += stats.solve_round_rpc_wall_us;
     worker_solve_us += stats.solve_round_worker_wall_us;
-    solve_count += stats.solve_round_count;
-    solve_batch_count += stats.solve_round_batch_count;
   }
+  const auto counters = gatherSolveCounters(remote_workers);
   const auto worker_rpc_overhead_us =
       saturatedSubtract(solve_rpc_us, worker_solve_us);
 
@@ -355,8 +381,17 @@ void printProgress(
             << record.regularization_active_sink_count
             << " iterations_since_improvement "
             << record.iterations_since_improvement
-            << " solve_round_count " << solve_count
-            << " solve_round_batch_count " << solve_batch_count
+            << " assigned_partition_count "
+            << counters.assigned_partition_count
+            << " active_worker_count " << counters.active_worker_count
+            << " partition_solves_per_iteration "
+            << counters.assigned_partition_count
+            << " solve_batch_rpcs_per_iteration "
+            << counters.active_worker_count
+            << " partition_solve_call_count_total "
+            << counters.partition_solve_call_count_total
+            << " solve_batch_rpc_count_total "
+            << counters.solve_batch_rpc_count_total
             << " solve_rpc_wall_us " << solve_rpc_us
             << " worker_solve_wall_us " << worker_solve_us
             << " worker_rpc_overhead_us " << worker_rpc_overhead_us << "\n";
@@ -366,9 +401,12 @@ void printProgress(
     std::cout << "progress_worker"
               << " total_iteration " << record.total_iteration
               << " name " << worker->hello().worker_name
-              << " solve_round_count " << stats.solve_round_count
-              << " solve_round_batch_count "
-              << stats.solve_round_batch_count
+              << " assigned_partition_count "
+              << stats.load_partition_rpc_count
+              << " partition_solve_call_count_total "
+              << stats.partition_solve_call_count
+              << " solve_batch_rpc_count_total "
+              << stats.solve_batch_rpc_count
               << " solve_rpc_wall_us " << stats.solve_round_rpc_wall_us
               << " worker_solve_wall_us "
               << stats.solve_round_worker_wall_us

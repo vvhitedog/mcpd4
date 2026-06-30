@@ -108,7 +108,7 @@ void TcpPartitionWorker::loadPartition(
   sendFrameBytes(socket_, encodePartitionPackage(package));
   (void)receiveReadyOrThrow(socket_);
   timing_stats_.load_partition_rpc_wall_us += elapsedUs(start);
-  ++timing_stats_.load_partition_count;
+  ++timing_stats_.load_partition_rpc_count;
 }
 
 mcpd3::PartitionWorkerResourceEstimate
@@ -142,7 +142,7 @@ mcpd3::PartitionSolveResult TcpPartitionWorker::solveRound(
   const auto timed = decodeTimedSolveRoundResult(frame_bytes);
   timing_stats_.solve_round_rpc_wall_us += elapsedUs(start);
   timing_stats_.solve_round_worker_wall_us += timed.worker_solve_wall_us;
-  ++timing_stats_.solve_round_count;
+  ++timing_stats_.partition_solve_call_count;
   return timed.result;
 }
 
@@ -164,9 +164,9 @@ std::vector<mcpd3::PartitionSolveResult> TcpPartitionWorker::solveRoundBatch(
   const auto timed = decodeTimedSolveRoundBatchResult(frame_bytes);
   timing_stats_.solve_round_rpc_wall_us += elapsedUs(start);
   timing_stats_.solve_round_worker_wall_us += timed.worker_solve_wall_us;
-  timing_stats_.solve_round_count +=
+  timing_stats_.partition_solve_call_count +=
       static_cast<long>(timed.results.size());
-  ++timing_stats_.solve_round_batch_count;
+  ++timing_stats_.solve_batch_rpc_count;
   return timed.results;
 }
 
@@ -177,7 +177,7 @@ void TcpPartitionWorker::scaleObjective(long factor) {
   sendFrameBytes(socket_, encodeScaleObjective(message));
   (void)receiveReadyOrThrow(socket_);
   timing_stats_.scale_objective_rpc_wall_us += elapsedUs(start);
-  ++timing_stats_.scale_objective_count;
+  ++timing_stats_.scale_objective_rpc_count;
 }
 
 void TcpPartitionWorker::stop(std::uint32_t reason,

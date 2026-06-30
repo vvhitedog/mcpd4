@@ -18,10 +18,10 @@ struct TcpPartitionWorkerTimingStats {
   std::uint64_t solve_round_rpc_wall_us = 0;
   std::uint64_t solve_round_worker_wall_us = 0;
   std::uint64_t scale_objective_rpc_wall_us = 0;
-  long load_partition_count = 0;
-  long solve_round_count = 0;
-  long solve_round_batch_count = 0;
-  long scale_objective_count = 0;
+  long load_partition_rpc_count = 0;
+  long partition_solve_call_count = 0;
+  long solve_batch_rpc_count = 0;
+  long scale_objective_rpc_count = 0;
 };
 
 class TcpPartitionWorker final : public mcpd3::PartitionWorker {

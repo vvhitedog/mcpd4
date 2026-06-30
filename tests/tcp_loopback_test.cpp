@@ -267,13 +267,13 @@ void remoteWorkerScalesLoadedObjective() {
     require(after.lower_bound == before.lower_bound * 10,
             "remote SCALE_OBJECTIVE should rescale loaded capacities");
     const auto &stats = worker->timingStats();
-    require(stats.load_partition_count == 1,
+    require(stats.load_partition_rpc_count == 1,
             "remote timing should count partition loads");
-    require(stats.solve_round_count == 2,
-            "remote timing should count solve rounds");
-    require(stats.solve_round_batch_count == 0,
+    require(stats.partition_solve_call_count == 2,
+            "remote timing should count partition solve calls");
+    require(stats.solve_batch_rpc_count == 0,
             "direct single solve should not count as a batch RPC");
-    require(stats.scale_objective_count == 1,
+    require(stats.scale_objective_rpc_count == 1,
             "remote timing should count objective scaling");
     require(stats.solve_round_rpc_wall_us >=
                 stats.solve_round_worker_wall_us,
@@ -310,9 +310,9 @@ void remoteWorkerSolvesExplicitBatch() {
             "remote batch should preserve partition result order");
     require(results[0].round_id == 3 && results[1].round_id == 3,
             "remote batch should preserve round ids");
-    require(worker->timingStats().solve_round_count == 2,
-            "remote batch timing should count solved partitions");
-    require(worker->timingStats().solve_round_batch_count == 1,
+    require(worker->timingStats().partition_solve_call_count == 2,
+            "remote batch timing should count partition solve calls");
+    require(worker->timingStats().solve_batch_rpc_count == 1,
             "remote batch timing should count batch RPCs");
     require(worker->timingStats().solve_round_rpc_wall_us >=
                 worker->timingStats().solve_round_worker_wall_us,
@@ -354,10 +354,10 @@ void remoteWorkerCoordinatorSolvesRegularizedAgreement() {
             "remote worker coordinator should finish with no disagreement");
     require(result.final_regularization_budget == 10,
             "remote worker should preserve regularization diagnostics");
-    require(remote_ptr->timingStats().solve_round_batch_count ==
+    require(remote_ptr->timingStats().solve_batch_rpc_count ==
                 result.total_iterations,
             "single remote worker should receive one solve batch per round");
-    require(remote_ptr->timingStats().solve_round_count ==
+    require(remote_ptr->timingStats().partition_solve_call_count ==
                 result.total_iterations * 2,
             "single remote worker should solve both partitions in each batch");
     remote_ptr->stop(/*reason=*/0, "coordinator test complete");
@@ -405,7 +405,7 @@ void remoteWorkerCoordinatorPromotesObjectiveScale() {
             "remote promoted solve should report promoted objective scale");
     require(result.final_regularization_budget < result.scale,
             "remote promoted solve should finish under budget");
-    require(remote_ptr->timingStats().scale_objective_count == 1,
+    require(remote_ptr->timingStats().scale_objective_rpc_count == 1,
             "remote promotion should record objective scaling timing");
     remote_ptr->stop(/*reason=*/0, "promotion test complete");
     client->joinAndRethrow();

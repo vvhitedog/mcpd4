@@ -1,5 +1,32 @@
 # Progress Log
 
+## 2026-06-30 11:02 PDT
+
+- Renamed solve-count telemetry so counters are not emitted with the
+  `timing_` prefix.
+- New final/progress counter names:
+  - `assigned_partition_count`;
+  - `active_worker_count`;
+  - `partition_solves_per_iteration`;
+  - `solve_batch_rpcs_per_iteration`;
+  - `partition_solve_call_count_total`;
+  - `solve_batch_rpc_count_total`;
+  - `load_partition_rpc_count`;
+  - `scale_objective_rpc_count`.
+- Removed current output of the confusing names
+  `timing_solve_round_count`, `timing_solve_round_batch_count`,
+  `solve_round_count`, and `solve_round_batch_count`.
+- Product tests now assert the clearer names and verify that final telemetry no
+  longer reports batch counters under a `timing_` prefix.
+- Verified:
+  - `ctest --test-dir build -R tcp_loopback_test --output-on-failure`;
+  - `git diff --check`;
+  - `git -C third_party/mcpd3 diff --check`.
+- Full product build is currently blocked by an unrelated dirty submodule
+  reporting refactor that removed `selected_objective` /
+  `best_selected_objective` fields while the product coordinator still targets
+  the committed submodule API.
+
 ## 2026-06-30 10:31 PDT
 
 - Confirmed branch state before starting:
@@ -45,8 +72,12 @@
   - `capacity_scale_saturation_count 0`;
   - `timing_solve_wall_us 140040416`;
   - `timing_worker_rpc_overhead_us 19525976`;
-  - `timing_solve_round_count 1820`;
-  - `timing_solve_round_batch_count 728`;
+  - `assigned_partition_count 10`;
+  - `active_worker_count 4`;
+  - `partition_solves_per_iteration 10`;
+  - `solve_batch_rpcs_per_iteration 4`;
+  - `partition_solve_call_count_total 1820`;
+  - `solve_batch_rpc_count_total 728`;
   - wall time `3:22.74`;
   - max RSS `6342740 kB`.
 - The lower-bound value now reflects the merged certified-LB accounting:
@@ -84,7 +115,7 @@
     `SOLVE_ROUND_BATCH_REQUEST` and `SOLVE_ROUND_BATCH_RESULT`;
   - added TCP `solveRoundBatch()` RPC support;
   - taught worker processes to execute a batch request;
-  - added `solve_round_batch_count` timing/progress telemetry.
+  - added batch RPC count telemetry.
 - Added product tests for:
   - batch protocol serialization round trips;
   - explicit TCP batch solve RPCs;
@@ -101,8 +132,9 @@
   - `final_disagreement_count 0`;
   - `final_regularization_budget 180`;
   - `capacity_scale_saturation_count 0`;
-  - `timing_solve_round_count 1820`;
-  - `timing_solve_round_batch_count 728`;
+  - old counter names at the time:
+    `timing_solve_round_count 1820` and
+    `timing_solve_round_batch_count 728`;
   - wall time `3:45.06`;
   - max RSS `6342852 kB`.
 - The 4-worker run initially exceeded the `M=100` regularization budget during
@@ -864,7 +896,7 @@
   was intentionally stopped after the first progress record.
 - The first adhead progress record showed the health issue directly:
   - `disagreement_count=456270`;
-  - `solve_round_count=10`;
+  - old counter name at the time: `solve_round_count=10`;
   - total solve RPC wall `107233556 us`;
   - worker solve wall `106982322 us`;
   - worker 3 solve wall about `69.7 s`;
