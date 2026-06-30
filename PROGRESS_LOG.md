@@ -976,3 +976,36 @@
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `cmake --build build -j`;
   - `ctest --test-dir build --output-on-failure` with loopback permission.
+
+## 2026-06-30 10:46 PDT
+
+- Split regularized reporting so selected/original objective, certified lower
+  bound, and regularized objective are distinct fields.
+- `PartitionWorkerCoordinator` and `DualDecomposition` now track selected
+  objective separately from the conservative certificate. Progress telemetry
+  exposes `selected_objective`, `certified_lower_bound`, and
+  `regularized_objective`.
+- Distributed final output now includes:
+  - `final_objective[_raw]` for the final selected/original objective;
+  - `best_selected_objective[_raw]` for the best selected/original objective
+    diagnostic;
+  - `best_certified_lower_bound[_raw]` for the conservative certificate;
+  - `best_regularized_objective[_raw]` for the perturbed objective.
+- Re-ran the balanced exact `adhead.n6c10` case with 4 workers, 10
+  partitions, capacity multiplier `100`, and promotion to scale `1000`.
+  Verified:
+  - `final_objective 48373`;
+  - `final_objective_raw 48373000`;
+  - `best_selected_objective 48373`;
+  - `best_selected_objective_raw 48373000`;
+  - `best_certified_lower_bound 48372.9`;
+  - `best_certified_lower_bound_raw 48372930`;
+  - `best_regularized_objective 48373.1`;
+  - `best_regularized_objective_raw 48373110`;
+  - `final_disagreement_count 0`.
+- Verified:
+  - `cmake --build third_party/mcpd3/build -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure` with loopback permission;
+  - exact balanced adhead local process benchmark.

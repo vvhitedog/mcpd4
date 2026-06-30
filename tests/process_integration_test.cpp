@@ -44,7 +44,12 @@ struct CaseConfig {
 struct SolveSummary {
   long status = -1;
   long stop_reason = -1;
+  long final_objective_raw = 0;
+  long final_certified_lower_bound_raw = 0;
+  long final_regularized_objective_raw = 0;
+  long best_selected_objective_raw = 0;
   long best_lower_bound_raw = 0;
+  long best_certified_lower_bound_raw = 0;
   long best_regularized_objective_raw = 0;
   long objective_scale = 1;
   long objective_scale_promotions = 0;
@@ -241,7 +246,14 @@ SolveSummary summarize(const mcpd3::PartitionWorkerCoordinatorSolveResult &r) {
   SolveSummary summary;
   summary.status = static_cast<long>(r.status);
   summary.stop_reason = static_cast<long>(r.stop_reason);
+  summary.final_objective_raw = r.final_selected_objective_raw;
+  summary.final_certified_lower_bound_raw =
+      r.final_certified_lower_bound_raw;
+  summary.final_regularized_objective_raw =
+      r.final_regularized_objective_raw;
+  summary.best_selected_objective_raw = r.best_selected_objective_raw;
   summary.best_lower_bound_raw = r.best_lower_bound_raw;
+  summary.best_certified_lower_bound_raw = r.best_certified_lower_bound_raw;
   summary.best_regularized_objective_raw = r.best_regularized_objective_raw;
   summary.objective_scale = r.scale;
   summary.objective_scale_promotions = r.objective_scale_promotion_count;
@@ -297,7 +309,12 @@ SolveSummary parseCoordinatorOutput(const std::string &output) {
   const std::vector<std::string> keys{
       "status",
       "stop_reason",
+      "final_objective_raw",
+      "final_certified_lower_bound_raw",
+      "final_regularized_objective_raw",
+      "best_selected_objective_raw",
       "best_lower_bound_raw",
+      "best_certified_lower_bound_raw",
       "best_regularized_objective_raw",
       "objective_scale",
       "objective_scale_promotions",
@@ -334,8 +351,17 @@ SolveSummary parseCoordinatorOutput(const std::string &output) {
   SolveSummary summary;
   summary.status = parseLongField(fields, "status");
   summary.stop_reason = parseLongField(fields, "stop_reason");
+  summary.final_objective_raw = parseLongField(fields, "final_objective_raw");
+  summary.final_certified_lower_bound_raw =
+      parseLongField(fields, "final_certified_lower_bound_raw");
+  summary.final_regularized_objective_raw =
+      parseLongField(fields, "final_regularized_objective_raw");
+  summary.best_selected_objective_raw =
+      parseLongField(fields, "best_selected_objective_raw");
   summary.best_lower_bound_raw =
       parseLongField(fields, "best_lower_bound_raw");
+  summary.best_certified_lower_bound_raw =
+      parseLongField(fields, "best_certified_lower_bound_raw");
   summary.best_regularized_objective_raw =
       parseLongField(fields, "best_regularized_objective_raw");
   summary.objective_scale = parseLongField(fields, "objective_scale");
@@ -439,8 +465,22 @@ void requireEqual(const SolveSummary &distributed,
 
   check(distributed.status, reference.status, "status");
   check(distributed.stop_reason, reference.stop_reason, "stop_reason");
+  check(distributed.final_objective_raw, reference.final_objective_raw,
+        "final_objective_raw");
+  check(distributed.final_certified_lower_bound_raw,
+        reference.final_certified_lower_bound_raw,
+        "final_certified_lower_bound_raw");
+  check(distributed.final_regularized_objective_raw,
+        reference.final_regularized_objective_raw,
+        "final_regularized_objective_raw");
+  check(distributed.best_selected_objective_raw,
+        reference.best_selected_objective_raw,
+        "best_selected_objective_raw");
   check(distributed.best_lower_bound_raw, reference.best_lower_bound_raw,
         "best_lower_bound_raw");
+  check(distributed.best_certified_lower_bound_raw,
+        reference.best_certified_lower_bound_raw,
+        "best_certified_lower_bound_raw");
   check(distributed.best_regularized_objective_raw,
         reference.best_regularized_objective_raw,
         "best_regularized_objective_raw");
@@ -579,6 +619,12 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
               run.output);
   require(run.output.find(" regularized_objective ") != std::string::npos,
           "progress telemetry should include regularized objective\n" +
+              run.output);
+  require(run.output.find(" selected_objective ") != std::string::npos,
+          "progress telemetry should include selected objective\n" +
+              run.output);
+  require(run.output.find(" certified_lower_bound ") != std::string::npos,
+          "progress telemetry should include certified lower bound\n" +
               run.output);
   require(run.output.find(" worker_solve_wall_us ") != std::string::npos,
           "progress telemetry should include worker solve timing\n" +

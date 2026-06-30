@@ -328,8 +328,15 @@ void printProgress(
             << " total_iteration " << record.total_iteration
             << " scale " << record.scale
             << " iteration " << record.iteration
+            << " selected_objective " << record.selected_objective
+            << " best_selected_objective "
+            << record.best_selected_objective
             << " lower_bound " << record.lower_bound
             << " best_lower_bound " << record.best_lower_bound
+            << " certified_lower_bound "
+            << record.certified_lower_bound
+            << " best_certified_lower_bound "
+            << record.best_certified_lower_bound
             << " regularized_objective " << record.regularized_objective
             << " best_regularized_objective "
             << record.best_regularized_objective
@@ -446,8 +453,27 @@ int main(int argc, char **argv) {
 
     std::cout << "status " << static_cast<int>(result.status) << "\n";
     std::cout << "stop_reason " << static_cast<int>(result.stop_reason) << "\n";
+    std::cout << "final_objective " << result.final_selected_objective << "\n";
+    std::cout << "final_objective_raw "
+              << result.final_selected_objective_raw << "\n";
+    std::cout << "final_certified_lower_bound "
+              << result.final_certified_lower_bound << "\n";
+    std::cout << "final_certified_lower_bound_raw "
+              << result.final_certified_lower_bound_raw << "\n";
+    std::cout << "final_regularized_objective "
+              << result.final_regularized_objective << "\n";
+    std::cout << "final_regularized_objective_raw "
+              << result.final_regularized_objective_raw << "\n";
+    std::cout << "best_selected_objective "
+              << result.best_selected_objective << "\n";
+    std::cout << "best_selected_objective_raw "
+              << result.best_selected_objective_raw << "\n";
     std::cout << "best_lower_bound " << result.best_lower_bound << "\n";
     std::cout << "best_lower_bound_raw " << result.best_lower_bound_raw << "\n";
+    std::cout << "best_certified_lower_bound "
+              << result.best_certified_lower_bound << "\n";
+    std::cout << "best_certified_lower_bound_raw "
+              << result.best_certified_lower_bound_raw << "\n";
     std::cout << "best_regularized_objective "
               << result.best_regularized_objective << "\n";
     std::cout << "best_regularized_objective_raw "
