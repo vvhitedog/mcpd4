@@ -719,3 +719,48 @@
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `cmake --build build -j`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-06-30 01:23 PDT
+
+- Added streaming optimizer-health telemetry to the productized coordinator:
+  - new `PartitionWorkerCoordinatorOptions::progress_report_interval`;
+  - new `progress_callback` hook carrying `PartitionWorkerProgressRecord`;
+  - `mcpd3_coordinator --progress-every N`;
+  - `MCPD3_PROGRESS_EVERY` support in
+    `scripts/run_local_process_benchmark.sh`.
+- Product progress output now reports, per interval:
+  - total iteration, scale, lower bound, best lower bound, disagreement count
+    and norm;
+  - step size and effective step size;
+  - regularization strength, budget, contribution, and active anchor counts;
+  - cumulative solve RPC wall time, worker-reported solve wall time, and RPC
+    overhead;
+  - one `progress_worker` line per worker with worker name, solve count, solve
+    RPC wall time, worker solve wall time, and RPC overhead.
+- Added tests:
+  - submodule callback enabled/disabled/invalid-interval coverage;
+  - product process integration coverage proving TCP coordinator progress and
+    per-worker timing lines are emitted.
+- Fixed a submodule include hygiene issue: `graph/dimacs.h` now includes
+  `<stdexcept>` because it throws `std::runtime_error` when included directly.
+- Ran an `adhead.n6c10` saturated telemetry smoke with 4 workers, 10
+  partitions, `M=10000`, `--progress-every 1`, and opt-in saturation. The run
+  was intentionally stopped after the first progress record.
+- The first adhead progress record showed the health issue directly:
+  - `disagreement_count=456270`;
+  - `solve_round_count=10`;
+  - total solve RPC wall `107233556 us`;
+  - worker solve wall `106982322 us`;
+  - worker 3 solve wall about `69.7 s`;
+  - worker 4 solve wall about `35.5 s`;
+  - workers 1 and 2 were each under `1 s`.
+- Conclusion from the smoke: the current run is not wedged, but static
+  partition ownership plus the round barrier creates severe per-round load
+  imbalance on `adhead`.
+- Verified:
+  - `cmake --build third_party/mcpd3/build -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `MCPD3_PROGRESS_EVERY=1` adhead saturated smoke via
+    `scripts/run_local_process_benchmark.sh`.

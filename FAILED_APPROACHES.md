@@ -309,3 +309,17 @@
   dispatch fix, the coordinator contacted workers serially, so a 4-worker
   `adhead` run showed one worker at 100% CPU while the coordinator and the
   other workers were idle.
+
+## 2026-06-30 01:23 PDT
+
+- Do not diagnose a one-hot-worker snapshot as a deadlock without checking
+  round-level progress. After concurrent dispatch, `adhead.n6c10` still shows
+  barrier tails where one worker finishes a much more expensive partition set
+  while other workers wait for the next coordinator round.
+- Do not rely on `ps %CPU` alone for solver health. It is lifetime-averaged
+  and can miss short round-boundary changes. Use `--progress-every N` for
+  optimizer fields and `pidstat` only as a process-level liveness/imbalance
+  supplement.
+- Do not treat the current `M=10000` saturated adhead telemetry smoke as an
+  exact benchmark. It clipped `328844` capacities before solving; the smoke was
+  only to validate health telemetry and identify load imbalance.

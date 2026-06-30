@@ -192,8 +192,11 @@ The MVP is complete when:
 - [ ] Handle malformed protocol messages.
 - [x] Handle worker-reported solver errors.
 - [x] Add coordinator timeout behavior with tests.
-- [ ] Add logging that identifies worker name, partition ids, round id, and
-  message type for failures.
+- [x] Add streaming optimizer-health telemetry with worker names, round counts,
+  per-worker solve timing, lower-bound progress, disagreement count, and
+  regularization diagnostics.
+- [ ] Add failure logging that identifies worker name, partition ids, round id,
+  and message type for protocol/solver failures.
 
 ### Stage 7: Docs And Runbook
 
@@ -229,6 +232,11 @@ The MVP is complete when:
 - Product coordinator solves are dispatched concurrently across active worker
   processes. If one worker owns multiple packages, that worker still solves
   its own package stream sequentially.
+- `mcpd3_coordinator --progress-every N` streams per-round optimizer health
+  and per-worker timing. On `adhead.n6c10`, this exposed severe static
+  partition load imbalance: the first saturated telemetry-smoke round spent
+  about `69.7 s` on one worker and `35.5 s` on another, while two workers were
+  under `1 s`.
 - `--saturate-capacity-overflow` is an opt-in benchmark/compatibility mode for
   the current 32-bit capacity path. Runs with nonzero
   `capacity_scale_saturation_count` solve a clipped-capacity problem, not the

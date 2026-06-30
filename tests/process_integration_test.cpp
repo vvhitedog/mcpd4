@@ -548,6 +548,38 @@ void capacityOverflowSaturationIsOptIn(const std::string &coordinator_bin,
           "one-partition saturated fixture should finish with agreement");
 }
 
+void progressTelemetryIsStreamed(const std::string &coordinator_bin,
+                                 const std::string &worker_bin,
+                                 const std::string &fixture_dir) {
+  const auto run = runDistributedProcess(
+      coordinator_bin, worker_bin, fixture_dir,
+      CaseConfig{/*name=*/"progress",
+                 /*fixture=*/"hand_bottleneck.max",
+                 /*worker_count=*/2,
+                 /*partition_count=*/2,
+                 /*max_iterations=*/10,
+                 /*num_scales=*/1,
+                 /*initial_step_size=*/10000,
+                 /*capacity_multiplier=*/10000},
+      {"--progress-every", "1"});
+
+  require(run.output.find("progress total_iteration ") != std::string::npos,
+          "progress telemetry should include coordinator progress\n" +
+              run.output);
+  require(run.output.find(" disagreement_count ") != std::string::npos,
+          "progress telemetry should include disagreement count\n" +
+              run.output);
+  require(run.output.find(" worker_solve_wall_us ") != std::string::npos,
+          "progress telemetry should include worker solve timing\n" +
+              run.output);
+  require(run.output.find("progress_worker total_iteration ") !=
+              std::string::npos,
+          "progress telemetry should include per-worker timing lines\n" +
+              run.output);
+  require(run.output.find(" name progress-worker-0 ") != std::string::npos,
+          "progress telemetry should include worker names\n" + run.output);
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -577,6 +609,7 @@ int main(int argc, char **argv) {
     coordinatorAcceptTimeoutIsExposed(coordinator_bin, fixture_dir);
     capacityOverflowSaturationIsOptIn(coordinator_bin, worker_bin,
                                       fixture_dir);
+    progressTelemetryIsStreamed(coordinator_bin, worker_bin, fixture_dir);
   } catch (const std::exception &e) {
     std::cerr << "process_integration_test failed: " << e.what() << "\n";
     return EXIT_FAILURE;

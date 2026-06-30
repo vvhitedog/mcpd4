@@ -52,6 +52,7 @@ struct Config {
   long initial_step_size = 10000;
   long capacity_multiplier = 1;
   long accept_timeout_ms = 24L * 60L * 60L * 1000L;
+  int progress_every = 0;
   std::string ready_file;
   bool saturate_capacity_overflow = false;
   bool directed = false;
@@ -73,6 +74,17 @@ int parseInt(const std::string &value, const std::string &name) {
   return static_cast<int>(parsed);
 }
 
+int parseNonNegativeInt(const std::string &value, const std::string &name) {
+  const long parsed = std::stol(value);
+  if (parsed < 0) {
+    throw std::runtime_error(name + " must be non-negative");
+  }
+  if (parsed > std::numeric_limits<int>::max()) {
+    throw std::runtime_error(name + " exceeds int range");
+  }
+  return static_cast<int>(parsed);
+}
+
 std::uint16_t parsePort(const std::string &value) {
   const long parsed = parseLong(value, "port");
   if (parsed > std::numeric_limits<std::uint16_t>::max()) {
@@ -87,7 +99,8 @@ void usage(const char *argv0) {
       << " DIMACS --port PORT [--bind HOST] [--workers N] [--partitions N]\n"
       << "       [--max-iterations N] [--num-scales N] [--initial-step N]\n"
       << "       [--capacity-multiplier N] [--accept-timeout-ms N]\n"
-      << "       [--ready-file PATH] [--saturate-capacity-overflow]\n"
+      << "       [--progress-every N] [--ready-file PATH]\n"
+      << "       [--saturate-capacity-overflow]\n"
       << "       [--directed]\n";
 }
 
@@ -124,6 +137,8 @@ Config parseArgs(int argc, char **argv) {
       config.capacity_multiplier = parseLong(require_value(arg), arg);
     } else if (arg == "--accept-timeout-ms") {
       config.accept_timeout_ms = parseLong(require_value(arg), arg);
+    } else if (arg == "--progress-every") {
+      config.progress_every = parseNonNegativeInt(require_value(arg), arg);
     } else if (arg == "--ready-file") {
       config.ready_file = require_value(arg);
     } else if (arg == "--saturate-capacity-overflow" ||
@@ -287,6 +302,65 @@ void printCapacityScaleStats(const Config &config,
             << stats.terminal_saturation_count << "\n";
 }
 
+void printProgress(
+    const mcpd3::PartitionWorkerProgressRecord &record,
+    const std::vector<mcpd3_distributed::TcpPartitionWorker *>
+        &remote_workers) {
+  std::uint64_t solve_rpc_us = 0;
+  std::uint64_t worker_solve_us = 0;
+  long solve_count = 0;
+  for (const auto *worker : remote_workers) {
+    const auto &stats = worker->timingStats();
+    solve_rpc_us += stats.solve_round_rpc_wall_us;
+    worker_solve_us += stats.solve_round_worker_wall_us;
+    solve_count += stats.solve_round_count;
+  }
+  const auto worker_rpc_overhead_us =
+      saturatedSubtract(solve_rpc_us, worker_solve_us);
+
+  std::cout << "progress"
+            << " total_iteration " << record.total_iteration
+            << " scale " << record.scale
+            << " iteration " << record.iteration
+            << " lower_bound " << record.lower_bound
+            << " best_lower_bound " << record.best_lower_bound
+            << " disagreement_count " << record.disagreement_count
+            << " disagreement_norm_sq " << record.disagreement_norm_sq
+            << " step_size " << record.step_size
+            << " effective_step_size " << record.effective_step_size
+            << " regularization_strength "
+            << record.regularization_strength
+            << " regularization_budget " << record.regularization_budget
+            << " regularization_contribution "
+            << record.regularization_contribution
+            << " regularization_anchor_sink_count "
+            << record.regularization_anchor_sink_count
+            << " regularization_active_sink_count "
+            << record.regularization_active_sink_count
+            << " iterations_since_improvement "
+            << record.iterations_since_improvement
+            << " solve_round_count " << solve_count
+            << " solve_rpc_wall_us " << solve_rpc_us
+            << " worker_solve_wall_us " << worker_solve_us
+            << " worker_rpc_overhead_us " << worker_rpc_overhead_us << "\n";
+
+  for (const auto *worker : remote_workers) {
+    const auto &stats = worker->timingStats();
+    std::cout << "progress_worker"
+              << " total_iteration " << record.total_iteration
+              << " name " << worker->hello().worker_name
+              << " solve_round_count " << stats.solve_round_count
+              << " solve_rpc_wall_us " << stats.solve_round_rpc_wall_us
+              << " worker_solve_wall_us "
+              << stats.solve_round_worker_wall_us
+              << " worker_rpc_overhead_us "
+              << saturatedSubtract(stats.solve_round_rpc_wall_us,
+                                   stats.solve_round_worker_wall_us)
+              << "\n";
+  }
+  std::cout.flush();
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -344,6 +418,11 @@ int main(int argc, char **argv) {
     solve_options.num_optimization_scales = config.num_scales;
     solve_options.initial_step_size = config.initial_step_size;
     solve_options.objective_scale = config.capacity_multiplier;
+    solve_options.progress_report_interval = config.progress_every;
+    solve_options.progress_callback =
+        [&](const mcpd3::PartitionWorkerProgressRecord &record) {
+          printProgress(record, remote_workers);
+        };
     const auto coordinator_setup_start = std::chrono::steady_clock::now();
     mcpd3::PartitionWorkerCoordinator coordinator(packages, std::move(workers),
                                                   solve_options);

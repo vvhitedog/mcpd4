@@ -15,6 +15,7 @@ Environment overrides:
   MCPD3_CAPACITY_MULTIPLIER    10000
   MCPD3_ACCEPT_TIMEOUT_MS      30000
   MCPD3_READY_TIMEOUT_SEC      300
+  MCPD3_PROGRESS_EVERY         0
   MCPD3_SATURATE_CAPACITY_OVERFLOW  0
 USAGE
   exit 2
@@ -32,6 +33,7 @@ initial_step=${MCPD3_INITIAL_STEP:-10000}
 capacity_multiplier=${MCPD3_CAPACITY_MULTIPLIER:-10000}
 accept_timeout_ms=${MCPD3_ACCEPT_TIMEOUT_MS:-30000}
 ready_timeout_sec=${MCPD3_READY_TIMEOUT_SEC:-300}
+progress_every=${MCPD3_PROGRESS_EVERY:-0}
 saturate_capacity_overflow=${MCPD3_SATURATE_CAPACITY_OVERFLOW:-${MCPD3_TRUNCATE_CAPACITY_OVERFLOW:-0}}
 
 coordinator="${build_dir}/mcpd3_coordinator"
@@ -78,6 +80,7 @@ fi
   --initial-step "$initial_step" \
   --capacity-multiplier "$capacity_multiplier" \
   --accept-timeout-ms "$accept_timeout_ms" \
+  --progress-every "$progress_every" \
   --ready-file "$ready_file" \
   "${extra_args[@]}" \
   "$@" &
