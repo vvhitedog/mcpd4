@@ -241,6 +241,7 @@ void printTiming(const RuntimeTiming &timing,
   std::uint64_t scale_rpc_us = 0;
   long load_count = 0;
   long solve_count = 0;
+  long solve_batch_count = 0;
   long scale_count = 0;
   for (const auto *worker : remote_workers) {
     const auto &stats = worker->timingStats();
@@ -250,6 +251,7 @@ void printTiming(const RuntimeTiming &timing,
     scale_rpc_us += stats.scale_objective_rpc_wall_us;
     load_count += stats.load_partition_count;
     solve_count += stats.solve_round_count;
+    solve_batch_count += stats.solve_round_batch_count;
     scale_count += stats.scale_objective_count;
   }
 
@@ -282,6 +284,8 @@ void printTiming(const RuntimeTiming &timing,
             << "\n";
   std::cout << "timing_load_partition_count " << load_count << "\n";
   std::cout << "timing_solve_round_count " << solve_count << "\n";
+  std::cout << "timing_solve_round_batch_count " << solve_batch_count
+            << "\n";
   std::cout << "timing_scale_objective_count " << scale_count << "\n";
 }
 
@@ -309,11 +313,13 @@ void printProgress(
   std::uint64_t solve_rpc_us = 0;
   std::uint64_t worker_solve_us = 0;
   long solve_count = 0;
+  long solve_batch_count = 0;
   for (const auto *worker : remote_workers) {
     const auto &stats = worker->timingStats();
     solve_rpc_us += stats.solve_round_rpc_wall_us;
     worker_solve_us += stats.solve_round_worker_wall_us;
     solve_count += stats.solve_round_count;
+    solve_batch_count += stats.solve_round_batch_count;
   }
   const auto worker_rpc_overhead_us =
       saturatedSubtract(solve_rpc_us, worker_solve_us);
@@ -340,6 +346,7 @@ void printProgress(
             << " iterations_since_improvement "
             << record.iterations_since_improvement
             << " solve_round_count " << solve_count
+            << " solve_round_batch_count " << solve_batch_count
             << " solve_rpc_wall_us " << solve_rpc_us
             << " worker_solve_wall_us " << worker_solve_us
             << " worker_rpc_overhead_us " << worker_rpc_overhead_us << "\n";
@@ -350,6 +357,8 @@ void printProgress(
               << " total_iteration " << record.total_iteration
               << " name " << worker->hello().worker_name
               << " solve_round_count " << stats.solve_round_count
+              << " solve_round_batch_count "
+              << stats.solve_round_batch_count
               << " solve_rpc_wall_us " << stats.solve_round_rpc_wall_us
               << " worker_solve_wall_us "
               << stats.solve_round_worker_wall_us

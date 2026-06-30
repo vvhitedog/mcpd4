@@ -129,6 +129,30 @@ mcpd3::PartitionSolveResult TcpPartitionWorker::solveRound(
   return timed.result;
 }
 
+std::vector<mcpd3::PartitionSolveResult> TcpPartitionWorker::solveRoundBatch(
+    const std::vector<mcpd3::PartitionSolveRequest> &requests) {
+  if (requests.empty()) {
+    return {};
+  }
+  const auto start = std::chrono::steady_clock::now();
+  sendFrameBytes(socket_, encodeSolveRoundBatchRequest(requests));
+  std::vector<std::uint8_t> frame_bytes;
+  const auto frame = receiveTypedFrame(socket_, &frame_bytes);
+  if (frame.type == MessageType::ERROR) {
+    throw remoteError(frame_bytes);
+  }
+  if (frame.type != MessageType::SOLVE_ROUND_BATCH_RESULT) {
+    throw std::runtime_error("expected SOLVE_ROUND_BATCH_RESULT from worker");
+  }
+  const auto timed = decodeTimedSolveRoundBatchResult(frame_bytes);
+  timing_stats_.solve_round_rpc_wall_us += elapsedUs(start);
+  timing_stats_.solve_round_worker_wall_us += timed.worker_solve_wall_us;
+  timing_stats_.solve_round_count +=
+      static_cast<long>(timed.results.size());
+  ++timing_stats_.solve_round_batch_count;
+  return timed.results;
+}
+
 void TcpPartitionWorker::scaleObjective(long factor) {
   const auto start = std::chrono::steady_clock::now();
   ScaleObjectiveMessage message;
@@ -194,6 +218,15 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
           const auto result = worker.solveRound(request);
           sendFrameBytes(socket, encodeSolveRoundResultWithTiming(
                                      result, elapsedUs(start)));
+        }
+        break;
+      case MessageType::SOLVE_ROUND_BATCH_REQUEST:
+        {
+          const auto requests = decodeSolveRoundBatchRequest(frame_bytes);
+          const auto start = std::chrono::steady_clock::now();
+          const auto results = worker.solveRoundBatch(requests);
+          sendFrameBytes(socket, encodeSolveRoundBatchResultWithTiming(
+                                     results, elapsedUs(start)));
         }
         break;
       case MessageType::SCALE_OBJECTIVE:

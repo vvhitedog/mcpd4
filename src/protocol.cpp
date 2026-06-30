@@ -28,6 +28,8 @@ bool isKnownMessageType(std::uint32_t value) {
   case MessageType::ALPHA_UPDATE:
   case MessageType::STOP:
   case MessageType::ERROR:
+  case MessageType::SOLVE_ROUND_BATCH_REQUEST:
+  case MessageType::SOLVE_ROUND_BATCH_RESULT:
     return true;
   }
   return false;
@@ -261,6 +263,59 @@ mcpd3::ConstraintLabel readConstraintLabel(Reader *reader) {
   return label;
 }
 
+void writeSolveRoundRequestPayload(
+    Writer *writer, const mcpd3::PartitionSolveRequest &message) {
+  writer->writeI64(message.round_id);
+  writer->writeI32(message.partition_id);
+  writer->writeI64(message.scale);
+  writer->writeI32(message.regularization_strength);
+  writer->writeVector<mcpd3::AlphaUpdate>(
+      message.alpha_updates,
+      [&](const auto &update) { writeAlphaUpdate(writer, update); });
+}
+
+mcpd3::PartitionSolveRequest readSolveRoundRequestPayload(Reader *reader) {
+  mcpd3::PartitionSolveRequest message;
+  message.round_id = checkedIntegerCast<long>(reader->readI64());
+  message.partition_id = reader->readI32();
+  message.scale = checkedIntegerCast<long>(reader->readI64());
+  message.regularization_strength = reader->readI32();
+  message.alpha_updates = reader->readVector<mcpd3::AlphaUpdate>(
+      [&] { return readAlphaUpdate(reader); });
+  return message;
+}
+
+void writeSolveRoundResultPayload(
+    Writer *writer, const mcpd3::PartitionSolveResult &message) {
+  writer->writeI64(message.round_id);
+  writer->writeI32(message.partition_id);
+  writer->writeI64(message.lower_bound);
+  writer->writeI64(message.regularization_budget);
+  writer->writeI64(message.regularization_contribution);
+  writer->writeI64(message.regularization_anchor_sink_count);
+  writer->writeI64(message.regularization_active_sink_count);
+  writer->writeVector<mcpd3::ConstraintLabel>(
+      message.constrained_labels,
+      [&](const auto &label) { writeConstraintLabel(writer, label); });
+}
+
+mcpd3::PartitionSolveResult readSolveRoundResultPayload(Reader *reader) {
+  mcpd3::PartitionSolveResult message;
+  message.round_id = checkedIntegerCast<long>(reader->readI64());
+  message.partition_id = reader->readI32();
+  message.lower_bound = checkedIntegerCast<long>(reader->readI64());
+  message.regularization_budget = checkedIntegerCast<long>(reader->readI64());
+  message.regularization_contribution =
+      checkedIntegerCast<long>(reader->readI64());
+  message.regularization_anchor_sink_count =
+      checkedIntegerCast<long>(reader->readI64());
+  message.regularization_active_sink_count =
+      checkedIntegerCast<long>(reader->readI64());
+  message.constrained_labels = reader->readVector<mcpd3::ConstraintLabel>(
+      [&] { return readConstraintLabel(reader); });
+  return message;
+}
+
 } // namespace
 
 std::vector<std::uint8_t> encodeFrame(
@@ -379,13 +434,7 @@ ReadyMessage decodeReady(const std::vector<std::uint8_t> &frame) {
 std::vector<std::uint8_t> encodeSolveRoundRequest(
     const mcpd3::PartitionSolveRequest &message) {
   Writer writer;
-  writer.writeI64(message.round_id);
-  writer.writeI32(message.partition_id);
-  writer.writeI64(message.scale);
-  writer.writeI32(message.regularization_strength);
-  writer.writeVector<mcpd3::AlphaUpdate>(
-      message.alpha_updates,
-      [&](const auto &update) { writeAlphaUpdate(&writer, update); });
+  writeSolveRoundRequestPayload(&writer, message);
   return encodeFrame(MessageType::SOLVE_ROUND_REQUEST, writer.bytes());
 }
 
@@ -393,31 +442,37 @@ mcpd3::PartitionSolveRequest decodeSolveRoundRequest(
     const std::vector<std::uint8_t> &frame) {
   auto decoded = decodeExpectedFrame(frame, MessageType::SOLVE_ROUND_REQUEST);
   Reader reader(decoded.payload);
-  mcpd3::PartitionSolveRequest message;
-  message.round_id = checkedIntegerCast<long>(reader.readI64());
-  message.partition_id = reader.readI32();
-  message.scale = checkedIntegerCast<long>(reader.readI64());
-  message.regularization_strength = reader.readI32();
-  message.alpha_updates = reader.readVector<mcpd3::AlphaUpdate>(
-      [&] { return readAlphaUpdate(&reader); });
+  auto message = readSolveRoundRequestPayload(&reader);
   requireDone(reader);
   return message;
+}
+
+std::vector<std::uint8_t> encodeSolveRoundBatchRequest(
+    const std::vector<mcpd3::PartitionSolveRequest> &messages) {
+  Writer writer;
+  writer.writeVector<mcpd3::PartitionSolveRequest>(
+      messages, [&](const auto &message) {
+        writeSolveRoundRequestPayload(&writer, message);
+      });
+  return encodeFrame(MessageType::SOLVE_ROUND_BATCH_REQUEST, writer.bytes());
+}
+
+std::vector<mcpd3::PartitionSolveRequest> decodeSolveRoundBatchRequest(
+    const std::vector<std::uint8_t> &frame) {
+  auto decoded =
+      decodeExpectedFrame(frame, MessageType::SOLVE_ROUND_BATCH_REQUEST);
+  Reader reader(decoded.payload);
+  auto messages = reader.readVector<mcpd3::PartitionSolveRequest>(
+      [&] { return readSolveRoundRequestPayload(&reader); });
+  requireDone(reader);
+  return messages;
 }
 
 std::vector<std::uint8_t> encodeSolveRoundResultWithTiming(
     const mcpd3::PartitionSolveResult &message,
     std::uint64_t worker_solve_wall_us) {
   Writer writer;
-  writer.writeI64(message.round_id);
-  writer.writeI32(message.partition_id);
-  writer.writeI64(message.lower_bound);
-  writer.writeI64(message.regularization_budget);
-  writer.writeI64(message.regularization_contribution);
-  writer.writeI64(message.regularization_anchor_sink_count);
-  writer.writeI64(message.regularization_active_sink_count);
-  writer.writeVector<mcpd3::ConstraintLabel>(
-      message.constrained_labels,
-      [&](const auto &label) { writeConstraintLabel(&writer, label); });
+  writeSolveRoundResultPayload(&writer, message);
   writer.writeU64(worker_solve_wall_us);
   return encodeFrame(MessageType::SOLVE_ROUND_RESULT, writer.bytes());
 }
@@ -433,19 +488,7 @@ TimedSolveRoundResult decodeTimedSolveRoundResult(
   auto decoded = decodeExpectedFrame(frame, MessageType::SOLVE_ROUND_RESULT);
   Reader reader(decoded.payload);
   TimedSolveRoundResult timed;
-  auto &message = timed.result;
-  message.round_id = checkedIntegerCast<long>(reader.readI64());
-  message.partition_id = reader.readI32();
-  message.lower_bound = checkedIntegerCast<long>(reader.readI64());
-  message.regularization_budget = checkedIntegerCast<long>(reader.readI64());
-  message.regularization_contribution =
-      checkedIntegerCast<long>(reader.readI64());
-  message.regularization_anchor_sink_count =
-      checkedIntegerCast<long>(reader.readI64());
-  message.regularization_active_sink_count =
-      checkedIntegerCast<long>(reader.readI64());
-  message.constrained_labels = reader.readVector<mcpd3::ConstraintLabel>(
-      [&] { return readConstraintLabel(&reader); });
+  timed.result = readSolveRoundResultPayload(&reader);
   if (!reader.empty()) {
     timed.worker_solve_wall_us = reader.readU64();
   }
@@ -456,6 +499,44 @@ TimedSolveRoundResult decodeTimedSolveRoundResult(
 mcpd3::PartitionSolveResult decodeSolveRoundResult(
     const std::vector<std::uint8_t> &frame) {
   return decodeTimedSolveRoundResult(frame).result;
+}
+
+std::vector<std::uint8_t> encodeSolveRoundBatchResultWithTiming(
+    const std::vector<mcpd3::PartitionSolveResult> &messages,
+    std::uint64_t worker_solve_wall_us) {
+  Writer writer;
+  writer.writeVector<mcpd3::PartitionSolveResult>(
+      messages, [&](const auto &message) {
+        writeSolveRoundResultPayload(&writer, message);
+      });
+  writer.writeU64(worker_solve_wall_us);
+  return encodeFrame(MessageType::SOLVE_ROUND_BATCH_RESULT, writer.bytes());
+}
+
+std::vector<std::uint8_t> encodeSolveRoundBatchResult(
+    const std::vector<mcpd3::PartitionSolveResult> &messages) {
+  return encodeSolveRoundBatchResultWithTiming(messages,
+                                               /*worker_solve_wall_us=*/0);
+}
+
+TimedSolveRoundBatchResult decodeTimedSolveRoundBatchResult(
+    const std::vector<std::uint8_t> &frame) {
+  auto decoded =
+      decodeExpectedFrame(frame, MessageType::SOLVE_ROUND_BATCH_RESULT);
+  Reader reader(decoded.payload);
+  TimedSolveRoundBatchResult timed;
+  timed.results = reader.readVector<mcpd3::PartitionSolveResult>(
+      [&] { return readSolveRoundResultPayload(&reader); });
+  if (!reader.empty()) {
+    timed.worker_solve_wall_us = reader.readU64();
+  }
+  requireDone(reader);
+  return timed;
+}
+
+std::vector<mcpd3::PartitionSolveResult> decodeSolveRoundBatchResult(
+    const std::vector<std::uint8_t> &frame) {
+  return decodeTimedSolveRoundBatchResult(frame).results;
 }
 
 std::vector<std::uint8_t> encodeScaleObjective(

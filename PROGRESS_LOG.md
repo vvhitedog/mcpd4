@@ -1,5 +1,61 @@
 # Progress Log
 
+## 2026-06-30 10:09 PDT
+
+- Implemented batched multi-partition worker solves.
+- In `third_party/mcpd3`:
+  - added `PartitionWorker::solveRoundBatch()` with a default single-request
+    fallback;
+  - added concurrent distinct-partition batch solving to
+    `InProcessPartitionWorker`;
+  - changed `PartitionWorkerCoordinator::runRound()` to send one batch per
+    worker per round and scatter results by returned partition id;
+  - added guards for wrong batch result counts and results for unowned
+    partitions.
+- Added submodule tests for:
+  - coordinator batching when one worker owns multiple partitions;
+  - malformed batch responses;
+  - in-process batch solving of distinct loaded partitions;
+  - duplicate partition rejection in one batch.
+- Committed and pushed mcpd3 submodule branch `partition-worker-api`:
+  `d19b319 Batch partition worker solve requests`.
+- In the product repo:
+  - added protocol v2 batch frames:
+    `SOLVE_ROUND_BATCH_REQUEST` and `SOLVE_ROUND_BATCH_RESULT`;
+  - added TCP `solveRoundBatch()` RPC support;
+  - taught worker processes to execute a batch request;
+  - added `solve_round_batch_count` timing/progress telemetry.
+- Added product tests for:
+  - batch protocol serialization round trips;
+  - explicit TCP batch solve RPCs;
+  - coordinator use of batch RPCs through a remote worker;
+  - process-level progress/final telemetry for batch counts.
+- Exact `adhead.n6c10` distributed/TCP benchmark with 4 workers and 10
+  partitions now completes correctly:
+  - output:
+    `benchmark_results/adhead-distributed-exact-w4-batch-20260630-100447.out`;
+  - `best_lower_bound 48373`;
+  - `best_lower_bound_raw 48373000`;
+  - `objective_scale 1000`;
+  - `objective_scale_promotions 1`;
+  - `final_disagreement_count 0`;
+  - `final_regularization_budget 180`;
+  - `capacity_scale_saturation_count 0`;
+  - `timing_solve_round_count 1820`;
+  - `timing_solve_round_batch_count 728`;
+  - wall time `3:45.06`;
+  - max RSS `6342852 kB`.
+- The 4-worker run initially exceeded the `M=100` regularization budget during
+  the schedule, promoted to `M=1000`, and finished with final budget below the
+  active objective scale.
+- Verified:
+  - `cmake --build third_party/mcpd3/build -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - exact distributed/TCP adhead run with 4 workers, 10 partitions, and no
+    saturation.
+
 ## 2026-06-29 00:24:08 PDT
 
 - Created product branch `network-free-worker-api` from `main`.

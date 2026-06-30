@@ -572,12 +572,18 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
   require(run.output.find(" worker_solve_wall_us ") != std::string::npos,
           "progress telemetry should include worker solve timing\n" +
               run.output);
+  require(run.output.find(" solve_round_batch_count ") != std::string::npos,
+          "progress telemetry should include batch solve count\n" +
+              run.output);
   require(run.output.find("progress_worker total_iteration ") !=
               std::string::npos,
           "progress telemetry should include per-worker timing lines\n" +
               run.output);
   require(run.output.find(" name progress-worker-0 ") != std::string::npos,
           "progress telemetry should include worker names\n" + run.output);
+  require(run.output.find("timing_solve_round_batch_count ") !=
+              std::string::npos,
+          "final timing should include batch solve count\n" + run.output);
 }
 
 } // namespace

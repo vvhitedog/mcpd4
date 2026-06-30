@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-30 00:12 PDT
+Last updated: 2026-06-30 10:09 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -12,7 +12,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
 - Current submodule checkpoint:
-  `f58cf42 Dispatch worker solves concurrently`
+  `d19b319 Batch partition worker solve requests`
 
 ## MVP Definition
 
@@ -145,6 +145,8 @@ The MVP is complete when:
   - `READY`;
   - `SOLVE_ROUND_REQUEST`;
   - `SOLVE_ROUND_RESULT`;
+  - `SOLVE_ROUND_BATCH_REQUEST`;
+  - `SOLVE_ROUND_BATCH_RESULT`;
   - `SCALE_OBJECTIVE`;
   - `ALPHA_UPDATE`;
   - `STOP`;
@@ -163,6 +165,8 @@ The MVP is complete when:
 - [x] Send partition packages once during setup.
 - [x] Implement per-round solve request, result gather, alpha update, and stop
   broadcast.
+- [x] Implement batched per-worker solve requests so one worker can own and
+  solve multiple partition packages in one round trip.
 - [x] Implement remote objective-scale promotion with `SCALE_OBJECTIVE`.
 - [x] Ensure graph structure is not resent during optimization rounds.
 - [x] Add clear worker-side and coordinator-side error messages.
@@ -184,6 +188,8 @@ The MVP is complete when:
   - regularization diagnostics.
 - [x] Add optional local benchmark hook for bunny data without making the repo
   depend on local experimental files.
+- [x] Validate exact `adhead.n6c10` distributed/TCP run with fewer worker
+  processes than partitions using batched requests.
 
 ### Stage 6: Failure Handling And Operational Readiness
 
@@ -193,8 +199,8 @@ The MVP is complete when:
 - [x] Handle worker-reported solver errors.
 - [x] Add coordinator timeout behavior with tests.
 - [x] Add streaming optimizer-health telemetry with worker names, round counts,
-  per-worker solve timing, lower-bound progress, disagreement count, and
-  regularization diagnostics.
+  per-worker solve timing, batch RPC counts, lower-bound progress,
+  disagreement count, and regularization diagnostics.
 - [ ] Add failure logging that identifies worker name, partition ids, round id,
   and message type for protocol/solver failures.
 
@@ -217,8 +223,9 @@ The MVP is complete when:
 ## Current Limitations
 
 - TCP runtime exists for the localhost/IPv4 MVP and exposes an explicit bind
-  address, but it is still sequential and blocking. It does not yet implement
-  reconnects, heartbeats, worker replacement, or partial-progress recovery.
+  address. It uses blocking socket RPCs per worker connection but dispatches
+  active workers concurrently. It does not yet implement reconnects,
+  heartbeats, worker replacement, or partial-progress recovery.
 - Process-level coordinator/worker tests now cover three committed tiny
   DIMACS fixtures, but no committed medium benchmark fixture exists. Local
   benchmark runs should use `scripts/run_local_process_benchmark.sh` with a
@@ -232,17 +239,17 @@ The MVP is complete when:
   `TcpPartitionWorker` support one worker object/process owning multiple
   partition packages.
 - Product coordinator solves are dispatched concurrently across active worker
-  processes. If one worker owns multiple packages, that worker still solves
-  its own package stream sequentially.
-- For local performance parity with the monolithic thread-pool path, use one
-  worker process per partition for now. The current protocol does not yet
-  implement work stealing or a batched multi-partition request that lets one
-  worker solve several owned partitions concurrently.
+  processes. If one worker owns multiple packages, the coordinator now sends a
+  single batch RPC and the worker solves the owned partition batch
+  concurrently.
+- Worker ownership is still static for a run. The current protocol does not
+  implement dynamic work stealing, repartitioning, or migration of a slow
+  worker's partitions to another process.
 - `mcpd3_coordinator --progress-every N` streams per-round optimizer health
-  and per-worker timing. On `adhead.n6c10`, this exposed severe static
-  partition load imbalance: the first saturated telemetry-smoke round spent
-  about `69.7 s` on one worker and `35.5 s` on another, while two workers were
-  under `1 s`.
+  and per-worker timing, including solve counts and batch RPC counts. On
+  `adhead.n6c10`, the current exact 4-worker/10-partition batched path reaches
+  the same objective as the 10-worker exact run with zero disagreement, but
+  static ownership can still leave partition-balance tails.
 - `--saturate-capacity-overflow` is an opt-in benchmark/compatibility mode for
   the current 32-bit capacity path. Runs with nonzero
   `capacity_scale_saturation_count` solve a clipped-capacity problem, not the

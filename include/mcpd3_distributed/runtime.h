@@ -11,7 +11,7 @@
 
 namespace mcpd3_distributed {
 
-constexpr std::uint32_t kProtocolVersion = 1;
+constexpr std::uint32_t kProtocolVersion = 2;
 
 struct TcpPartitionWorkerTimingStats {
   std::uint64_t load_partition_rpc_wall_us = 0;
@@ -20,6 +20,7 @@ struct TcpPartitionWorkerTimingStats {
   std::uint64_t scale_objective_rpc_wall_us = 0;
   long load_partition_count = 0;
   long solve_round_count = 0;
+  long solve_round_batch_count = 0;
   long scale_objective_count = 0;
 };
 
@@ -30,6 +31,8 @@ public:
   void loadPartition(const mcpd3::PartitionPackage &package) override;
   mcpd3::PartitionSolveResult solveRound(
       const mcpd3::PartitionSolveRequest &request) override;
+  std::vector<mcpd3::PartitionSolveResult> solveRoundBatch(
+      const std::vector<mcpd3::PartitionSolveRequest> &requests) override;
   void scaleObjective(long factor) override;
 
   void stop(std::uint32_t reason = 0, const std::string &message = "");

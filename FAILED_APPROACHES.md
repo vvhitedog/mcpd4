@@ -340,3 +340,18 @@
 - Do not resend full alpha state every round. Most alpha records are unchanged
   after early iterations; dirty-only alpha sync reduced exact adhead cumulative
   worker RPC overhead from `87912105 us` to `28968042 us`.
+
+## 2026-06-30 10:09 PDT
+
+- The prior one-worker-per-partition comparison rule is obsolete after the
+  batched worker RPC implementation. Do not use older 4-worker/10-partition
+  results from the per-partition RPC path as representative of current
+  performance.
+- Do not confuse fixed ownership batching with dynamic load balancing. A
+  worker can now receive one batch and solve its owned partitions concurrently,
+  but partition ownership is still static for the run; work stealing and
+  repartitioning remain future work.
+- Do not interpret summed `timing_coordinator_wait_worker_us` as elapsed wall
+  time. It is accumulated across parallel worker RPCs and can exceed
+  `timing_solve_wall_us`; use the wall-time fields plus per-worker progress
+  timing to diagnose imbalance.

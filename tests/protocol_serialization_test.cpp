@@ -200,6 +200,55 @@ void roundTripsSolveRoundRequest() {
   }
 }
 
+void roundTripsSolveRoundBatchRequest() {
+  mcpd3::PartitionSolveRequest first;
+  first.round_id = 123;
+  first.partition_id = 9;
+  first.scale = 1000;
+  first.regularization_strength = 10;
+  first.alpha_updates.push_back(
+      mcpd3::AlphaUpdate{/*constraint_id=*/1,
+                          /*alpha=*/-2,
+                          /*last_alpha=*/3,
+                          /*alpha_momentum=*/0.75f});
+
+  mcpd3::PartitionSolveRequest second;
+  second.round_id = 124;
+  second.partition_id = 10;
+  second.scale = 100;
+  second.regularization_strength = 0;
+  second.alpha_updates.push_back(
+      mcpd3::AlphaUpdate{/*constraint_id=*/4,
+                          /*alpha=*/5,
+                          /*last_alpha=*/-6,
+                          /*alpha_momentum=*/-1.5f});
+
+  const std::vector<mcpd3::PartitionSolveRequest> messages{first, second};
+  const auto decoded = mcpd3_distributed::decodeSolveRoundBatchRequest(
+      mcpd3_distributed::encodeSolveRoundBatchRequest(messages));
+
+  require(decoded.size() == messages.size(),
+          "batch request count mismatch");
+  for (size_t i = 0; i < messages.size(); ++i) {
+    require(decoded[i].round_id == messages[i].round_id,
+            "batch request round mismatch");
+    require(decoded[i].partition_id == messages[i].partition_id,
+            "batch request partition mismatch");
+    require(decoded[i].scale == messages[i].scale,
+            "batch request scale mismatch");
+    require(decoded[i].regularization_strength ==
+                messages[i].regularization_strength,
+            "batch request regularization mismatch");
+    require(decoded[i].alpha_updates.size() ==
+                messages[i].alpha_updates.size(),
+            "batch request alpha count mismatch");
+    for (size_t j = 0; j < messages[i].alpha_updates.size(); ++j) {
+      requireAlphaUpdateEqual(decoded[i].alpha_updates[j],
+                              messages[i].alpha_updates[j]);
+    }
+  }
+}
+
 void roundTripsSolveRoundResult() {
   mcpd3::PartitionSolveResult message;
   message.round_id = 77;
@@ -259,6 +308,85 @@ void roundTripsSolveRoundResult() {
           "timed result round mismatch");
   require(decoded_timed.worker_solve_wall_us == 12345,
           "timed result worker solve timing mismatch");
+}
+
+void roundTripsSolveRoundBatchResult() {
+  mcpd3::PartitionSolveResult first;
+  first.round_id = 77;
+  first.partition_id = 8;
+  first.lower_bound = -100;
+  first.regularization_budget = 11;
+  first.regularization_contribution = 7;
+  first.regularization_anchor_sink_count = 5;
+  first.regularization_active_sink_count = 3;
+  first.constrained_labels.push_back(
+      mcpd3::ConstraintLabel{/*constraint_id=*/10,
+                              /*global_node_id=*/20,
+                              /*local_index=*/1,
+                              /*label=*/0});
+
+  mcpd3::PartitionSolveResult second;
+  second.round_id = 78;
+  second.partition_id = 9;
+  second.lower_bound = 200;
+  second.regularization_budget = 13;
+  second.regularization_contribution = 2;
+  second.regularization_anchor_sink_count = 1;
+  second.regularization_active_sink_count = 1;
+  second.constrained_labels.push_back(
+      mcpd3::ConstraintLabel{/*constraint_id=*/11,
+                              /*global_node_id=*/21,
+                              /*local_index=*/2,
+                              /*label=*/1});
+
+  const std::vector<mcpd3::PartitionSolveResult> messages{first, second};
+  const auto decoded = mcpd3_distributed::decodeSolveRoundBatchResult(
+      mcpd3_distributed::encodeSolveRoundBatchResult(messages));
+  require(decoded.size() == messages.size(), "batch result count mismatch");
+  for (size_t i = 0; i < messages.size(); ++i) {
+    require(decoded[i].round_id == messages[i].round_id,
+            "batch result round mismatch");
+    require(decoded[i].partition_id == messages[i].partition_id,
+            "batch result partition mismatch");
+    require(decoded[i].lower_bound == messages[i].lower_bound,
+            "batch result lower bound mismatch");
+    require(decoded[i].regularization_budget ==
+                messages[i].regularization_budget,
+            "batch result budget mismatch");
+    require(decoded[i].regularization_contribution ==
+                messages[i].regularization_contribution,
+            "batch result contribution mismatch");
+    require(decoded[i].regularization_anchor_sink_count ==
+                messages[i].regularization_anchor_sink_count,
+            "batch result anchor count mismatch");
+    require(decoded[i].regularization_active_sink_count ==
+                messages[i].regularization_active_sink_count,
+            "batch result active count mismatch");
+    require(decoded[i].constrained_labels.size() ==
+                messages[i].constrained_labels.size(),
+            "batch result label count mismatch");
+    for (size_t j = 0; j < messages[i].constrained_labels.size(); ++j) {
+      requireLabelEqual(decoded[i].constrained_labels[j],
+                        messages[i].constrained_labels[j]);
+    }
+  }
+
+  const auto decoded_default_timing =
+      mcpd3_distributed::decodeTimedSolveRoundBatchResult(
+          mcpd3_distributed::encodeSolveRoundBatchResult(messages));
+  require(decoded_default_timing.worker_solve_wall_us == 0,
+          "default batch timing should be zero");
+
+  const auto decoded_timed =
+      mcpd3_distributed::decodeTimedSolveRoundBatchResult(
+          mcpd3_distributed::encodeSolveRoundBatchResultWithTiming(
+              messages, /*worker_solve_wall_us=*/56789));
+  require(decoded_timed.results.size() == messages.size(),
+          "timed batch result count mismatch");
+  require(decoded_timed.results[1].partition_id == second.partition_id,
+          "timed batch result payload mismatch");
+  require(decoded_timed.worker_solve_wall_us == 56789,
+          "timed batch worker solve timing mismatch");
 }
 
 void roundTripsScaleObjective() {
@@ -352,7 +480,9 @@ int main() {
     roundTripsPartitionPackage();
     roundTripsReady();
     roundTripsSolveRoundRequest();
+    roundTripsSolveRoundBatchRequest();
     roundTripsSolveRoundResult();
+    roundTripsSolveRoundBatchResult();
     roundTripsScaleObjective();
     roundTripsAlphaUpdate();
     roundTripsStop();

@@ -18,6 +18,8 @@ enum class MessageType : std::uint32_t {
   ALPHA_UPDATE = 7,
   STOP = 8,
   ERROR = 9,
+  SOLVE_ROUND_BATCH_REQUEST = 10,
+  SOLVE_ROUND_BATCH_RESULT = 11,
 };
 
 struct Frame {
@@ -64,6 +66,11 @@ struct TimedSolveRoundResult {
   std::uint64_t worker_solve_wall_us = 0;
 };
 
+struct TimedSolveRoundBatchResult {
+  std::vector<mcpd3::PartitionSolveResult> results;
+  std::uint64_t worker_solve_wall_us = 0;
+};
+
 std::vector<std::uint8_t> encodeFrame(MessageType type,
                                       const std::vector<std::uint8_t> &payload);
 Frame decodeFrame(const std::vector<std::uint8_t> &bytes);
@@ -83,6 +90,10 @@ std::vector<std::uint8_t> encodeSolveRoundRequest(
     const mcpd3::PartitionSolveRequest &message);
 mcpd3::PartitionSolveRequest decodeSolveRoundRequest(
     const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodeSolveRoundBatchRequest(
+    const std::vector<mcpd3::PartitionSolveRequest> &messages);
+std::vector<mcpd3::PartitionSolveRequest> decodeSolveRoundBatchRequest(
+    const std::vector<std::uint8_t> &frame);
 
 std::vector<std::uint8_t> encodeSolveRoundResult(
     const mcpd3::PartitionSolveResult &message);
@@ -92,6 +103,15 @@ std::vector<std::uint8_t> encodeSolveRoundResultWithTiming(
 mcpd3::PartitionSolveResult decodeSolveRoundResult(
     const std::vector<std::uint8_t> &frame);
 TimedSolveRoundResult decodeTimedSolveRoundResult(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodeSolveRoundBatchResult(
+    const std::vector<mcpd3::PartitionSolveResult> &messages);
+std::vector<std::uint8_t> encodeSolveRoundBatchResultWithTiming(
+    const std::vector<mcpd3::PartitionSolveResult> &messages,
+    std::uint64_t worker_solve_wall_us);
+std::vector<mcpd3::PartitionSolveResult> decodeSolveRoundBatchResult(
+    const std::vector<std::uint8_t> &frame);
+TimedSolveRoundBatchResult decodeTimedSolveRoundBatchResult(
     const std::vector<std::uint8_t> &frame);
 
 std::vector<std::uint8_t> encodeScaleObjective(

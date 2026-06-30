@@ -250,11 +250,52 @@ void remoteWorkerScalesLoadedObjective() {
             "remote timing should count partition loads");
     require(stats.solve_round_count == 2,
             "remote timing should count solve rounds");
+    require(stats.solve_round_batch_count == 0,
+            "direct single solve should not count as a batch RPC");
     require(stats.scale_objective_count == 1,
             "remote timing should count objective scaling");
     require(stats.solve_round_rpc_wall_us >=
                 stats.solve_round_worker_wall_us,
             "remote timing should split RPC and worker solve time");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
+void remoteWorkerSolvesExplicitBatch() {
+  auto listener = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(&listener, &client, "batch-worker");
+  try {
+    for (const auto &package : makeTieBreakRegularizationPackages()) {
+      worker->loadPartition(package);
+    }
+
+    mcpd3::PartitionSolveRequest first;
+    first.round_id = 3;
+    first.partition_id = 0;
+    first.scale = 100;
+    first.regularization_strength = 0;
+
+    mcpd3::PartitionSolveRequest second = first;
+    second.partition_id = 1;
+
+    const auto results = worker->solveRoundBatch({first, second});
+    require(results.size() == 2,
+            "remote batch should return one result per request");
+    require(results[0].partition_id == 0 && results[1].partition_id == 1,
+            "remote batch should preserve partition result order");
+    require(results[0].round_id == 3 && results[1].round_id == 3,
+            "remote batch should preserve round ids");
+    require(worker->timingStats().solve_round_count == 2,
+            "remote batch timing should count solved partitions");
+    require(worker->timingStats().solve_round_batch_count == 1,
+            "remote batch timing should count batch RPCs");
+    require(worker->timingStats().solve_round_rpc_wall_us >=
+                worker->timingStats().solve_round_worker_wall_us,
+            "remote batch timing should split RPC and worker solve time");
     stopAndJoin(worker.get(), client);
   } catch (...) {
     stopAndJoin(worker.get(), client);
@@ -292,6 +333,12 @@ void remoteWorkerCoordinatorSolvesRegularizedAgreement() {
             "remote worker coordinator should finish with no disagreement");
     require(result.final_regularization_budget == 10,
             "remote worker should preserve regularization diagnostics");
+    require(remote_ptr->timingStats().solve_round_batch_count ==
+                result.total_iterations,
+            "single remote worker should receive one solve batch per round");
+    require(remote_ptr->timingStats().solve_round_count ==
+                result.total_iterations * 2,
+            "single remote worker should solve both partitions in each batch");
     remote_ptr->stop(/*reason=*/0, "coordinator test complete");
     client->joinAndRethrow();
     delete client;
@@ -363,6 +410,7 @@ int main() {
     rejectsInvalidWorkerHello();
     remoteWorkerReportsErrorsAsExceptions();
     remoteWorkerScalesLoadedObjective();
+    remoteWorkerSolvesExplicitBatch();
     remoteWorkerCoordinatorSolvesRegularizedAgreement();
     remoteWorkerCoordinatorPromotesObjectiveScale();
   } catch (const std::exception &e) {
