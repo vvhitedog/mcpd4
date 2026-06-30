@@ -1,6 +1,7 @@
 #include <mcpd3_distributed/runtime.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <stdexcept>
@@ -86,6 +87,13 @@ std::string defaultTempPath() {
                                                  : std::string("/tmp");
 }
 
+std::uint64_t elapsedUs(std::chrono::steady_clock::time_point start) {
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now() - start)
+          .count());
+}
+
 } // namespace
 
 TcpPartitionWorker::TcpPartitionWorker(SocketHandle socket, HelloMessage hello)
@@ -95,12 +103,16 @@ TcpPartitionWorker::TcpPartitionWorker(SocketHandle socket, HelloMessage hello)
 
 void TcpPartitionWorker::loadPartition(
     const mcpd3::PartitionPackage &package) {
+  const auto start = std::chrono::steady_clock::now();
   sendFrameBytes(socket_, encodePartitionPackage(package));
   (void)receiveReadyOrThrow(socket_);
+  timing_stats_.load_partition_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.load_partition_count;
 }
 
 mcpd3::PartitionSolveResult TcpPartitionWorker::solveRound(
     const mcpd3::PartitionSolveRequest &request) {
+  const auto start = std::chrono::steady_clock::now();
   sendFrameBytes(socket_, encodeSolveRoundRequest(request));
   std::vector<std::uint8_t> frame_bytes;
   const auto frame = receiveTypedFrame(socket_, &frame_bytes);
@@ -110,14 +122,21 @@ mcpd3::PartitionSolveResult TcpPartitionWorker::solveRound(
   if (frame.type != MessageType::SOLVE_ROUND_RESULT) {
     throw std::runtime_error("expected SOLVE_ROUND_RESULT from worker");
   }
-  return decodeSolveRoundResult(frame_bytes);
+  const auto timed = decodeTimedSolveRoundResult(frame_bytes);
+  timing_stats_.solve_round_rpc_wall_us += elapsedUs(start);
+  timing_stats_.solve_round_worker_wall_us += timed.worker_solve_wall_us;
+  ++timing_stats_.solve_round_count;
+  return timed.result;
 }
 
 void TcpPartitionWorker::scaleObjective(long factor) {
+  const auto start = std::chrono::steady_clock::now();
   ScaleObjectiveMessage message;
   message.factor = factor;
   sendFrameBytes(socket_, encodeScaleObjective(message));
   (void)receiveReadyOrThrow(socket_);
+  timing_stats_.scale_objective_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.scale_objective_count;
 }
 
 void TcpPartitionWorker::stop(std::uint32_t reason,
@@ -169,8 +188,13 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
         sendReady(socket, hello.worker_name);
         break;
       case MessageType::SOLVE_ROUND_REQUEST:
-        sendFrameBytes(socket, encodeSolveRoundResult(worker.solveRound(
-                                  decodeSolveRoundRequest(frame_bytes))));
+        {
+          const auto request = decodeSolveRoundRequest(frame_bytes);
+          const auto start = std::chrono::steady_clock::now();
+          const auto result = worker.solveRound(request);
+          sendFrameBytes(socket, encodeSolveRoundResultWithTiming(
+                                     result, elapsedUs(start)));
+        }
         break;
       case MessageType::SCALE_OBJECTIVE:
         worker.scaleObjective(decodeScaleObjective(frame_bytes).factor);

@@ -287,3 +287,25 @@
 - Do not commit local Waterloo/bunny/adhead benchmark data paths into the test
   suite. Keep committed Stage 5 fixtures tiny and deterministic; use
   `scripts/run_local_process_benchmark.sh` for user-supplied local datasets.
+
+## 2026-06-30 00:45 PDT
+
+- Do not assume `adhead.n6c10 --capacity-multiplier 10000` is safe in the
+  product/distributed path. The real max DIMACS arc capacity is `999999`, so
+  scaling by `10000` exceeds the 32-bit package/solver capacity type.
+- Do not treat saturating capacity overflow as exact. It is an explicit
+  benchmark/compatibility mode for running the current 32-bit implementation
+  when a requested multiplier is too large. Any run with
+  `capacity_scale_saturation_count > 0` solved a clipped-capacity problem.
+- Do not hide the distinction between modulo overflow and saturation. The old
+  monolithic benchmark path multiplied `int` capacities unchecked. The product
+  compatibility mode clamps to `INT_MAX`/`INT_MIN`, which is safer and
+  diagnosable but not bit-for-bit old-overflow behavior.
+
+## 2026-06-30 00:58 PDT
+
+- Do not treat process-level coordinator/worker tests as evidence of parallel
+  solve throughput by themselves. Before the `PartitionWorkerCoordinator`
+  dispatch fix, the coordinator contacted workers serially, so a 4-worker
+  `adhead` run showed one worker at 100% CPU while the coordinator and the
+  other workers were idle.

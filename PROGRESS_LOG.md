@@ -660,3 +660,62 @@
   - `ctest --test-dir build --output-on-failure`;
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `MCPD3_WORKERS=1 MCPD3_PARTITIONS=1 MCPD3_MAX_ITERATIONS=2 scripts/run_local_process_benchmark.sh tests/fixtures/hand_bottleneck.max`.
+
+## 2026-06-30 00:45 PDT
+
+- Added benchmark timing telemetry to the product TCP runtime:
+  - coordinator total wall time;
+  - graph read/scale/partition times;
+  - worker accept/setup/stop times;
+  - solve wall time;
+  - coordinator compute time outside remote solve RPCs;
+  - coordinator wait-for-worker RPC time;
+  - worker-reported local solve time;
+  - remote RPC overhead;
+  - load/solve/scale request counts.
+- Extended `SOLVE_ROUND_RESULT` serialization with an optional trailing
+  `worker_solve_wall_us` field. The decoder accepts older no-timing frames as
+  zero timing.
+- Added non-default saturating capacity scaling for the product coordinator:
+  `--saturate-capacity-overflow` and alias `--truncate-capacity-overflow`.
+  Strict checked overflow remains the default.
+- Added saturation diagnostics:
+  - `capacity_scale_overflow_mode`;
+  - `capacity_scale_saturation_count`;
+  - arc and terminal saturation counts.
+- Added `tests/fixtures/overflow_saturate.max` and process coverage proving:
+  - strict mode rejects 32-bit overflow;
+  - opt-in saturation clamps overflowing capacities and completes a process
+    solve.
+- Scanned local `adhead.n6c10.max`:
+  - `arc_count=75826316`;
+  - `max_cap=999999`;
+  - safe per-capacity limit for `M=10000` is `214748`;
+  - `328844` DIMACS arc records exceed that limit and would be clipped by
+    saturation mode.
+- Verified:
+  - `cmake -S . -B build`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `MCPD3_WORKERS=1 MCPD3_PARTITIONS=1 MCPD3_MAX_ITERATIONS=2 MCPD3_CAPACITY_MULTIPLIER=10000 MCPD3_SATURATE_CAPACITY_OVERFLOW=1 scripts/run_local_process_benchmark.sh tests/fixtures/overflow_saturate.max`.
+
+## 2026-06-30 00:58 PDT
+
+- Started a saturated process-architecture `adhead.n6c10` run with
+  4 worker processes, 10 partitions, and `M=10000`.
+- Observed via process CPU sampling that the coordinator was issuing remote
+  `solveRound` requests serially: one worker consumed CPU while the
+  coordinator and other workers were idle.
+- Stopped the run because it was not a valid distributed performance
+  benchmark.
+- Updated upstream `PartitionWorkerCoordinator::runRound()` so package solves
+  are dispatched concurrently across active workers. Multiple packages owned
+  by the same worker are still solved sequentially on that worker connection.
+- Added a submodule regression test with probe workers that verifies two
+  independent workers are inside `solveRound()` concurrently.
+- Verified:
+  - `cmake --build third_party/mcpd3/build --target partition_worker_test -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.

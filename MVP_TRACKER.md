@@ -12,7 +12,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
 - Current submodule checkpoint:
-  `27ff756 Support multi-package partition workers`
+  `f58cf42 Dispatch worker solves concurrently`
 
 ## MVP Definition
 
@@ -226,6 +226,13 @@ The MVP is complete when:
 - `PartitionWorkerCoordinator`, `InProcessPartitionWorker`, and
   `TcpPartitionWorker` support one worker object/process owning multiple
   partition packages.
+- Product coordinator solves are dispatched concurrently across active worker
+  processes. If one worker owns multiple packages, that worker still solves
+  its own package stream sequentially.
+- `--saturate-capacity-overflow` is an opt-in benchmark/compatibility mode for
+  the current 32-bit capacity path. Runs with nonzero
+  `capacity_scale_saturation_count` solve a clipped-capacity problem, not the
+  exact original capacities.
 - Source-side lexicographic regularization can be redundant in simple local
   ties because the current maxflow implementation already chooses source in
   those cases.

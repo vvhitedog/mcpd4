@@ -245,6 +245,16 @@ void remoteWorkerScalesLoadedObjective() {
             "scale test needs a nonzero lower bound before scaling");
     require(after.lower_bound == before.lower_bound * 10,
             "remote SCALE_OBJECTIVE should rescale loaded capacities");
+    const auto &stats = worker->timingStats();
+    require(stats.load_partition_count == 1,
+            "remote timing should count partition loads");
+    require(stats.solve_round_count == 2,
+            "remote timing should count solve rounds");
+    require(stats.scale_objective_count == 1,
+            "remote timing should count objective scaling");
+    require(stats.solve_round_rpc_wall_us >=
+                stats.solve_round_worker_wall_us,
+            "remote timing should split RPC and worker solve time");
     stopAndJoin(worker.get(), client);
   } catch (...) {
     stopAndJoin(worker.get(), client);
@@ -327,6 +337,8 @@ void remoteWorkerCoordinatorPromotesObjectiveScale() {
             "remote promoted solve should report promoted objective scale");
     require(result.final_regularization_budget < result.scale,
             "remote promoted solve should finish under budget");
+    require(remote_ptr->timingStats().scale_objective_count == 1,
+            "remote promotion should record objective scaling timing");
     remote_ptr->stop(/*reason=*/0, "promotion test complete");
     client->joinAndRethrow();
     delete client;

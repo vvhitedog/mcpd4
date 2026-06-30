@@ -59,6 +59,11 @@ struct ErrorMessage {
   std::string message;
 };
 
+struct TimedSolveRoundResult {
+  mcpd3::PartitionSolveResult result;
+  std::uint64_t worker_solve_wall_us = 0;
+};
+
 std::vector<std::uint8_t> encodeFrame(MessageType type,
                                       const std::vector<std::uint8_t> &payload);
 Frame decodeFrame(const std::vector<std::uint8_t> &bytes);
@@ -81,7 +86,12 @@ mcpd3::PartitionSolveRequest decodeSolveRoundRequest(
 
 std::vector<std::uint8_t> encodeSolveRoundResult(
     const mcpd3::PartitionSolveResult &message);
+std::vector<std::uint8_t> encodeSolveRoundResultWithTiming(
+    const mcpd3::PartitionSolveResult &message,
+    std::uint64_t worker_solve_wall_us);
 mcpd3::PartitionSolveResult decodeSolveRoundResult(
+    const std::vector<std::uint8_t> &frame);
+TimedSolveRoundResult decodeTimedSolveRoundResult(
     const std::vector<std::uint8_t> &frame);
 
 std::vector<std::uint8_t> encodeScaleObjective(

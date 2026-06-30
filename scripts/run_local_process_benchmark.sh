@@ -14,6 +14,8 @@ Environment overrides:
   MCPD3_INITIAL_STEP           10000
   MCPD3_CAPACITY_MULTIPLIER    10000
   MCPD3_ACCEPT_TIMEOUT_MS      30000
+  MCPD3_READY_TIMEOUT_SEC      300
+  MCPD3_SATURATE_CAPACITY_OVERFLOW  0
 USAGE
   exit 2
 fi
@@ -29,6 +31,8 @@ num_scales=${MCPD3_NUM_SCALES:-5}
 initial_step=${MCPD3_INITIAL_STEP:-10000}
 capacity_multiplier=${MCPD3_CAPACITY_MULTIPLIER:-10000}
 accept_timeout_ms=${MCPD3_ACCEPT_TIMEOUT_MS:-30000}
+ready_timeout_sec=${MCPD3_READY_TIMEOUT_SEC:-300}
+saturate_capacity_overflow=${MCPD3_SATURATE_CAPACITY_OVERFLOW:-${MCPD3_TRUNCATE_CAPACITY_OVERFLOW:-0}}
 
 coordinator="${build_dir}/mcpd3_coordinator"
 worker="${build_dir}/mcpd3_worker"
@@ -60,6 +64,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+extra_args=()
+if [[ "$saturate_capacity_overflow" != "0" && -n "$saturate_capacity_overflow" ]]; then
+  extra_args+=(--saturate-capacity-overflow)
+fi
+
 "$coordinator" "$dimacs_path" \
   --port "$port" \
   --workers "$workers" \
@@ -70,10 +79,12 @@ trap cleanup EXIT
   --capacity-multiplier "$capacity_multiplier" \
   --accept-timeout-ms "$accept_timeout_ms" \
   --ready-file "$ready_file" \
+  "${extra_args[@]}" \
   "$@" &
 coordinator_pid=$!
 
-for _ in $(seq 1 500); do
+ready_attempts=$((ready_timeout_sec * 100))
+for _ in $(seq 1 "$ready_attempts"); do
   if [[ -s "$ready_file" ]]; then
     break
   fi

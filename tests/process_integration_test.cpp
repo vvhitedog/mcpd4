@@ -10,6 +10,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -52,6 +53,11 @@ struct SolveSummary {
   long final_regularization_contribution = 0;
   long final_regularization_anchor_sink_count = 0;
   long final_regularization_active_sink_count = 0;
+};
+
+struct DistributedRun {
+  SolveSummary summary;
+  std::string output;
 };
 
 struct ChildProcess {
@@ -344,10 +350,11 @@ SolveSummary parseCoordinatorOutput(const std::string &output) {
   return summary;
 }
 
-SolveSummary runDistributedProcess(const std::string &coordinator_bin,
-                                   const std::string &worker_bin,
-                                   const std::string &fixture_dir,
-                                   const CaseConfig &config) {
+DistributedRun runDistributedProcess(const std::string &coordinator_bin,
+                                     const std::string &worker_bin,
+                                     const std::string &fixture_dir,
+                                     const CaseConfig &config,
+                                     std::vector<std::string> extra_args = {}) {
   const auto port = reservePort();
   const std::string port_string = std::to_string(port);
   const std::string ready_file =
@@ -358,27 +365,30 @@ SolveSummary runDistributedProcess(const std::string &coordinator_bin,
   std::vector<ChildProcess> workers;
   ChildProcess coordinator;
   try {
-    coordinator = spawnProcess(
-        {coordinator_bin,
-         fixture_dir + "/" + config.fixture,
-         "--port",
-         port_string,
-         "--workers",
-         std::to_string(config.worker_count),
-         "--partitions",
-         std::to_string(config.partition_count),
-         "--max-iterations",
-         std::to_string(config.max_iterations),
-         "--num-scales",
-         std::to_string(config.num_scales),
-         "--initial-step",
-         std::to_string(config.initial_step_size),
-         "--capacity-multiplier",
-         std::to_string(config.capacity_multiplier),
-         "--accept-timeout-ms",
-         "5000",
-         "--ready-file",
-         ready_file});
+    std::vector<std::string> coordinator_args{
+        coordinator_bin,
+        fixture_dir + "/" + config.fixture,
+        "--port",
+        port_string,
+        "--workers",
+        std::to_string(config.worker_count),
+        "--partitions",
+        std::to_string(config.partition_count),
+        "--max-iterations",
+        std::to_string(config.max_iterations),
+        "--num-scales",
+        std::to_string(config.num_scales),
+        "--initial-step",
+        std::to_string(config.initial_step_size),
+        "--capacity-multiplier",
+        std::to_string(config.capacity_multiplier),
+        "--accept-timeout-ms",
+        "5000",
+        "--ready-file",
+        ready_file};
+    coordinator_args.insert(coordinator_args.end(), extra_args.begin(),
+                            extra_args.end());
+    coordinator = spawnProcess(std::move(coordinator_args));
 
     waitForReadyFile(ready_file, 5s);
 
@@ -399,7 +409,10 @@ SolveSummary runDistributedProcess(const std::string &coordinator_bin,
               "worker failed for " + config.name + "\n" + worker.output);
     }
     std::remove(ready_file.c_str());
-    return parseCoordinatorOutput(coordinator.output);
+    DistributedRun run;
+    run.summary = parseCoordinatorOutput(coordinator.output);
+    run.output = coordinator.output;
+    return run;
   } catch (...) {
     killIfRunning(&coordinator);
     for (auto &worker : workers) {
@@ -448,9 +461,9 @@ void fixtureProcessMatchesInProcessReference(
     const std::string &coordinator_bin, const std::string &worker_bin,
     const std::string &fixture_dir, const CaseConfig &config) {
   const auto reference = runInProcessReference(fixture_dir, config);
-  const auto distributed =
+  const auto distributed_run =
       runDistributedProcess(coordinator_bin, worker_bin, fixture_dir, config);
-  requireEqual(distributed, reference, config.name);
+  requireEqual(distributed_run.summary, reference, config.name);
 }
 
 void coordinatorAcceptTimeoutIsExposed(const std::string &coordinator_bin,
@@ -489,6 +502,52 @@ void coordinatorAcceptTimeoutIsExposed(const std::string &coordinator_bin,
   }
 }
 
+void capacityOverflowSaturationIsOptIn(const std::string &coordinator_bin,
+                                       const std::string &worker_bin,
+                                       const std::string &fixture_dir) {
+  const auto port = reservePort();
+  auto rejected = spawnProcess({coordinator_bin,
+                                fixture_dir + "/overflow_saturate.max",
+                                "--port",
+                                std::to_string(port),
+                                "--workers",
+                                "1",
+                                "--partitions",
+                                "1",
+                                "--capacity-multiplier",
+                                "10000",
+                                "--accept-timeout-ms",
+                                "50"});
+  const int rejected_exit = waitForExit(&rejected, 5s);
+  require(rejected_exit != 0,
+          "capacity overflow should fail in strict mode");
+  require(rejected.output.find("capacity multiplier exceeds int range") !=
+              std::string::npos,
+          "strict overflow should explain int range failure\n" +
+              rejected.output);
+
+  const auto saturated = runDistributedProcess(
+      coordinator_bin, worker_bin, fixture_dir,
+      CaseConfig{/*name=*/"overflow_saturate",
+                 /*fixture=*/"overflow_saturate.max",
+                 /*worker_count=*/1,
+                 /*partition_count=*/1,
+                 /*max_iterations=*/5,
+                 /*num_scales=*/1,
+                 /*initial_step_size=*/10000,
+                 /*capacity_multiplier=*/10000},
+      {"--saturate-capacity-overflow"});
+  require(saturated.output.find("capacity_scale_overflow_mode saturate") !=
+              std::string::npos,
+          "saturated run should report saturate mode\n" + saturated.output);
+  require(saturated.output.find("capacity_scale_saturation_count 1") !=
+              std::string::npos,
+          "saturated run should report one clipped capacity\n" +
+              saturated.output);
+  require(saturated.summary.final_disagreement_count == 0,
+          "one-partition saturated fixture should finish with agreement");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -516,6 +575,8 @@ int main(int argc, char **argv) {
                    /*worker_count=*/2,
                    /*partition_count=*/3});
     coordinatorAcceptTimeoutIsExposed(coordinator_bin, fixture_dir);
+    capacityOverflowSaturationIsOptIn(coordinator_bin, worker_bin,
+                                      fixture_dir);
   } catch (const std::exception &e) {
     std::cerr << "process_integration_test failed: " << e.what() << "\n";
     return EXIT_FAILURE;

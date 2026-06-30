@@ -245,6 +245,20 @@ void roundTripsSolveRoundResult() {
     requireLabelEqual(decoded.constrained_labels[i],
                       message.constrained_labels[i]);
   }
+
+  const auto decoded_default_timing =
+      mcpd3_distributed::decodeTimedSolveRoundResult(
+          mcpd3_distributed::encodeSolveRoundResult(message));
+  require(decoded_default_timing.worker_solve_wall_us == 0,
+          "default result timing should be zero");
+
+  const auto decoded_timed = mcpd3_distributed::decodeTimedSolveRoundResult(
+      mcpd3_distributed::encodeSolveRoundResultWithTiming(
+          message, /*worker_solve_wall_us=*/12345));
+  require(decoded_timed.result.round_id == message.round_id,
+          "timed result round mismatch");
+  require(decoded_timed.worker_solve_wall_us == 12345,
+          "timed result worker solve timing mismatch");
 }
 
 void roundTripsScaleObjective() {

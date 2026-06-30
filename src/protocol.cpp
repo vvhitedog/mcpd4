@@ -404,8 +404,9 @@ mcpd3::PartitionSolveRequest decodeSolveRoundRequest(
   return message;
 }
 
-std::vector<std::uint8_t> encodeSolveRoundResult(
-    const mcpd3::PartitionSolveResult &message) {
+std::vector<std::uint8_t> encodeSolveRoundResultWithTiming(
+    const mcpd3::PartitionSolveResult &message,
+    std::uint64_t worker_solve_wall_us) {
   Writer writer;
   writer.writeI64(message.round_id);
   writer.writeI32(message.partition_id);
@@ -417,14 +418,22 @@ std::vector<std::uint8_t> encodeSolveRoundResult(
   writer.writeVector<mcpd3::ConstraintLabel>(
       message.constrained_labels,
       [&](const auto &label) { writeConstraintLabel(&writer, label); });
+  writer.writeU64(worker_solve_wall_us);
   return encodeFrame(MessageType::SOLVE_ROUND_RESULT, writer.bytes());
 }
 
-mcpd3::PartitionSolveResult decodeSolveRoundResult(
+std::vector<std::uint8_t> encodeSolveRoundResult(
+    const mcpd3::PartitionSolveResult &message) {
+  return encodeSolveRoundResultWithTiming(message,
+                                          /*worker_solve_wall_us=*/0);
+}
+
+TimedSolveRoundResult decodeTimedSolveRoundResult(
     const std::vector<std::uint8_t> &frame) {
   auto decoded = decodeExpectedFrame(frame, MessageType::SOLVE_ROUND_RESULT);
   Reader reader(decoded.payload);
-  mcpd3::PartitionSolveResult message;
+  TimedSolveRoundResult timed;
+  auto &message = timed.result;
   message.round_id = checkedIntegerCast<long>(reader.readI64());
   message.partition_id = reader.readI32();
   message.lower_bound = checkedIntegerCast<long>(reader.readI64());
@@ -437,8 +446,16 @@ mcpd3::PartitionSolveResult decodeSolveRoundResult(
       checkedIntegerCast<long>(reader.readI64());
   message.constrained_labels = reader.readVector<mcpd3::ConstraintLabel>(
       [&] { return readConstraintLabel(&reader); });
+  if (!reader.empty()) {
+    timed.worker_solve_wall_us = reader.readU64();
+  }
   requireDone(reader);
-  return message;
+  return timed;
+}
+
+mcpd3::PartitionSolveResult decodeSolveRoundResult(
+    const std::vector<std::uint8_t> &frame) {
+  return decodeTimedSolveRoundResult(frame).result;
 }
 
 std::vector<std::uint8_t> encodeScaleObjective(
