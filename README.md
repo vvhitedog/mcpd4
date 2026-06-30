@@ -1,17 +1,352 @@
 # mcpd4
 
-Product-layer project for distributed mcpd3, branded as mcpd4.
+mcpd4 is the distributed product wrapper around the `mcpd3` min-cut solver.
+The product repo owns the coordinator/worker binaries, TCP protocol, run
+scripts, integration tests, and deployment docs. The solver dependency remains
+the `third_party/mcpd3` submodule and keeps its public `mcpd3::` API.
 
-This repository is intentionally separate from
-`/home/matt/software/graph-cuts-undirected`, which remains the experimental
-cut/benchmark/proof workspace.
+Use this README as the setup/runbook for another agent or machine. Historical
+planning details live in [AGENT_HANDOFF.md](AGENT_HANDOFF.md), progress is in
+[PROGRESS_LOG.md](PROGRESS_LOG.md), and known constraints are in
+[FAILED_APPROACHES.md](FAILED_APPROACHES.md).
 
-Start with:
+## Repository Layout
 
-- [AGENT_HANDOFF.md](AGENT_HANDOFF.md)
-- [MVP_TRACKER.md](MVP_TRACKER.md)
+- `include/mcpd4`, `src`: mcpd4 protocol, TCP runtime, coordinator, worker.
+- `third_party/mcpd3`: pinned solver dependency and partition-worker API.
+- `tests/fixtures`: small committed DIMACS graphs for smoke tests.
+- `scripts/run_local_process_benchmark.sh`: starts one coordinator and local
+  workers for a quick localhost distributed run.
 
-The solver dependency is pinned as a submodule:
+## Requirements
 
-- `third_party/mcpd3`
-- public branch: `https://github.com/vvhitedog/mcpd3/tree/distributed-mvp-start`
+- Linux/POSIX environment with TCP loopback support.
+- CMake 3.16 or newer.
+- C++17 compiler.
+- `git` with submodule support.
+- `python3` only for the local benchmark helper script.
+
+The current runtime is plain IPv4 TCP. It does not provide authentication or
+encryption, so run it on a trusted network or behind an SSH/VPN tunnel.
+
+## Get The Code
+
+Clone the product repo and initialize the solver submodule:
+
+```bash
+git clone --branch network-free-worker-api --recurse-submodules \
+  https://github.com/vvhitedog/mcpd4.git
+cd mcpd4
+git submodule update --init --recursive
+```
+
+If the checkout already exists, refresh it with:
+
+```bash
+git pull
+git submodule sync --recursive
+git submodule update --init --recursive
+```
+
+The expected solver dependency is `third_party/mcpd3`. Do not rename that
+submodule or the `mcpd3::` API when working on mcpd4.
+
+## Build And Test
+
+Configure and build the product binaries:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
+
+The important outputs are:
+
+- `build/mcpd4_coordinator`
+- `build/mcpd4_worker`
+
+Run the product test suite:
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+The current suite includes protocol serialization, TCP loopback, worker error
+handling, objective-scale promotion, and localhost process integration tests.
+
+## Quick Localhost Run
+
+Use the helper script for the simplest end-to-end distributed smoke test. It
+starts a coordinator, waits until it is listening, starts workers, and forwards
+the coordinator output.
+
+```bash
+MCPD4_WORKERS=2 \
+MCPD4_PARTITIONS=4 \
+MCPD4_MAX_ITERATIONS=10000 \
+MCPD4_NUM_SCALES=5 \
+MCPD4_INITIAL_STEP=10000 \
+MCPD4_CAPACITY_MULTIPLIER=10000 \
+MCPD4_PROGRESS_EVERY=100 \
+scripts/run_local_process_benchmark.sh tests/fixtures/hand_bottleneck.max
+```
+
+The helper accepts these environment overrides:
+
+```text
+MCPD4_BUILD_DIR                    default: build
+MCPD4_WORKERS                      default: 2
+MCPD4_PARTITIONS                   default: 2
+MCPD4_MAX_ITERATIONS               default: 10000
+MCPD4_NUM_SCALES                   default: 5
+MCPD4_INITIAL_STEP                 default: 10000
+MCPD4_CAPACITY_MULTIPLIER          default: 10000
+MCPD4_ACCEPT_TIMEOUT_MS            default: 30000
+MCPD4_READY_TIMEOUT_SEC            default: 300
+MCPD4_PROGRESS_EVERY               default: 0
+MCPD4_SATURATE_CAPACITY_OVERFLOW   default: 0
+```
+
+Legacy `MCPD3_*` aliases are still accepted by the helper for compatibility.
+
+## Manual Localhost Run
+
+Manual runs are useful when debugging process behavior. Start the coordinator
+first in terminal 1:
+
+```bash
+./build/mcpd4_coordinator tests/fixtures/hand_bottleneck.max \
+  --bind 127.0.0.1 \
+  --port 50051 \
+  --workers 2 \
+  --partitions 4 \
+  --max-iterations 10000 \
+  --num-scales 5 \
+  --initial-step 10000 \
+  --capacity-multiplier 10000 \
+  --accept-timeout-ms 30000 \
+  --progress-every 100
+```
+
+Then start exactly two workers, matching `--workers 2`:
+
+```bash
+./build/mcpd4_worker 127.0.0.1 50051 --name local-a
+```
+
+```bash
+./build/mcpd4_worker 127.0.0.1 50051 --name local-b
+```
+
+The coordinator waits for all requested workers before solving. If a worker
+does not connect before `--accept-timeout-ms`, the coordinator exits with an
+error.
+
+## Distributed Run Across Machines
+
+Only the coordinator needs the DIMACS input file. Workers only need the built
+`mcpd4_worker` binary and network access to the coordinator.
+
+On the coordinator machine, choose an interface and open the port in any local
+firewall. Use `0.0.0.0` to accept connections on all IPv4 interfaces:
+
+```bash
+./build/mcpd4_coordinator /data/graph.max \
+  --bind 0.0.0.0 \
+  --port 50051 \
+  --workers 4 \
+  --partitions 10 \
+  --max-iterations 10000 \
+  --num-scales 5 \
+  --initial-step 10000 \
+  --capacity-multiplier 10000 \
+  --accept-timeout-ms 600000 \
+  --progress-every 50
+```
+
+On each worker machine, use the coordinator machine's reachable IP or DNS name:
+
+```bash
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-a
+```
+
+```bash
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-b
+```
+
+```bash
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-c
+```
+
+```bash
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-d
+```
+
+Use one worker process per machine to start. A worker can own multiple
+partitions; the coordinator sends a batched solve request to each active worker
+per round. Initial partition ownership is static and weighted by partition size
+plus the worker CPU/RAM values reported in the worker handshake.
+
+For directed DIMACS inputs, add `--directed` to the coordinator command:
+
+```bash
+./build/mcpd4_coordinator /data/adhead.n6c10.max \
+  --directed \
+  --bind 0.0.0.0 \
+  --port 50051 \
+  --workers 4 \
+  --partitions 10 \
+  --capacity-multiplier 10000
+```
+
+## Coordinator Options
+
+```text
+usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
+       [--partitions N] [--max-iterations N] [--num-scales N]
+       [--initial-step N] [--capacity-multiplier N]
+       [--accept-timeout-ms N] [--progress-every N] [--ready-file PATH]
+       [--saturate-capacity-overflow] [--directed]
+```
+
+- `DIMACS`: input graph path. The coordinator reads this locally.
+- `--bind HOST`: local bind address. Default is `127.0.0.1`; use `0.0.0.0` or
+  an interface IP for remote workers.
+- `--port PORT`: required TCP port.
+- `--workers N`: number of worker processes the coordinator must accept.
+- `--partitions N`: number of local subproblems to build.
+- `--max-iterations N`: maximum optimizer iterations.
+- `--num-scales N`: number of capacity-scaling levels.
+- `--initial-step N`: initial dual update step size.
+- `--capacity-multiplier N`: multiplies capacities before partitioning and is
+  also the objective scale used by exact scaled-epsilon regularization.
+- `--accept-timeout-ms N`: per-worker accept timeout.
+- `--progress-every N`: print optimizer health every N total iterations. Use
+  `0` to disable progress streaming.
+- `--ready-file PATH`: write the listening port after the socket is ready.
+- `--saturate-capacity-overflow`: opt-in overflow compatibility mode. This
+  clips overflowing scaled capacities and solves the clipped problem, not the
+  exact original problem.
+- `--directed`: use the directed streaming DIMACS reader.
+
+## Worker Options
+
+```text
+usage: mcpd4_worker HOST PORT [--name NAME]
+```
+
+- `HOST`: coordinator host or IP.
+- `PORT`: coordinator port.
+- `--name NAME`: optional worker name used in logs and progress output.
+
+Workers receive all partition data from the coordinator after connecting. They
+do not need the DIMACS file.
+
+## Interpreting Output
+
+The coordinator prints key-value lines. A successful exact run usually has:
+
+```text
+status 0
+stop_reason 1
+final_disagreement_count 0
+capacity_scale_saturation_count 0
+```
+
+`stop_reason 2` is also an exact agreement path when the scaled-epsilon
+regularization budget is valid. The product rejects over-budget regularized
+rounds and promotes objective scale before accepting the result.
+
+Status values:
+
+```text
+0 OPTIMAL
+1 NO_FURTHER_PROGRESS
+2 ITERATION_COUNT_EXCEEDED
+3 REGULARIZATION_BUDGET_EXCEEDED
+```
+
+Stop reason values:
+
+```text
+0 NONE
+1 NO_DISAGREEMENT
+2 REGULARIZED_NO_DISAGREEMENT
+3 ITERATION_COUNT_EXCEEDED
+4 NO_LOWER_BOUND_IMPROVEMENT
+5 LEGACY_PATIENCE
+6 GROUP_STOPPING
+7 REGULARIZATION_BUDGET_EXCEEDED
+```
+
+Important objective fields:
+
+- `final_objective`: selected original objective after dividing by
+  `objective_scale`.
+- `final_certified_lower_bound`: conservative lower-bound certificate after
+  dividing by `objective_scale`.
+- `final_regularized_objective`: perturbed objective used by the regularized
+  local solve.
+- `objective_scale`: final scale after any promotions.
+- `objective_scale_promotions`: number of times the coordinator promoted the
+  scale after a regularization budget overflow.
+- `final_regularization_budget`: total active regularization budget in raw
+  units.
+- `capacity_scale_saturation_count`: nonzero means overflow clipping occurred
+  and the run solved a clipped-capacity problem.
+
+With `--progress-every`, the coordinator also prints:
+
+- `progress ...`: global optimizer health and cumulative worker timing.
+- `progress_worker ...`: per-worker assigned partition counts, solve counts,
+  batch RPC counts, solve wall time, and RPC overhead.
+
+These fields are useful for detecting stalled workers or partition imbalance.
+
+## Capacity Multiplier And Exactness
+
+The scaled-epsilon regularizer treats each local objective as:
+
+```text
+M * F(x) + R(x)
+```
+
+where `M` is the objective scale from `--capacity-multiplier`. The point is to
+make regularization a lexicographic tie-break rather than a change to the
+original optimization problem. Larger multipliers give more regularization
+budget but increase the risk of 32-bit capacity overflow.
+
+Practical starting points:
+
+- Small fixtures: `--capacity-multiplier 10000`.
+- Large benchmark graphs with bigger capacities: try `100`, then increase if
+  the run reports objective-scale promotions or regularization budget pressure.
+- If strict scaling overflows, inspect the input capacities before using
+  `--saturate-capacity-overflow`; saturation is only a compatibility mode.
+
+## Troubleshooting
+
+- `mcpd4_coordinator failed: --port is required`: pass `--port PORT`.
+- Coordinator waits forever or times out: start the exact number of workers
+  requested by `--workers`; verify firewall rules and bind address.
+- Remote workers cannot connect: bind the coordinator to `0.0.0.0` or the
+  correct interface IP, not `127.0.0.1`.
+- `capacity multiplier exceeds int range`: reduce
+  `--capacity-multiplier` or intentionally use
+  `--saturate-capacity-overflow` knowing it clips capacities.
+- One worker does most of the work: increase `--partitions`, check
+  `progress_worker` timing, and compare assigned partition counts. Dynamic
+  work stealing is not implemented yet.
+- Nonzero `final_disagreement_count`: the coordinator did not recover an
+  agreeing primal solution in that run. Increase scales/iterations, inspect
+  progress output, and check whether objective-scale promotions occurred.
+
+## Current MVP Limits
+
+- Worker ownership is static after initial assignment.
+- No worker reconnect, heartbeat, or worker replacement during optimization.
+- No authentication/encryption on the TCP protocol.
+- Coordinator and workers use blocking RPCs, though active workers are
+  dispatched concurrently.
+- The current capacity storage path is 32-bit for graph capacities; scaling can
+  overflow without care.

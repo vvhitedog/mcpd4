@@ -1069,3 +1069,17 @@
   `mcpd4`.
 - Updated the local benchmark helper to prefer `MCPD4_*` environment variables
   while accepting legacy `MCPD3_*` aliases for existing local run scripts.
+
+## 2026-06-30 11:57 PDT
+
+- Expanded `README.md` into a concrete setup and distributed-run guide for a
+  new agent or client machine.
+- Documented clone/submodule setup, build/test commands, localhost helper
+  runs, manual coordinator/worker runs, remote worker setup, coordinator and
+  worker options, output status codes, exactness checks, capacity scaling, and
+  troubleshooting.
+- Verified:
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - README quick-start helper command on `tests/fixtures/hand_bottleneck.max`
+    with two workers and four partitions.
