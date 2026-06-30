@@ -6,6 +6,7 @@
 
 #include <cstdlib>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -25,6 +26,8 @@ struct Config {
   int num_scales = 5;
   long initial_step_size = 10000;
   long capacity_multiplier = 1;
+  long accept_timeout_ms = 24L * 60L * 60L * 1000L;
+  std::string ready_file;
   bool directed = false;
 };
 
@@ -57,7 +60,8 @@ void usage(const char *argv0) {
       << "usage: " << argv0
       << " DIMACS --port PORT [--bind HOST] [--workers N] [--partitions N]\n"
       << "       [--max-iterations N] [--num-scales N] [--initial-step N]\n"
-      << "       [--capacity-multiplier N] [--directed]\n";
+      << "       [--capacity-multiplier N] [--accept-timeout-ms N]\n"
+      << "       [--ready-file PATH] [--directed]\n";
 }
 
 Config parseArgs(int argc, char **argv) {
@@ -91,6 +95,10 @@ Config parseArgs(int argc, char **argv) {
       config.initial_step_size = parseLong(require_value(arg), arg);
     } else if (arg == "--capacity-multiplier") {
       config.capacity_multiplier = parseLong(require_value(arg), arg);
+    } else if (arg == "--accept-timeout-ms") {
+      config.accept_timeout_ms = parseLong(require_value(arg), arg);
+    } else if (arg == "--ready-file") {
+      config.ready_file = require_value(arg);
     } else if (arg == "--directed") {
       config.directed = true;
     } else {
@@ -124,6 +132,17 @@ void scaleGraph(mcpd3::MinCutGraph *graph, long factor) {
   }
 }
 
+void writeReadyFile(const std::string &path, std::uint16_t port) {
+  if (path.empty()) {
+    return;
+  }
+  std::ofstream out(path);
+  if (!out) {
+    throw std::runtime_error("failed to open ready file for writing: " + path);
+  }
+  out << port << "\n";
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -150,12 +169,13 @@ int main(int argc, char **argv) {
         mcpd3_distributed::listenTcp(config.bind_host, config.port);
     std::cout << "listening " << config.bind_host << ":"
               << mcpd3_distributed::localPort(listener) << "\n";
+    writeReadyFile(config.ready_file, mcpd3_distributed::localPort(listener));
 
     std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
     std::vector<mcpd3_distributed::TcpPartitionWorker *> remote_workers;
     for (int i = 0; i < config.worker_count; ++i) {
       auto worker = mcpd3_distributed::acceptTcpPartitionWorker(
-          &listener, std::chrono::hours(24));
+          &listener, std::chrono::milliseconds(config.accept_timeout_ms));
       std::cout << "accepted worker " << worker->hello().worker_name << "\n";
       remote_workers.push_back(worker.get());
       workers.push_back(std::move(worker));
@@ -180,6 +200,14 @@ int main(int argc, char **argv) {
     std::cout << "total_iterations " << result.total_iterations << "\n";
     std::cout << "final_disagreement_count "
               << result.final_disagreement_count << "\n";
+    std::cout << "final_regularization_budget "
+              << result.final_regularization_budget << "\n";
+    std::cout << "final_regularization_contribution "
+              << result.final_regularization_contribution << "\n";
+    std::cout << "final_regularization_anchor_sink_count "
+              << result.final_regularization_anchor_sink_count << "\n";
+    std::cout << "final_regularization_active_sink_count "
+              << result.final_regularization_active_sink_count << "\n";
     for (auto *worker : remote_workers) {
       worker->stop(/*reason=*/0, "coordinator finished");
     }

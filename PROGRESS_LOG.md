@@ -629,3 +629,34 @@
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - manual process smoke test with `mcpd3_coordinator` and `mcpd3_worker`
     on a temporary DIMACS graph.
+
+## 2026-06-30 00:12 PDT
+
+- Completed Stage 5 correctness and process integration coverage.
+- Added committed DIMACS fixtures:
+  - `tests/fixtures/hand_bottleneck.max`;
+  - `tests/fixtures/dead_end.max`;
+  - `tests/fixtures/random_small.max`.
+- Added `process_integration_test`, which:
+  - runs the in-process `PartitionWorkerCoordinator` reference on each
+    fixture;
+  - launches real `mcpd3_coordinator` and `mcpd3_worker` processes on the same
+    fixture;
+  - compares status, stop reason, raw best lower bound, final disagreement
+    count, objective-scale promotions, and regularization diagnostics;
+  - verifies coordinator accept timeout behavior and error text.
+- Added coordinator CLI support for:
+  - `--ready-file PATH`, used by process tests and scripts to avoid startup
+    races;
+  - `--accept-timeout-ms N`, making worker-accept timeout behavior testable;
+  - final regularization diagnostic output fields.
+- Added `scripts/run_local_process_benchmark.sh`, an optional local hook for
+  user-supplied bunny/adhead-style DIMACS files without committing external
+  data paths.
+- Verified:
+  - `cmake -S . -B build`;
+  - `cmake --build build -j`;
+  - `./build/process_integration_test ./build/mcpd3_coordinator ./build/mcpd3_worker tests/fixtures`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `MCPD3_WORKERS=1 MCPD3_PARTITIONS=1 MCPD3_MAX_ITERATIONS=2 scripts/run_local_process_benchmark.sh tests/fixtures/hand_bottleneck.max`.

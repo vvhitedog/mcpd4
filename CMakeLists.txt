@@ -62,4 +62,17 @@ if (BUILD_TESTING)
     mcpd3_distributed_runtime)
   add_test(NAME tcp_loopback_test
     COMMAND tcp_loopback_test)
+
+  add_executable(process_integration_test
+    tests/process_integration_test.cpp)
+  target_link_libraries(process_integration_test PRIVATE
+    mcpd3_distributed_runtime)
+  add_dependencies(process_integration_test
+    mcpd3_coordinator
+    mcpd3_worker)
+  add_test(NAME process_integration_test
+    COMMAND process_integration_test
+      $<TARGET_FILE:mcpd3_coordinator>
+      $<TARGET_FILE:mcpd3_worker>
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
 endif ()

@@ -277,3 +277,13 @@
   propagates worker `ERROR` frames and rejects invalid handshakes, but worker
   disconnect/reconnect, heartbeat, replacement, and process-level fixture
   tests remain Stage 6/Stage 5 work.
+
+## 2026-06-30 00:12 PDT
+
+- Do not start process-level workers after an arbitrary sleep and assume the
+  coordinator is listening. The Stage 5 test and local benchmark hook use the
+  coordinator's `--ready-file` signal before launching workers to avoid
+  nondeterministic connection-refused failures.
+- Do not commit local Waterloo/bunny/adhead benchmark data paths into the test
+  suite. Keep committed Stage 5 fixtures tiny and deterministic; use
+  `scripts/run_local_process_benchmark.sh` for user-supplied local datasets.

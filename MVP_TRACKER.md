@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 23:56 PDT
+Last updated: 2026-06-30 00:12 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -171,18 +171,18 @@ The MVP is complete when:
 
 ### Stage 5: Correctness And Integration Tests
 
-- [ ] Add committed tiny DIMACS fixtures:
+- [x] Add committed tiny DIMACS fixtures:
   - hand bottleneck graph;
   - dead-end graph;
   - random small graph.
-- [ ] Add in-process reference tests for each fixture.
-- [ ] Add localhost coordinator/worker integration tests for each fixture.
-- [ ] Compare distributed and in-process behavior:
+- [x] Add in-process reference tests for each fixture.
+- [x] Add localhost coordinator/worker integration tests for each fixture.
+- [x] Compare distributed and in-process behavior:
   - final best lower bound;
   - final disagreement count;
   - stopping status;
   - regularization diagnostics.
-- [ ] Add optional local benchmark hook for bunny data without making the repo
+- [x] Add optional local benchmark hook for bunny data without making the repo
   depend on local experimental files.
 
 ### Stage 6: Failure Handling And Operational Readiness
@@ -190,8 +190,8 @@ The MVP is complete when:
 - [ ] Handle worker disconnect before setup completes.
 - [ ] Handle worker disconnect during optimization.
 - [ ] Handle malformed protocol messages.
-- [ ] Handle worker-reported solver errors.
-- [ ] Add coordinator timeout behavior with tests.
+- [x] Handle worker-reported solver errors.
+- [x] Add coordinator timeout behavior with tests.
 - [ ] Add logging that identifies worker name, partition ids, round id, and
   message type for failures.
 
@@ -216,12 +216,12 @@ The MVP is complete when:
 - TCP runtime exists for the localhost/IPv4 MVP and exposes an explicit bind
   address, but it is still sequential and blocking. It does not yet implement
   reconnects, heartbeats, worker replacement, or partial-progress recovery.
-- The committed Stage 4 integration test uses loopback worker threads through
-  the runtime API. Stage 5 still needs process-level coordinator/worker tests
-  on committed DIMACS fixtures.
-- `mcpd3_coordinator` currently uses a long fixed accept wait while collecting
-  workers. Runtime accept calls are timeout-capable, but the CLI does not yet
-  expose a timeout flag.
+- Process-level coordinator/worker tests now cover three committed tiny
+  DIMACS fixtures, but no committed medium benchmark fixture exists. Local
+  benchmark runs should use `scripts/run_local_process_benchmark.sh` with a
+  user-supplied DIMACS path.
+- `mcpd3_coordinator` now exposes `--accept-timeout-ms`, but it still has no
+  worker reconnect, replacement, heartbeat, or partial-progress recovery.
 - `PartitionWorkerCoordinator` currently sends all alpha records every round.
 - `PartitionWorkerCoordinator`, `InProcessPartitionWorker`, and
   `TcpPartitionWorker` support one worker object/process owning multiple
