@@ -5,10 +5,7 @@ The product repo owns the coordinator/worker binaries, TCP protocol, run
 scripts, integration tests, and deployment docs. The solver dependency remains
 the `third_party/mcpd3` submodule and keeps its public `mcpd3::` API.
 
-Use this README as the setup/runbook for another agent or machine. Historical
-planning details live in [AGENT_HANDOFF.md](AGENT_HANDOFF.md), progress is in
-[PROGRESS_LOG.md](PROGRESS_LOG.md), and known constraints are in
-[FAILED_APPROACHES.md](FAILED_APPROACHES.md).
+Use this README as the setup/runbook for another agent or machine.
 
 ## Repository Layout
 
