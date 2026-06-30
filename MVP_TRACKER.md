@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 22:43 PDT
+Last updated: 2026-06-29 22:58 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -12,7 +12,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
 - Current submodule checkpoint:
-  `8290cd8 Promote objective scale on reg overbudget`
+  `0d699c8 Promote coordinator scale on reg overbudget`
 
 ## MVP Definition
 
@@ -28,8 +28,8 @@ The MVP is complete when:
 - localhost integration tests show distributed results match current
   in-process mcpd3 behavior on committed tiny and small fixtures;
 - stopping output distinguishes exact unregularized agreement, exact
-  budget-safe scaled-epsilon regularized agreement, warning-only over-budget
-  regularized agreement, and non-certificate no-progress stops.
+  budget-safe scaled-epsilon regularized agreement, over-budget
+  promotion/rejection, and non-certificate no-progress stops.
 
 ## Progress Checklist
 
@@ -110,14 +110,17 @@ The MVP is complete when:
 - [x] Implement a hardened OG-style scaled-epsilon regularization mode with an
   explicit summed global active-budget diagnostic:
   `global_regularization_budget < objective_scale`.
-- [x] Replace warning-only over-budget behavior in the legacy
-  `DualDecomposition` path with objective-scale promotion: reject the
-  over-budget iteration's lower bound, scale the objective by `10x`, preserve
-  residual graphs and alphas, and restart the capacity-scaling schedule from
-  the promoted scale.
-- [ ] Add equivalent over-budget handling to `PartitionWorkerCoordinator` and
-  the future distributed protocol. The current promotion code is benchmark
-  path only.
+- [x] Replace warning-only over-budget behavior in the current monolithic
+  `DualDecomposition` benchmark path with objective-scale promotion: reject
+  the over-budget iteration's lower bound, scale the objective by `10x`,
+  preserve residual graphs and alphas, and restart the capacity-scaling
+  schedule from the promoted scale.
+- [x] Add equivalent over-budget handling to `PartitionWorkerCoordinator` and
+  `InProcessPartitionWorker`: reject over-budget lower bounds, skip alpha
+  updates for those rounds, rescale coordinator state plus live worker
+  solvers, and restart from the promoted objective scale.
+- [ ] Add equivalent scale-promotion/rescale message support to the future TCP
+  distributed protocol.
 - [x] Benchmark the hardened scaled-epsilon mode on local
   `adhead.n6c10` against the OG `early_experiments` scheme. Current
   productized code and OG both reached raw lower bound `483730000` with zero
@@ -198,8 +201,9 @@ The MVP is complete when:
   - zero disagreement with zero regularization can be exact;
   - scaled-epsilon regularized agreement can be exact when the summed active
     regularization budget is strictly below the objective scale;
-  - over-budget regularized agreement currently warns and must not be treated
-    as a hard certificate until future handling is implemented;
+  - over-budget regularized rounds are not certificates; current in-process
+    paths reject those lower bounds and either promote objective scale or
+    return `REGULARIZATION_BUDGET_EXCEEDED`;
   - patience, group stopping, timeout, and no-progress stops are not exact
     certificates.
 
@@ -237,22 +241,22 @@ The MVP is complete when:
   `final_disagreement_count=187`).
 - The OG regularization idea is exact under the lattice proof when agreement
   holds and the summed effective regularization range is strictly below the
-  objective scale. The hardened implementation now reports the summed active
-  budget and warns on `budget >= limit`; future work must replace the warning
-  with a real over-budget handling policy.
+  objective scale. The hardened in-process implementations now report the
+  summed active budget, reject over-budget lower bounds, and promote objective
+  scale when allowed.
 - `adhead.n6c10` is the current benchmark comparison target. With
   `--capacity-multiplier 10000`, current scaled epsilon reached the known
   optimum `48373` with zero disagreement and active budget `40 < 10000`.
-- Dynamic objective-scale promotion lets the legacy benchmark path start
+- Dynamic objective-scale promotion lets the monolithic benchmark path start
   `adhead.n6c10` at `--capacity-multiplier 100`, detect
   `budget=9840 >= 100`, promote to objective scale `1000`, and finish with
   `best_lower_bound_unscaled=48373`, `final_disagreement_count=0`, and
   `final_regularization_budget_raw=180 < 1000`. This was correct but slower
   than starting at `10000`.
-- Dynamic objective-scale promotion is not yet implemented in
-  `PartitionWorkerCoordinator`; the distributed protocol will need an explicit
-  rescale/promotion step to preserve worker residual graphs and coordinator
-  alpha state across promotion.
+- Dynamic objective-scale promotion is implemented in
+  `PartitionWorkerCoordinator` for in-process workers. The future distributed
+  protocol will still need an explicit rescale/promotion message to preserve
+  remote worker residual graphs and coordinator alpha state across promotion.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator
   path.
 

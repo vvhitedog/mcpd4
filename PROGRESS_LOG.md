@@ -480,3 +480,37 @@
   - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-06-29 22:58 PDT
+
+- Corrected the scope of objective-scale promotion: the previous commit
+  covered the current monolithic `DualDecomposition` benchmark path, but the
+  productized `PartitionWorkerCoordinator` path also needs the same behavior.
+- Added a worker rescale API:
+  `PartitionWorker::scaleObjective(long factor)`.
+- Implemented `InProcessPartitionWorker::scaleObjective()` by scaling the
+  already-loaded `PrimalDualMinCutSolver`, package capacities, and local
+  alpha/last-alpha state in place.
+- Updated `PartitionWorkerCoordinator` so over-budget scaled-epsilon rounds:
+  - compute disagreement diagnostics;
+  - do not update coordinator alpha state;
+  - do not record the lower bound as accepted progress;
+  - return an explicit `REGULARIZATION_BUDGET_EXCEEDED` status/stop reason;
+  - promote the objective scale by `10x` when promotion is enabled;
+  - scale coordinator alphas, accepted aggregate bounds, packages, and live
+    workers;
+  - restart the schedule from the promoted objective scale.
+- Added coordinator tests for:
+  - promotion success with scripted workers, including worker rescale calls
+    and rejection of the over-budget lower bound;
+  - disabled-promotion behavior, where over-budget is reported and no lower
+    bound is accepted;
+  - promotion through real `InProcessPartitionWorker` instances, exercising
+    live solver/residual-graph scaling.
+- Committed and pushed the mcpd3 unit on branch `partition-worker-api`:
+  `0d699c8 Promote coordinator scale on reg overbudget`.
+- Verified:
+  - `cmake --build third_party/mcpd3/build --target partition_worker_test -j`;
+  - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `ctest --test-dir build --output-on-failure`.

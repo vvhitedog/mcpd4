@@ -184,7 +184,8 @@
   implementation treats active epsilon terms as explicit state and reports the
   full active budget, including terms that persist across unchanged-alpha
   solves.
-- The current over-budget behavior is intentionally warning-only. If
+- Superseded by later objective-scale promotion work: at this point the
+  over-budget behavior was intentionally warning-only. If
   `regularization_budget >= regularization_budget_limit`, the run may still
   stop on regularized agreement for now, but that result must be treated as
   potentially non-certifying until future code rejects, rescales, or otherwise
@@ -218,7 +219,21 @@
   promotion, `adhead.n6c10 --capacity-multiplier 100` became certifying by
   promoting to `1000`, but still took `3:26.77` versus `1:24.18` for starting
   directly at `10000`.
-- Objective-scale promotion is currently implemented for the legacy
-  `DualDecomposition` benchmark path. The network-free worker coordinator and
-  future distributed protocol still need an equivalent promotion/rescale
-  mechanism before they can use the same over-budget handling strategy.
+- The first dynamic-promotion commit only covered the current monolithic
+  `DualDecomposition` benchmark path. That was incomplete for productization;
+  the productized `PartitionWorkerCoordinator` also needs promotion/rescale
+  handling.
+
+## 2026-06-29 22:58 PDT
+
+- Do not describe the current monolithic `DualDecomposition` path as a
+  separate old branch. It is current code, but it is not the whole
+  productized worker-coordinator path.
+- Do not let worker-coordinator over-budget rounds mutate alpha state or enter
+  accepted progress. The coordinator now computes disagreement diagnostics for
+  the over-budget round, rejects its lower bound, skips alpha updates, and
+  then either promotes or returns `REGULARIZATION_BUDGET_EXCEEDED`.
+- Remaining distributed-protocol note: the in-process worker API has
+  `scaleObjective(long factor)`, but the future TCP protocol still needs an
+  explicit rescale message before remote workers can preserve live solver
+  state across promotion.
