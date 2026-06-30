@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 14:50 PDT
+Last updated: 2026-06-29 17:15 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -11,7 +11,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
-- Current submodule checkpoint: `fb311f4 Add randomized alpha initialization option`
+- Current submodule checkpoint: `5147815 Add directed streaming DIMACS reader`
 
 ## MVP Definition
 
@@ -87,6 +87,14 @@ The MVP is complete when:
   disagreeing.
 - [x] Add an experimental seedable randomized initial-alpha option and test
   both a hit seed and a miss seed on fixed-scale cycle cases.
+- [x] Add benchmark controls for the legacy `DualDecomposition` path:
+  selectable regularization scheme, symmetric alpha shift size, randomized
+  initial-alpha radius/seed, and directed streaming DIMACS input.
+- [x] Run local directed Waterloo `BL06-gargoyle-med` checks for no-reg,
+  randomized initial alpha, symmetric alpha shift, and local lexicographic
+  modes. In the checked 10-partition basic setup, no-reg already reached
+  exact agreement and matched the `.sol` value after adding the reader's
+  terminal imbalance offset.
 - [ ] Decide whether symmetric alpha-shift should replace local
   lexicographic regularization as the coordinator default, and whether
   randomized initial alphas should remain diagnostic-only, after broader
@@ -188,6 +196,10 @@ The MVP is complete when:
   step-`10` variants when the seed lands in a useful multiplier region, but a
   tested miss seed remains disagreeing. This is a one-shot perturbation, not a
   replacement for an adaptive regularizer.
+- Waterloo `BL06-gargoyle-med` did not reproduce a regularization-required
+  failure under the checked directed-streaming, 10-partition basic setup:
+  no-reg reached gap zero and zero disagreement; randomized initial alpha and
+  symmetric alpha shift were worse in the checked runs.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator
   path.
 

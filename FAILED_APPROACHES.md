@@ -101,3 +101,24 @@
   agreement, while another seed misses and remains disagreeing.
 - Use randomized initial alphas as diagnostic/experimental evidence for
   alpha-offset behavior, not as an MVP default or an optimality argument.
+
+## 2026-06-29 17:15 PDT
+
+- Do not cite Waterloo `BL06-gargoyle-med` as a current reproduced
+  regularization-required case under the checked setup. With directed
+  streaming input, 10 basic partitions, 4 threads, and regularization disabled,
+  it reached `best_gap=0` and `final_disagreement_count=0`.
+- The GARG-med objective needs the reader's terminal imbalance offset when
+  comparing against the `.sol` file. The checked no-reg value was
+  `68173681`; adding the reported imbalance `29806257` gives the provided
+  solution value `97979938`.
+- Randomized initial alpha is not automatically beneficial on GARG-med:
+  radius `9999`, seed `1`, with no regularization ended with
+  `best_gap=1024` and `final_disagreement_count=10`.
+- Symmetric alpha shift is not automatically beneficial on GARG-med:
+  shift `1` ended with `best_gap=1024` and
+  `final_disagreement_count=7`.
+- The local lexicographic run did not test final recovery on GARG-med because
+  it closed at step size `100` with zero regularization budget. This is a
+  useful regression check, not evidence that lexicographic recovery is needed
+  on this instance.

@@ -206,3 +206,55 @@
 - Verified:
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`.
+
+## 2026-06-29 17:15 PDT
+
+- Added benchmark-facing regularization controls to the legacy
+  `DualDecomposition` path and `dimacs_dual_decomp_example`:
+  - `--regularization local-lexicographic|symmetric-alpha-shift|none`;
+  - `--disable-regularization`;
+  - `--symmetric-alpha-shift`;
+  - `--random-initial-alpha-radius`;
+  - `--random-initial-alpha-seed`.
+- Added tests that verify:
+  - low-scale regularization strength is controlled by the selected scheme;
+  - randomized initial alphas are exported through partition packages.
+- Committed the mcpd3 unit:
+  `599d206 Add dual decomposition benchmark regularization controls`.
+- Added a streaming directed DIMACS reader for large directed benchmark files
+  and exposed it through `dimacs_dual_decomp_example --stream-directed-input`.
+  The reader preserves each directed nonterminal arc with zero reverse
+  capacity instead of merging reverse arcs through the general reader's
+  unordered-map path.
+- Added a tiny DIMACS test comparing the streaming directed reader against the
+  general reader on maxflow value and terminal capacities.
+- Committed the mcpd3 unit:
+  `5147815 Add directed streaming DIMACS reader`.
+- Downloaded and extracted Waterloo `BL06-gargoyle-med` locally under ignored
+  `data/maxflow/`.
+- Ran directed GARG-med benchmarks with 10 basic partitions, 4 threads,
+  progress enabled, and logs under ignored `benchmark_results/gargoyle-med/`:
+  - no regularization:
+    `best_lower_bound_unscaled=68173681`,
+    `best_upper_bound_unscaled=68173681`, `best_gap=0`,
+    `final_disagreement_count=0`, `iteration_count=416`,
+    wall time `2:09.44`;
+  - local lexicographic regularization:
+    same final value and disagreement as no-reg, with
+    `final_regularization_budget=0`, because the run closes at step size
+    `100` before low-scale regularization activates;
+  - random initial alpha with radius `9999`, seed `1`, and no regularization:
+    `best_gap=1024`, `final_disagreement_count=10`,
+    `iteration_count=549`, wall time `2:41.37`;
+  - symmetric alpha shift `1`:
+    `best_gap=1024`, `final_disagreement_count=7`,
+    `iteration_count=515`, wall time `2:30.44`.
+- The DIMACS `.sol` value is `97979938`; the reader reports terminal
+  imbalance `29806257`, and `68173681 + 29806257 = 97979938`.
+  Under this setup the no-regularization baseline therefore reaches an exact
+  primal agreement and matches the provided solution after the reader's
+  imbalance offset.
+- Conclusion: `BL06-gargoyle-med` with this directed reader, basic 10-way
+  partitioning, and default fixed-step schedule is not a reproduced
+  regularization-required case. Randomized initial alpha and symmetric alpha
+  shift were worse than no-reg in the checked runs.
