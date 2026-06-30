@@ -197,6 +197,27 @@ void rejectsInvalidWorkerHello() {
   client.join();
 }
 
+void remoteWorkerExposesHandshakeResources() {
+  auto listener = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
+  const auto port = mcpd3_distributed::localPort(listener);
+  auto hello = makeHello("resource-worker");
+  hello.cpu_count = 7;
+  hello.ram_gb = 48;
+  auto client = std::make_unique<WorkerClientThread>(port, hello);
+  auto worker = mcpd3_distributed::acceptTcpPartitionWorker(&listener, 2s);
+  try {
+    const auto resources = worker->resourceEstimate();
+    require(resources.cpu_count == 7,
+            "remote worker should expose HELLO cpu count");
+    require(resources.ram_gb == 48,
+            "remote worker should expose HELLO RAM estimate");
+    stopAndJoin(worker.get(), client.release());
+  } catch (...) {
+    stopAndJoin(worker.get(), client.release());
+    throw;
+  }
+}
+
 void remoteWorkerReportsErrorsAsExceptions() {
   auto listener = mcpd3_distributed::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
@@ -408,6 +429,7 @@ int main() {
     receivesFrameSplitAcrossTcpPackets();
     rejectsOversizedPayloadBeforeReadingBody();
     rejectsInvalidWorkerHello();
+    remoteWorkerExposesHandshakeResources();
     remoteWorkerReportsErrorsAsExceptions();
     remoteWorkerScalesLoadedObjective();
     remoteWorkerSolvesExplicitBatch();

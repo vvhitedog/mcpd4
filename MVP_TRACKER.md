@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-30 10:09 PDT
+Last updated: 2026-06-30 10:31 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -12,7 +12,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
 - Current submodule checkpoint:
-  `d19b319 Batch partition worker solve requests`
+  `6415ec7 Balance initial partition worker assignment`
 
 ## MVP Definition
 
@@ -161,7 +161,9 @@ The MVP is complete when:
 - [x] Implement worker `HELLO` with protocol version, worker name, CPU count,
   RAM GB, feature bits, temp path, and debug build/endianness fields.
 - [x] Implement coordinator wait-for-workers and accept-timeout behavior.
-- [x] Implement MVP partition assignment, initially round-robin.
+- [x] Implement static initial partition assignment.
+- [x] Replace round-robin initial assignment with weighted packing from
+  partition size estimates and worker CPU/RAM handshake data.
 - [x] Send partition packages once during setup.
 - [x] Implement per-round solve request, result gather, alpha update, and stop
   broadcast.
@@ -170,8 +172,9 @@ The MVP is complete when:
 - [x] Implement remote objective-scale promotion with `SCALE_OBJECTIVE`.
 - [x] Ensure graph structure is not resent during optimization rounds.
 - [x] Add clear worker-side and coordinator-side error messages.
-- [x] Add TCP loopback tests for framing, invalid handshakes, worker errors,
-  objective scaling, regularized agreement, and objective-scale promotion.
+- [x] Add TCP loopback tests for framing, invalid handshakes, worker resource
+  propagation, worker errors, objective scaling, regularized agreement, and
+  objective-scale promotion.
 
 ### Stage 5: Correctness And Integration Tests
 
@@ -190,6 +193,8 @@ The MVP is complete when:
   depend on local experimental files.
 - [x] Validate exact `adhead.n6c10` distributed/TCP run with fewer worker
   processes than partitions using batched requests.
+- [x] Validate exact `adhead.n6c10` distributed/TCP run with fewer worker
+  processes than partitions using static weighted initial assignment.
 
 ### Stage 6: Failure Handling And Operational Readiness
 
@@ -238,18 +243,23 @@ The MVP is complete when:
 - `PartitionWorkerCoordinator`, `InProcessPartitionWorker`, and
   `TcpPartitionWorker` support one worker object/process owning multiple
   partition packages.
+- `PartitionWorkerCoordinator` assigns packages statically at setup using a
+  largest-partition-first weighted pack. The package estimate uses local
+  nodes, arcs, and boundary endpoints; TCP workers contribute CPU/RAM estimates
+  from `HELLO`.
 - Product coordinator solves are dispatched concurrently across active worker
   processes. If one worker owns multiple packages, the coordinator now sends a
   single batch RPC and the worker solves the owned partition batch
   concurrently.
-- Worker ownership is still static for a run. The current protocol does not
+- Worker ownership is still static after setup. The current protocol does not
   implement dynamic work stealing, repartitioning, or migration of a slow
   worker's partitions to another process.
 - `mcpd3_coordinator --progress-every N` streams per-round optimizer health
   and per-worker timing, including solve counts and batch RPC counts. On
-  `adhead.n6c10`, the current exact 4-worker/10-partition batched path reaches
-  the same objective as the 10-worker exact run with zero disagreement, but
-  static ownership can still leave partition-balance tails.
+  `adhead.n6c10`, the current exact 4-worker/10-partition statically balanced
+  batched path reaches agreement and improved wall time from `3:45.06` to
+  `3:22.74` versus the previous 4-worker batched run, but static ownership can
+  still leave partition-balance tails.
 - `--saturate-capacity-overflow` is an opt-in benchmark/compatibility mode for
   the current 32-bit capacity path. Runs with nonzero
   `capacity_scale_saturation_count` solve a clipped-capacity problem, not the

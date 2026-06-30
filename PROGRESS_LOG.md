@@ -1,5 +1,65 @@
 # Progress Log
 
+## 2026-06-30 10:31 PDT
+
+- Confirmed branch state before starting:
+  - product branch `network-free-worker-api` was at
+    `d89cc4e Merge certified lower bound diagnostics`;
+  - `third_party/mcpd3` branch `partition-worker-api` was at
+    `5805c53 Merge certified lower bound accounting`.
+- Implemented static initial partition-to-worker balancing.
+- In `third_party/mcpd3`:
+  - added `PartitionWorkerResourceEstimate` with `cpu_count` and `ram_gb`;
+  - added `PartitionWorker::resourceEstimate()` with a default one-CPU,
+    unknown-RAM estimate;
+  - changed `PartitionWorkerCoordinator` setup from round-robin assignment to
+    deterministic largest-partition-first packing;
+  - partition work estimate uses local node count, arc count, and boundary
+    endpoint count;
+  - worker capacity uses CPU count as the primary scale and RAM as a mild
+    tie-break/modifier;
+  - assignment remains static after packages are loaded.
+- Added submodule tests proving:
+  - higher-CPU workers receive the largest package and more total estimated
+    work;
+  - for equal CPU counts, the higher-RAM worker receives the largest package.
+- Committed and pushed mcpd3 submodule branch `partition-worker-api`:
+  `6415ec7 Balance initial partition worker assignment`.
+- In the product repo:
+  - `TcpPartitionWorker::resourceEstimate()` now exposes CPU/RAM from the
+    worker `HELLO`;
+  - TCP loopback coverage verifies custom handshake resources propagate to the
+    coordinator-side worker object.
+- Exact `adhead.n6c10` distributed/TCP benchmark with 4 workers and 10
+  partitions improved versus the previous batched run:
+  - output:
+    `benchmark_results/adhead-distributed-exact-w4-balanced-20260630-102800.out`;
+  - `best_lower_bound 48372.9`;
+  - `best_lower_bound_raw 48372930`;
+  - `best_regularized_objective 48373.1`;
+  - `best_regularized_objective_raw 48373110`;
+  - `objective_scale 1000`;
+  - `objective_scale_promotions 1`;
+  - `final_disagreement_count 0`;
+  - `final_regularization_budget 180`;
+  - `capacity_scale_saturation_count 0`;
+  - `timing_solve_wall_us 140040416`;
+  - `timing_worker_rpc_overhead_us 19525976`;
+  - `timing_solve_round_count 1820`;
+  - `timing_solve_round_batch_count 728`;
+  - wall time `3:22.74`;
+  - max RSS `6342740 kB`.
+- The lower-bound value now reflects the merged certified-LB accounting:
+  certified original lower bound is conservative relative to the regularized
+  objective. This was not changed in this balancing unit.
+- Verified:
+  - `cmake --build third_party/mcpd3/build -j`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - exact distributed/TCP adhead run with 4 workers, 10 partitions, and no
+    saturation.
+
 ## 2026-06-30 10:09 PDT
 
 - Implemented batched multi-partition worker solves.

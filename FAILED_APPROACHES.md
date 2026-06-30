@@ -368,3 +368,17 @@
   the selected solution. Subtracting `R` directly from `F(x_selected)` is safe
   but unnecessarily pessimistic; not subtracting the slack at all can overstate
   the lower bound.
+
+## 2026-06-30 10:31 PDT
+
+- Do not revert to round-robin as the default static partition map. It ignores
+  both package-size skew and worker resources. The current setup path uses a
+  deterministic largest-partition-first weighted assignment from package node,
+  arc, and boundary counts plus worker CPU/RAM estimates.
+- Do not treat static weighted assignment as dynamic load balancing. Packages
+  are still sent once and remain owned by the assigned worker for the solve;
+  moving packages later would require explicit migration/reload semantics.
+- Do not compare the pre-balancing 4-worker batched adhead run against the
+  post-balancing run without noting the ownership change. On the checked
+  `adhead.n6c10` run, static weighted assignment improved wall time from
+  `3:45.06` to `3:22.74`.

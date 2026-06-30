@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <exception>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -108,6 +109,22 @@ void TcpPartitionWorker::loadPartition(
   (void)receiveReadyOrThrow(socket_);
   timing_stats_.load_partition_rpc_wall_us += elapsedUs(start);
   ++timing_stats_.load_partition_count;
+}
+
+mcpd3::PartitionWorkerResourceEstimate
+TcpPartitionWorker::resourceEstimate() const {
+  mcpd3::PartitionWorkerResourceEstimate resources;
+  resources.cpu_count =
+      hello_.cpu_count >
+              static_cast<std::uint32_t>(std::numeric_limits<int>::max())
+          ? std::numeric_limits<int>::max()
+          : static_cast<int>(hello_.cpu_count);
+  resources.ram_gb =
+      hello_.ram_gb >
+              static_cast<std::uint64_t>(std::numeric_limits<long>::max())
+          ? std::numeric_limits<long>::max()
+          : static_cast<long>(hello_.ram_gb);
+  return resources;
 }
 
 mcpd3::PartitionSolveResult TcpPartitionWorker::solveRound(

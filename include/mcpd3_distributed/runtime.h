@@ -29,6 +29,7 @@ public:
   TcpPartitionWorker(SocketHandle socket, HelloMessage hello);
 
   void loadPartition(const mcpd3::PartitionPackage &package) override;
+  mcpd3::PartitionWorkerResourceEstimate resourceEstimate() const override;
   mcpd3::PartitionSolveResult solveRound(
       const mcpd3::PartitionSolveRequest &request) override;
   std::vector<mcpd3::PartitionSolveResult> solveRoundBatch(
