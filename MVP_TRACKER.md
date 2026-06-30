@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 19:57 PDT
+Last updated: 2026-06-29 20:45 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -11,7 +11,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 
 - Product repo: `network-free-worker-api`
 - mcpd3 submodule: `partition-worker-api`
-- Current submodule checkpoint: `c398487 Decouple objective scale from DD step size`
+- Current submodule checkpoint: `7e5caea Harden scaled epsilon regularization`
 
 ## MVP Definition
 
@@ -27,7 +27,8 @@ The MVP is complete when:
 - localhost integration tests show distributed results match current
   in-process mcpd3 behavior on committed tiny and small fixtures;
 - stopping output distinguishes exact unregularized agreement, exact
-  lexicographic regularized agreement, and non-certificate no-progress stops.
+  budget-safe scaled-epsilon regularized agreement, warning-only over-budget
+  regularized agreement, and non-certificate no-progress stops.
 
 ## Progress Checklist
 
@@ -105,13 +106,19 @@ The MVP is complete when:
   exact regularization path needs follow-up.
 - [x] Write the exactness proof for the original scaled epsilon regularization
   idea and review the OG implementation against it.
-- [ ] Implement a hardened OG-style regularization mode with an explicit
-  summed global budget check:
+- [x] Implement a hardened OG-style scaled-epsilon regularization mode with an
+  explicit summed global active-budget diagnostic:
   `global_regularization_budget < objective_scale`.
-- [ ] Decide whether symmetric alpha-shift should replace local
-  lexicographic regularization as the coordinator default, and whether
-  randomized initial alphas should remain diagnostic-only, after broader
-  stress testing.
+- [ ] Replace the current over-budget warning with a real handling strategy:
+  reject the regularized certificate, reduce/redistribute epsilon, increase a
+  safe objective scale, or continue without claiming optimality.
+- [x] Benchmark the hardened scaled-epsilon mode on local
+  `adhead.n6c10` against the OG `early_experiments` scheme. Current
+  productized code and OG both reached raw lower bound `483730000` with zero
+  disagreement; current wall time was `1:24.18`, OG wall time was `1:26.19`.
+- [x] Decide regularization default for this MVP slice: use OG-style
+  scaled-epsilon regularization, remove symmetric alpha-shift from the
+  productized path, and keep randomized initial alphas diagnostic-only.
 - [ ] Decide and implement how optional primal upper-bound decoding maps to
   workers. MVP may keep it disabled, but behavior must be explicit.
 - [ ] Support one worker object/process owning multiple partition packages.
@@ -183,9 +190,10 @@ The MVP is complete when:
 - [ ] Document current MVP limitations.
 - [ ] Document exactness semantics:
   - zero disagreement with zero regularization can be exact;
-  - lexicographic regularized agreement can be exact when local workers solve
-    `M * F(x) + R(x)` and report `F(x)`;
-  - heuristic/additive regularized agreement is not an exact certificate;
+  - scaled-epsilon regularized agreement can be exact when the summed active
+    regularization budget is strictly below the objective scale;
+  - over-budget regularized agreement currently warns and must not be treated
+    as a hard certificate until future handling is implemented;
   - patience, group stopping, timeout, and no-progress stops are not exact
     certificates.
 
@@ -202,9 +210,9 @@ The MVP is complete when:
   scale-schedule case: step `10` cycles, but continuing to step `1` reaches
   agreement. This is not a strict regularization-required example because a
   forced-unregularized step `1` run also reaches agreement.
-- Experimental `SYMMETRIC_ALPHA_SHIFT` resolves fixed step-`10` variants of
-  that cycle by making `+/-10` alpha updates into `+/-9` updates. It has only
-  been tested on committed tiny synthetic cases so far.
+- `SYMMETRIC_ALPHA_SHIFT` was useful experimental evidence, but it is no
+  longer part of the productized regularization path. The productized path is
+  now OG-style scaled epsilon plus optional randomized initial alphas.
 - Experimental randomized initial alphas can also resolve those fixed
   step-`10` variants when the seed lands in a useful multiplier region, but a
   tested miss seed remains disagreeing. This is a one-shot perturbation, not a
@@ -217,14 +225,18 @@ The MVP is complete when:
   case: `early_experiments` reaches `19448` with zero disagreement. Current
   no-reg gets near the lower bound but leaves disagreement, while the current
   exact lexicographic regularizer is too slow and did not reproduce the
-  original behavior in the checked window.
+  original behavior in the checked window. The hardened scaled-epsilon path
+  improves the productized behavior but still leaves disagreement under the
+  default patience window (`best_lower_bound_raw=194479904`,
+  `final_disagreement_count=187`).
 - The OG regularization idea is exact under the lattice proof when agreement
-  holds and the summed effective regularization range is below the objective
-  scale. The OG implementation has the right shape but does not fully enforce
-  this condition because the budget check is local, warning-only, and can miss
-  stale incremental perturbations.
-- `adhead.n6c10` is available locally but has not been solved because the
-  current machine is memory constrained for a graph that size.
+  holds and the summed effective regularization range is strictly below the
+  objective scale. The hardened implementation now reports the summed active
+  budget and warns on `budget >= limit`; future work must replace the warning
+  with a real over-budget handling policy.
+- `adhead.n6c10` is the current benchmark comparison target. With
+  `--capacity-multiplier 10000`, current scaled epsilon reached the known
+  optimum `48373` with zero disagreement and active budget `40 < 10000`.
 - Primal upper-bound decoding is not yet mapped into the worker-coordinator
   path.
 

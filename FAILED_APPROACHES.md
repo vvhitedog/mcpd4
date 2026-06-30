@@ -172,3 +172,27 @@
   perturbation in the maxflow graph. Skipped constrained nodes can retain stale
   terminal perturbations, and changing low-scale regularization strength does
   not force a full terminal recomputation.
+
+## 2026-06-29 20:45 PDT
+
+- Do not anchor every previous sink boundary copy on every low-scale solve.
+  That over-broad productized variant over-regularized `babyface.n6c10`:
+  `final_regularization_budget_raw=876603`, far above the `10000` objective
+  scale, and it still ended with hundreds of disagreements. The useful OG
+  shape refreshes anchors only when the local DD alpha term changes.
+- Do not hide stale or persistent epsilon terms from diagnostics. The hardened
+  implementation treats active epsilon terms as explicit state and reports the
+  full active budget, including terms that persist across unchanged-alpha
+  solves.
+- The current over-budget behavior is intentionally warning-only. If
+  `regularization_budget >= regularization_budget_limit`, the run may still
+  stop on regularized agreement for now, but that result must be treated as
+  potentially non-certifying until future code rejects, rescales, or otherwise
+  handles the over-budget condition.
+- Do not use `babyface.n6c10` as the primary benchmark for this step. It
+  remains a useful sanity/regression case, but the benchmark comparison
+  requested here is `adhead.n6c10` against the OG scheme.
+- The OG `early_experiments` benchmark run on this machine required a local
+  worktree-only shim to remove unused CSR/primal-decoding code that depended
+  on missing Boost headers. That shim did not modify the OG DD solver or
+  regularizer, but benchmark notes should mention it.

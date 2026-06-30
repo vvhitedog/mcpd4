@@ -373,3 +373,57 @@
   regularization strength changes between step sizes. A hardened version must
   track the actual effective perturbation used in the solve or force a full
   terminal recomputation when regularization state changes.
+
+## 2026-06-29 20:45 PDT
+
+- Replaced the productized local regularization experiments with a hardened
+  OG-style scaled-epsilon scheme:
+  - low-scale only: regularization strength is `10` at step `10`, `1` at
+    step `1`, and `0` above step `10`;
+  - anchors are refreshed from previous sink labels only when the local DD
+    alpha term changes;
+  - active epsilon terms persist across unchanged-alpha solves, matching the
+    useful OG incremental behavior;
+  - diagnostics count the full active regularization budget and contribution;
+  - `regularization_budget_limit` is configurable, defaulting to
+    `objective_scale`;
+  - if the active budget is not strictly below the limit, the solver prints a
+    warning that the result may not certify optimality, but it does not stop
+    the run yet.
+- Removed the symmetric alpha-shift scheme from the productized coordinator
+  and legacy benchmark path. Randomized initial alphas remain available as a
+  diagnostic/preconditioning option.
+- Added/updated tests for:
+  - scaled-epsilon activation only when a previous sink label has a changed
+    alpha term;
+  - persistence of active epsilon terms until a later alpha change clears
+    them;
+  - low-scale tie handling;
+  - the synthetic opposite-direction cycle case;
+  - over-budget warning diagnostics where regularized agreement still stops
+    for now.
+- Committed and pushed the mcpd3 unit on branch `partition-worker-api`:
+  `7e5caea Harden scaled epsilon regularization`.
+- Benchmarked current productized scaled-epsilon on `adhead.n6c10` with
+  10 basic partitions, 4 threads, and `--capacity-multiplier 10000`:
+  - known `.sol` value: `48373`;
+  - `best_lower_bound_raw=483730000`;
+  - `final_disagreement_count=0`;
+  - `final_regularization_budget_raw=40`, below the default strict limit
+    `10000`;
+  - wall time `1:24.18`, max RSS `6007596 KB`.
+- Compared against the OG `origin/early_experiments` branch in a separate
+  worktree. The old example needed a local benchmark-only shim to remove an
+  unused CSR/primal-decoding Boost dependency; the DD solver and OG
+  regularizer were left unchanged. OG on the same `adhead.n6c10` setup
+  reached:
+  - `=== MAX === lower_bound : 483730000`;
+  - final printed `num_disagreeing : 0`;
+  - wall time `1:26.19`, max RSS `5848172 KB`.
+- Sanity-checked `babyface.n6c10` with the hardened scaled-epsilon path. It
+  improved the prior productized run but did not reach agreement under the
+  default patience window:
+  - `best_lower_bound_raw=194479904` versus `.sol=19448`;
+  - `final_disagreement_count=187`;
+  - `final_regularization_budget_raw=1048`, below the default strict limit
+    `10000`.
