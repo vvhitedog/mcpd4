@@ -568,3 +568,30 @@
   - `cmake --build third_party/mcpd3/build --target dimacs_dual_decomp_example -j`;
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-06-29 23:38 PDT
+
+- Completed Stage 3 product serialization without adding sockets.
+- Added `mcpd3_distributed_protocol` with:
+  - length-prefixed frames:
+    `uint32 message_type`, `uint64 payload_bytes`, `payload`;
+  - explicit little-endian integer encodings;
+  - strict complete-frame parsing;
+  - typed encode/decode helpers for `HELLO`, `PARTITION_PACKAGE`, `READY`,
+    `SOLVE_ROUND_REQUEST`, `SOLVE_ROUND_RESULT`, `SCALE_OBJECTIVE`,
+    `ALPHA_UPDATE`, `STOP`, and `ERROR`.
+- Added `protocol_serialization_test` covering:
+  - header little-endian layout;
+  - round trips for every Stage 3 message type;
+  - unknown message type rejection;
+  - truncated header rejection;
+  - payload-size mismatch rejection;
+  - wrong expected message type rejection;
+  - truncated typed payload rejection;
+  - trailing typed payload byte rejection.
+- Verified:
+  - `cmake -S . -B build`;
+  - `cmake --build build --target protocol_serialization_test -j`;
+  - `./build/protocol_serialization_test`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`.

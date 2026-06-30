@@ -256,3 +256,12 @@
 - Do not assume one package per worker object. The in-process worker API now
   supports multiple loaded packages per worker, and solve requests must carry
   a `partition_id` when a worker owns more than one partition.
+
+## 2026-06-29 23:38 PDT
+
+- Do not add TCP behavior into the Stage 3 serialization module. Stage 3 is
+  bytes-in/bytes-out only; socket lifecycle and partial network reads belong
+  to Stage 4.
+- The current frame decoder intentionally expects a complete frame buffer.
+  Stage 4 can add a stream/framing reader that accumulates bytes from sockets
+  before calling the strict decoder.

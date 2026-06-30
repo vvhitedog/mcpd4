@@ -9,6 +9,12 @@ include(CTest)
 
 find_package(Threads REQUIRED)
 
+add_library(mcpd3_distributed_protocol
+  src/protocol.cpp)
+target_include_directories(mcpd3_distributed_protocol PUBLIC
+  include
+  third_party/mcpd3)
+
 if (BUILD_TESTING)
   add_executable(distributed_partition_worker_smoke_test
     tests/partition_worker_smoke_test.cpp
@@ -20,4 +26,11 @@ if (BUILD_TESTING)
     Threads::Threads)
   add_test(NAME distributed_partition_worker_smoke_test
     COMMAND distributed_partition_worker_smoke_test)
+
+  add_executable(protocol_serialization_test
+    tests/protocol_serialization_test.cpp)
+  target_link_libraries(protocol_serialization_test PRIVATE
+    mcpd3_distributed_protocol)
+  add_test(NAME protocol_serialization_test
+    COMMAND protocol_serialization_test)
 endif ()

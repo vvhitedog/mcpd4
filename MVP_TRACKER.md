@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 23:30 PDT
+Last updated: 2026-06-29 23:38 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -135,11 +135,11 @@ The MVP is complete when:
 
 ### Stage 3: Product Serialization
 
-- [ ] Add product-repo serialization module.
-- [ ] Implement length-prefixed framing:
+- [x] Add product-repo serialization module.
+- [x] Implement length-prefixed framing:
   `uint32 message_type`, `uint64 payload_bytes`, `payload`.
-- [ ] Use explicit little-endian encodings.
-- [ ] Serialize/deserialize:
+- [x] Use explicit little-endian encodings.
+- [x] Serialize/deserialize:
   - `HELLO`;
   - `PARTITION_PACKAGE`;
   - `READY`;
@@ -149,8 +149,8 @@ The MVP is complete when:
   - `ALPHA_UPDATE`;
   - `STOP`;
   - `ERROR`.
-- [ ] Add round-trip unit tests for every message type.
-- [ ] Add malformed-frame and truncated-payload tests.
+- [x] Add round-trip unit tests for every message type.
+- [x] Add malformed-frame and truncated-payload tests.
 
 ### Stage 4: TCP Loopback Runtime
 
