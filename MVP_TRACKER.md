@@ -1,6 +1,6 @@
 # Distributed mcpd3 MVP Tracker
 
-Last updated: 2026-06-29 23:38 PDT
+Last updated: 2026-06-29 23:56 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -154,17 +154,20 @@ The MVP is complete when:
 
 ### Stage 4: TCP Loopback Runtime
 
-- [ ] Add `mcpd3_coordinator` binary in this product repo.
-- [ ] Add `mcpd3_worker` binary in this product repo.
-- [ ] Implement worker `HELLO` with protocol version, worker name, CPU count,
+- [x] Add `mcpd3_coordinator` binary in this product repo.
+- [x] Add `mcpd3_worker` binary in this product repo.
+- [x] Implement worker `HELLO` with protocol version, worker name, CPU count,
   RAM GB, feature bits, temp path, and debug build/endianness fields.
-- [ ] Implement coordinator wait-for-workers and timeout behavior.
-- [ ] Implement MVP partition assignment, initially round-robin.
-- [ ] Send partition packages once during setup.
-- [ ] Implement per-round solve request, result gather, alpha update, and stop
+- [x] Implement coordinator wait-for-workers and accept-timeout behavior.
+- [x] Implement MVP partition assignment, initially round-robin.
+- [x] Send partition packages once during setup.
+- [x] Implement per-round solve request, result gather, alpha update, and stop
   broadcast.
-- [ ] Ensure graph structure is not resent during optimization rounds.
-- [ ] Add clear worker-side and coordinator-side error messages.
+- [x] Implement remote objective-scale promotion with `SCALE_OBJECTIVE`.
+- [x] Ensure graph structure is not resent during optimization rounds.
+- [x] Add clear worker-side and coordinator-side error messages.
+- [x] Add TCP loopback tests for framing, invalid handshakes, worker errors,
+  objective scaling, regularized agreement, and objective-scale promotion.
 
 ### Stage 5: Correctness And Integration Tests
 
@@ -210,12 +213,19 @@ The MVP is complete when:
 
 ## Current Limitations
 
-- No TCP transport exists yet.
-- No product serialization exists yet.
+- TCP runtime exists for the localhost/IPv4 MVP and exposes an explicit bind
+  address, but it is still sequential and blocking. It does not yet implement
+  reconnects, heartbeats, worker replacement, or partial-progress recovery.
+- The committed Stage 4 integration test uses loopback worker threads through
+  the runtime API. Stage 5 still needs process-level coordinator/worker tests
+  on committed DIMACS fixtures.
+- `mcpd3_coordinator` currently uses a long fixed accept wait while collecting
+  workers. Runtime accept calls are timeout-capable, but the CLI does not yet
+  expose a timeout flag.
 - `PartitionWorkerCoordinator` currently sends all alpha records every round.
-- `PartitionWorkerCoordinator` and `InProcessPartitionWorker` support one
-  worker object owning multiple partition packages. TCP assignment/runtime does
-  not exist yet.
+- `PartitionWorkerCoordinator`, `InProcessPartitionWorker`, and
+  `TcpPartitionWorker` support one worker object/process owning multiple
+  partition packages.
 - Source-side lexicographic regularization can be redundant in simple local
   ties because the current maxflow implementation already chooses source in
   those cases.
@@ -257,9 +267,9 @@ The MVP is complete when:
   `final_regularization_budget_raw=180 < 1000`. This was correct but slower
   than starting at `10000`.
 - Dynamic objective-scale promotion is implemented in
-  `PartitionWorkerCoordinator` for in-process workers. The future distributed
-  protocol will still need an explicit rescale/promotion message to preserve
-  remote worker residual graphs and coordinator alpha state across promotion.
+  `PartitionWorkerCoordinator` for both in-process workers and TCP workers via
+  the `SCALE_OBJECTIVE` message, preserving remote live solver state across
+  promotion.
 - The opposite-direction cycle has explicit coverage for starting at low
   objective scale: with `M=10`, enough promoted schedule depth, and sufficient
   unit-scale iterations, the coordinator promotes once to `M=100` and reaches

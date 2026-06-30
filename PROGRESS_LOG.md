@@ -595,3 +595,37 @@
   - `./build/protocol_serialization_test`;
   - `ctest --test-dir build --output-on-failure`;
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`.
+
+## 2026-06-29 23:56 PDT
+
+- Completed Stage 4 TCP loopback runtime in the product repo.
+- Added `mcpd3_distributed_runtime` with:
+  - POSIX TCP socket RAII;
+  - explicit complete-frame send/receive helpers;
+  - loopback and explicit IPv4 bind helpers;
+  - `TcpPartitionWorker`, implementing the existing
+    `mcpd3::PartitionWorker` interface over the serialized protocol;
+  - worker-side request loop backed by `InProcessPartitionWorker`;
+  - coordinator-side `HELLO` accept/validation.
+- Added product binaries:
+  - `mcpd3_worker HOST PORT [--name NAME]`;
+  - `mcpd3_coordinator DIMACS --port PORT ...`, which reads/partitions a graph,
+    accepts workers, sends packages once, runs the worker coordinator, reports
+    solve diagnostics, and sends `STOP`.
+- Implemented remote handling for `PARTITION_PACKAGE`, `SOLVE_ROUND_REQUEST`,
+  `SOLVE_ROUND_RESULT`, `SCALE_OBJECTIVE`, `READY`, `STOP`, and `ERROR`.
+- Added `tcp_loopback_test` covering:
+  - partial TCP frame receive;
+  - oversized payload rejection;
+  - invalid worker protocol version rejection;
+  - worker-side solver errors returned as `ERROR` frames;
+  - remote objective scaling of a loaded partition;
+  - full coordinator solve over one TCP worker owning both partitions;
+  - objective-scale promotion over TCP via `SCALE_OBJECTIVE`.
+- Verified:
+  - `cmake -S . -B build`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - manual process smoke test with `mcpd3_coordinator` and `mcpd3_worker`
+    on a temporary DIMACS graph.

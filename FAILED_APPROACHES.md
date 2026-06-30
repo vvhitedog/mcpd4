@@ -265,3 +265,15 @@
 - The current frame decoder intentionally expects a complete frame buffer.
   Stage 4 can add a stream/framing reader that accumulates bytes from sockets
   before calling the strict decoder.
+
+## 2026-06-29 23:56 PDT
+
+- Do not test remote objective scaling with an unconstrained one-node local
+  partition. That local problem can report a valid zero lower bound, so it is
+  not a useful witness that `SCALE_OBJECTIVE` rescaled the live remote solver.
+  The Stage 4 test now includes a source-side boundary constraint so the bound
+  is nonzero before scaling and must scale by the requested factor.
+- Do not treat Stage 4 loopback runtime as operational fault tolerance. It now
+  propagates worker `ERROR` frames and rejects invalid handshakes, but worker
+  disconnect/reconnect, heartbeat, replacement, and process-level fixture
+  tests remain Stage 6/Stage 5 work.
