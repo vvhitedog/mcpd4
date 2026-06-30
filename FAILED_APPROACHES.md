@@ -196,3 +196,13 @@
   worktree-only shim to remove unused CSR/primal-decoding code that depended
   on missing Boost headers. That shim did not modify the OG DD solver or
   regularizer, but benchmark notes should mention it.
+
+## 2026-06-29 21:43 PDT
+
+- Do not use `--capacity-multiplier 100` for the current scaled-epsilon
+  `adhead.n6c10` benchmark. It reached zero disagreement, but the active
+  regularization budget exceeded the strict limit by orders of magnitude
+  (`11036 >= 100`), so the run is non-certifying and the reported lower bound
+  rose above the known optimum.
+- Lowering the multiplier from `10000` to `100` did not improve performance on
+  `adhead.n6c10`; wall time increased from `1:24.18` to `3:31.91`.

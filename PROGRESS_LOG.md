@@ -427,3 +427,19 @@
   - `final_disagreement_count=187`;
   - `final_regularization_budget_raw=1048`, below the default strict limit
     `10000`.
+
+## 2026-06-29 21:43 PDT
+
+- Tested whether `adhead.n6c10` can use a smaller compatibility multiplier:
+  `--capacity-multiplier 100`.
+- Result: not enough for the current scaled-epsilon method.
+  - The run printed the expected warning:
+    `regularization budget 9840 is not below limit 100`.
+  - Final agreement was reached, but it was non-certifying:
+    `final_disagreement_count=0`,
+    `final_regularization_budget_raw=11036`, and
+    `final_regularization_contribution_raw=10205`.
+  - The reported bound exceeded the known scaled optimum:
+    `best_lower_bound_raw=4855590` versus expected `4837300`.
+  - It was slower than the `10000` multiplier run:
+    wall time `3:31.91` versus `1:24.18`.
