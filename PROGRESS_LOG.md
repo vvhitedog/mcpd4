@@ -1,5 +1,23 @@
 # Progress Log
 
+## 2026-06-30 11:18 PDT
+
+- Removed the separate public `selected_objective` /
+  `best_selected_objective` reporting surface.
+- `final_objective[_raw]` is now the user-facing original objective for the
+  final agreed solution.
+- Kept the distinct certificate diagnostics:
+  - `final_certified_lower_bound[_raw]`;
+  - `final_regularized_objective[_raw]`;
+  - `best_lower_bound[_raw]` / `best_certified_lower_bound[_raw]`;
+  - `best_regularized_objective[_raw]`.
+- Progress telemetry now reports certified lower-bound and regularized
+  objective diagnostics without duplicating the final objective as a selected
+  objective.
+- Tests were updated to keep checking the internal original-objective
+  arithmetic needed for the certificate while rejecting `selected_objective` in
+  product progress output.
+
 ## 2026-06-30 11:02 PDT
 
 - Renamed solve-count telemetry so counters are not emitted with the

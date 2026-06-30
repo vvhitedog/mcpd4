@@ -388,7 +388,8 @@
 - Do not use the conservative certified lower bound as the user-facing solved
   objective after budget-safe regularized agreement. For adhead, the certificate
   is `48372.9` while the selected/original final objective is `48373`.
-- Report selected/original objective, certified lower bound, and regularized
-  objective as separate fields. The certificate remains the valid lower bound;
-  the selected/original objective is the final value once agreement certifies
-  primal recovery.
+- Do not expose a separate `selected_objective` /
+  `best_selected_objective` user-facing field. It duplicates `final_objective`
+  once agreement certifies primal recovery and makes the reporting semantics
+  harder to reason about. Keep `final_objective` for the solved value, and keep
+  certified lower-bound plus regularized-objective fields as diagnostics.

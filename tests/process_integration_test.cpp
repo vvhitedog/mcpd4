@@ -47,7 +47,6 @@ struct SolveSummary {
   long final_objective_raw = 0;
   long final_certified_lower_bound_raw = 0;
   long final_regularized_objective_raw = 0;
-  long best_selected_objective_raw = 0;
   long best_lower_bound_raw = 0;
   long best_certified_lower_bound_raw = 0;
   long best_regularized_objective_raw = 0;
@@ -246,12 +245,11 @@ SolveSummary summarize(const mcpd3::PartitionWorkerCoordinatorSolveResult &r) {
   SolveSummary summary;
   summary.status = static_cast<long>(r.status);
   summary.stop_reason = static_cast<long>(r.stop_reason);
-  summary.final_objective_raw = r.final_selected_objective_raw;
+  summary.final_objective_raw = r.final_objective_raw;
   summary.final_certified_lower_bound_raw =
       r.final_certified_lower_bound_raw;
   summary.final_regularized_objective_raw =
       r.final_regularized_objective_raw;
-  summary.best_selected_objective_raw = r.best_selected_objective_raw;
   summary.best_lower_bound_raw = r.best_lower_bound_raw;
   summary.best_certified_lower_bound_raw = r.best_certified_lower_bound_raw;
   summary.best_regularized_objective_raw = r.best_regularized_objective_raw;
@@ -312,7 +310,6 @@ SolveSummary parseCoordinatorOutput(const std::string &output) {
       "final_objective_raw",
       "final_certified_lower_bound_raw",
       "final_regularized_objective_raw",
-      "best_selected_objective_raw",
       "best_lower_bound_raw",
       "best_certified_lower_bound_raw",
       "best_regularized_objective_raw",
@@ -356,8 +353,6 @@ SolveSummary parseCoordinatorOutput(const std::string &output) {
       parseLongField(fields, "final_certified_lower_bound_raw");
   summary.final_regularized_objective_raw =
       parseLongField(fields, "final_regularized_objective_raw");
-  summary.best_selected_objective_raw =
-      parseLongField(fields, "best_selected_objective_raw");
   summary.best_lower_bound_raw =
       parseLongField(fields, "best_lower_bound_raw");
   summary.best_certified_lower_bound_raw =
@@ -473,9 +468,6 @@ void requireEqual(const SolveSummary &distributed,
   check(distributed.final_regularized_objective_raw,
         reference.final_regularized_objective_raw,
         "final_regularized_objective_raw");
-  check(distributed.best_selected_objective_raw,
-        reference.best_selected_objective_raw,
-        "best_selected_objective_raw");
   check(distributed.best_lower_bound_raw, reference.best_lower_bound_raw,
         "best_lower_bound_raw");
   check(distributed.best_certified_lower_bound_raw,
@@ -620,8 +612,8 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
   require(run.output.find(" regularized_objective ") != std::string::npos,
           "progress telemetry should include regularized objective\n" +
               run.output);
-  require(run.output.find(" selected_objective ") != std::string::npos,
-          "progress telemetry should include selected objective\n" +
+  require(run.output.find(" selected_objective ") == std::string::npos,
+          "progress telemetry should not include selected objective\n" +
               run.output);
   require(run.output.find(" certified_lower_bound ") != std::string::npos,
           "progress telemetry should include certified lower bound\n" +
