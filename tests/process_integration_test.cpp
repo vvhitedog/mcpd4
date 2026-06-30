@@ -45,6 +45,7 @@ struct SolveSummary {
   long status = -1;
   long stop_reason = -1;
   long best_lower_bound_raw = 0;
+  long best_regularized_objective_raw = 0;
   long objective_scale = 1;
   long objective_scale_promotions = 0;
   long total_iterations = 0;
@@ -241,6 +242,7 @@ SolveSummary summarize(const mcpd3::PartitionWorkerCoordinatorSolveResult &r) {
   summary.status = static_cast<long>(r.status);
   summary.stop_reason = static_cast<long>(r.stop_reason);
   summary.best_lower_bound_raw = r.best_lower_bound_raw;
+  summary.best_regularized_objective_raw = r.best_regularized_objective_raw;
   summary.objective_scale = r.scale;
   summary.objective_scale_promotions = r.objective_scale_promotion_count;
   summary.total_iterations = r.total_iterations;
@@ -296,6 +298,7 @@ SolveSummary parseCoordinatorOutput(const std::string &output) {
       "status",
       "stop_reason",
       "best_lower_bound_raw",
+      "best_regularized_objective_raw",
       "objective_scale",
       "objective_scale_promotions",
       "total_iterations",
@@ -333,6 +336,8 @@ SolveSummary parseCoordinatorOutput(const std::string &output) {
   summary.stop_reason = parseLongField(fields, "stop_reason");
   summary.best_lower_bound_raw =
       parseLongField(fields, "best_lower_bound_raw");
+  summary.best_regularized_objective_raw =
+      parseLongField(fields, "best_regularized_objective_raw");
   summary.objective_scale = parseLongField(fields, "objective_scale");
   summary.objective_scale_promotions =
       parseLongField(fields, "objective_scale_promotions");
@@ -436,6 +441,9 @@ void requireEqual(const SolveSummary &distributed,
   check(distributed.stop_reason, reference.stop_reason, "stop_reason");
   check(distributed.best_lower_bound_raw, reference.best_lower_bound_raw,
         "best_lower_bound_raw");
+  check(distributed.best_regularized_objective_raw,
+        reference.best_regularized_objective_raw,
+        "best_regularized_objective_raw");
   check(distributed.objective_scale, reference.objective_scale,
         "objective_scale");
   check(distributed.objective_scale_promotions,
@@ -568,6 +576,9 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
               run.output);
   require(run.output.find(" disagreement_count ") != std::string::npos,
           "progress telemetry should include disagreement count\n" +
+              run.output);
+  require(run.output.find(" regularized_objective ") != std::string::npos,
+          "progress telemetry should include regularized objective\n" +
               run.output);
   require(run.output.find(" worker_solve_wall_us ") != std::string::npos,
           "progress telemetry should include worker solve timing\n" +
