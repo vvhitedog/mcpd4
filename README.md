@@ -18,6 +18,9 @@ planning details live in [AGENT_HANDOFF.md](AGENT_HANDOFF.md), progress is in
 - `tests/fixtures`: small committed DIMACS graphs for smoke tests.
 - `scripts/run_local_process_benchmark.sh`: starts one coordinator and local
   workers for a quick localhost distributed run.
+- `build/mcpd4_inprocess_benchmark`: optional benchmark binary that runs the
+  product `PartitionWorkerCoordinator` fully in-process for local monolithic
+  comparisons.
 
 ## Requirements
 

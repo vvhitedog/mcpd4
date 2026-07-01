@@ -1,5 +1,27 @@
 # Progress Log
 
+## 2026-07-01 16:37 PDT
+
+- Added `mcpd4_inprocess_benchmark`, a local benchmark executable that uses
+  the product `mcpd3::PartitionWorkerCoordinator` path with
+  `InProcessPartitionWorker` instances instead of TCP workers.
+- Ran a one-worker in-process `adhead.n6c10` baseline with the same 10
+  partitions, objective scale `1000`, schedule start `10000`, five schedule
+  levels, and directed input used by the two-machine delta/no-Snappy run:
+  - output prefix:
+    `benchmark_results/adhead-local-inprocess-w1-p10-os1000-20260701-163403`;
+  - `final_objective_raw=48373000`, `total_iterations=108`,
+    `final_disagreement_count=0`;
+  - in-process wall `158.95s`;
+  - two-machine delta/no-Snappy fair wall excluding discovery was `158.28s`;
+  - in-process solve wall `87.91s` versus distributed solve wall `90.51s`.
+- Interpretation: with this partition count and laptop CPU count, the
+  two-machine run did not produce a meaningful end-to-end speedup over one
+  local in-process worker. The remote worker mainly replaces local maxflow
+  work but adds setup/transport overhead; future gains likely require reducing
+  partition upload/setup cost, changing partition/worker balance, or using a
+  larger case where local in-process parallelism is saturated.
+
 ## 2026-07-01 01:55 PDT
 
 - Added temporal delta encoding for live TCP solve traffic:

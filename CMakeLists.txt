@@ -68,6 +68,11 @@ add_executable(mcpd4_coordinator
 target_link_libraries(mcpd4_coordinator PRIVATE
   mcpd4_runtime)
 
+add_executable(mcpd4_inprocess_benchmark
+  src/inprocess_benchmark_main.cpp)
+target_link_libraries(mcpd4_inprocess_benchmark PRIVATE
+  mcpd4_runtime)
+
 if (BUILD_TESTING)
   add_executable(distributed_partition_worker_smoke_test
     tests/partition_worker_smoke_test.cpp
