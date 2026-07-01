@@ -680,7 +680,8 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
 
 void discoveryModeAcceptsDiscoveredWorkersAndClose(
     const std::string &coordinator_bin, const std::string &worker_bin,
-    const std::string &discovery_bin, const std::string &fixture_dir) {
+    const std::string &discovery_bin, const std::string &status_bin,
+    const std::string &fixture_dir) {
   const CaseConfig config{/*name=*/"discovery",
                           /*fixture=*/"hand_bottleneck.max",
                           /*worker_count=*/1,
@@ -692,8 +693,12 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
   const auto reference = runInProcessReference(fixture_dir, config);
   const auto tcp_port = reservePort();
   const auto discovery_port = reserveUdpPort();
+  const auto coordinator_status_port = reserveUdpPort();
+  const auto worker_status_port = reserveUdpPort();
   const std::string token =
       "process-test-" + std::to_string(::getpid()) + "-discovery";
+  const std::string status_token =
+      "process-test-" + std::to_string(::getpid()) + "-status";
   const std::string ready_file =
       "/tmp/mcpd4-discovery-" + std::to_string(::getpid()) + ".ready";
   std::remove(ready_file.c_str());
@@ -724,7 +729,11 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
                                 "--discovery-port",
                                 std::to_string(discovery_port),
                                 "--discovery-token",
-                                token});
+                                token,
+                                "--status-port",
+                                std::to_string(coordinator_status_port),
+                                "--status-token",
+                                status_token});
     waitForReadyFile(ready_file, 5s);
 
     auto list = spawnProcess({discovery_bin,
@@ -757,8 +766,72 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
                            token,
                            "--discovery-timeout-ms",
                            "2000",
+                           "--status-port",
+                           std::to_string(worker_status_port),
+                           "--status-token",
+                           status_token,
                            "--name",
                            "discovered-worker"});
+
+    auto query_status = [&](std::uint16_t port) {
+      auto status = spawnProcess({status_bin,
+                                  "127.0.0.1",
+                                  std::to_string(port),
+                                  "--token",
+                                  status_token,
+                                  "--timeout-ms",
+                                  "2000"});
+      const int exit_code = waitForExit(&status, 5s);
+      require(exit_code == 0, "status query failed\n" + status.output);
+      return status.output;
+    };
+
+    std::string coordinator_status_output;
+    const auto status_deadline = std::chrono::steady_clock::now() + 5s;
+    while (std::chrono::steady_clock::now() < status_deadline) {
+      coordinator_status_output = query_status(coordinator_status_port);
+      if (coordinator_status_output.find("worker_count 1") !=
+              std::string::npos &&
+          coordinator_status_output.find("worker_names discovered-worker") !=
+              std::string::npos) {
+        break;
+      }
+      std::this_thread::sleep_for(50ms);
+    }
+    require(coordinator_status_output.find("role coordinator") !=
+                std::string::npos,
+            "coordinator status should report role\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find("phase discovery_waiting") !=
+                std::string::npos,
+            "coordinator status should report discovery waiting phase\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find("worker_count 1") !=
+                std::string::npos,
+            "coordinator status should report accepted worker count\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find("worker_names discovered-worker") !=
+                std::string::npos,
+            "coordinator status should report accepted worker name\n" +
+                coordinator_status_output);
+
+    std::string worker_status_output;
+    while (std::chrono::steady_clock::now() < status_deadline) {
+      worker_status_output = query_status(worker_status_port);
+      if (worker_status_output.find("phase connected") != std::string::npos) {
+        break;
+      }
+      std::this_thread::sleep_for(50ms);
+    }
+    require(worker_status_output.find("role worker") != std::string::npos,
+            "worker status should report role\n" + worker_status_output);
+    require(worker_status_output.find("name discovered-worker") !=
+                std::string::npos,
+            "worker status should report worker name\n" +
+                worker_status_output);
+    require(worker_status_output.find("phase connected") != std::string::npos,
+            "worker status should report connected phase\n" +
+                worker_status_output);
 
     auto close = spawnProcess({discovery_bin,
                                "close",
@@ -809,15 +882,16 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
 
 int main(int argc, char **argv) {
   try {
-    require(argc == 5,
+    require(argc == 6,
             "usage: process_integration_test COORDINATOR_BIN WORKER_BIN "
-            "DISCOVERY_BIN FIXTURE_DIR");
+            "DISCOVERY_BIN STATUS_BIN FIXTURE_DIR");
     setenv("MCPD3_PARTITIONER", "basic", /*overwrite=*/1);
 
     const std::string coordinator_bin = argv[1];
     const std::string worker_bin = argv[2];
     const std::string discovery_bin = argv[3];
-    const std::string fixture_dir = argv[4];
+    const std::string status_bin = argv[4];
+    const std::string fixture_dir = argv[5];
 
     fixtureProcessMatchesInProcessReference(
         coordinator_bin, worker_bin, fixture_dir,
@@ -837,7 +911,7 @@ int main(int argc, char **argv) {
                                       fixture_dir);
     progressTelemetryIsStreamed(coordinator_bin, worker_bin, fixture_dir);
     discoveryModeAcceptsDiscoveredWorkersAndClose(
-        coordinator_bin, worker_bin, discovery_bin, fixture_dir);
+        coordinator_bin, worker_bin, discovery_bin, status_bin, fixture_dir);
   } catch (const std::exception &e) {
     std::cerr << "process_integration_test failed: " << e.what() << "\n";
     return EXIT_FAILURE;

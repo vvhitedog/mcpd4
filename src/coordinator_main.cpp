@@ -1,5 +1,6 @@
 #include <mcpd4/discovery.h>
 #include <mcpd4/runtime.h>
+#include <mcpd4/status.h>
 
 #include <decomp/dualdecomp.h>
 #include <decomp/partition_coordinator.h>
@@ -9,13 +10,16 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <cctype>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <poll.h>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -61,8 +65,165 @@ struct Config {
   std::uint16_t discovery_port = 0;
   std::string discovery_token = mcpd4::kDefaultDiscoveryToken;
   std::string advertise_host;
+  std::uint16_t status_port = 0;
+  std::string status_token = mcpd4::kDefaultStatusToken;
   bool saturate_capacity_overflow = false;
   bool directed = false;
+};
+
+std::string statusValue(std::string value) {
+  if (value.empty()) {
+    return "-";
+  }
+  for (auto &ch : value) {
+    if (std::isspace(static_cast<unsigned char>(ch)) || ch == ',' ||
+        ch == ';') {
+      ch = '_';
+    }
+  }
+  return value;
+}
+
+std::string joinStatusValues(const std::vector<std::string> &values) {
+  if (values.empty()) {
+    return "-";
+  }
+  std::string joined;
+  for (const auto &value : values) {
+    if (!joined.empty()) {
+      joined += ",";
+    }
+    joined += statusValue(value);
+  }
+  return joined;
+}
+
+struct CoordinatorStatusState {
+  mutable std::mutex mutex;
+  std::string phase = "starting";
+  std::uint16_t tcp_port = 0;
+  std::uint16_t discovery_port = 0;
+  std::uint16_t status_port = 0;
+  int min_worker_count = 0;
+  int worker_count = 0;
+  int partition_count = 0;
+  long objective_scale = 1;
+  long capacity_multiplier = 1;
+  long total_iteration = 0;
+  long schedule_scale = 0;
+  long step_size = 0;
+  long lower_bound = 0;
+  long best_lower_bound = 0;
+  long certified_lower_bound = 0;
+  long best_certified_lower_bound = 0;
+  long disagreement_count = 0;
+  long assigned_partition_count = 0;
+  long active_worker_count = 0;
+  long partition_solve_call_count_total = 0;
+  long solve_batch_rpc_count_total = 0;
+  std::vector<std::string> worker_names;
+
+  void initialize(const Config &config) {
+    std::lock_guard<std::mutex> lock(mutex);
+    min_worker_count = config.worker_count;
+    partition_count = config.partition_count;
+    objective_scale = config.capacity_multiplier;
+    capacity_multiplier = config.capacity_multiplier;
+  }
+
+  void setPhase(const std::string &value) {
+    std::lock_guard<std::mutex> lock(mutex);
+    phase = value;
+  }
+
+  void setPorts(std::uint16_t tcp, std::uint16_t discovery,
+                std::uint16_t status) {
+    std::lock_guard<std::mutex> lock(mutex);
+    tcp_port = tcp;
+    discovery_port = discovery;
+    status_port = status;
+  }
+
+  void recordWorker(const std::string &name) {
+    std::lock_guard<std::mutex> lock(mutex);
+    worker_names.push_back(name);
+    worker_count = static_cast<int>(worker_names.size());
+  }
+
+  void recordProgress(const mcpd3::PartitionWorkerProgressRecord &record,
+                      const std::vector<mcpd4::TcpPartitionWorker *>
+                          &remote_workers) {
+    long assigned_partitions = 0;
+    long active_workers = 0;
+    long partition_solves = 0;
+    long batch_rpcs = 0;
+    for (const auto *worker : remote_workers) {
+      const auto &stats = worker->timingStats();
+      assigned_partitions += stats.load_partition_rpc_count;
+      if (stats.load_partition_rpc_count > 0) {
+        ++active_workers;
+      }
+      partition_solves += stats.partition_solve_call_count;
+      batch_rpcs += stats.solve_batch_rpc_count;
+    }
+    std::lock_guard<std::mutex> lock(mutex);
+    phase = "solving";
+    total_iteration = record.total_iteration;
+    schedule_scale = record.scale;
+    step_size = record.step_size;
+    lower_bound = record.lower_bound;
+    best_lower_bound = record.best_lower_bound;
+    certified_lower_bound = record.certified_lower_bound;
+    best_certified_lower_bound = record.best_certified_lower_bound;
+    disagreement_count = record.disagreement_count;
+    assigned_partition_count = assigned_partitions;
+    active_worker_count = active_workers;
+    partition_solve_call_count_total = partition_solves;
+    solve_batch_rpc_count_total = batch_rpcs;
+  }
+
+  void recordFinal(
+      const mcpd3::PartitionWorkerCoordinatorSolveResult &result) {
+    std::lock_guard<std::mutex> lock(mutex);
+    phase = "finished";
+    objective_scale = result.scale;
+    total_iteration = result.total_iterations;
+    disagreement_count = result.final_disagreement_count;
+    lower_bound = result.final_certified_lower_bound_raw;
+    best_lower_bound = result.best_lower_bound_raw;
+    certified_lower_bound = result.final_certified_lower_bound_raw;
+    best_certified_lower_bound = result.best_certified_lower_bound_raw;
+  }
+
+  std::string snapshot() const {
+    std::lock_guard<std::mutex> lock(mutex);
+    std::ostringstream out;
+    out << "role coordinator"
+        << " phase " << phase
+        << " tcp_port " << tcp_port
+        << " discovery_port " << discovery_port
+        << " status_port " << status_port
+        << " worker_count " << worker_count
+        << " min_worker_count " << min_worker_count
+        << " partition_count " << partition_count
+        << " objective_scale " << objective_scale
+        << " capacity_multiplier " << capacity_multiplier
+        << " total_iteration " << total_iteration
+        << " schedule_scale " << schedule_scale
+        << " step_size " << step_size
+        << " lower_bound " << lower_bound
+        << " best_lower_bound " << best_lower_bound
+        << " certified_lower_bound " << certified_lower_bound
+        << " best_certified_lower_bound " << best_certified_lower_bound
+        << " disagreement_count " << disagreement_count
+        << " assigned_partition_count " << assigned_partition_count
+        << " active_worker_count " << active_worker_count
+        << " partition_solve_call_count_total "
+        << partition_solve_call_count_total
+        << " solve_batch_rpc_count_total " << solve_batch_rpc_count_total
+        << " worker_names " << joinStatusValues(worker_names);
+    return out.str();
+  }
 };
 
 long parseLong(const std::string &value, const std::string &name) {
@@ -109,6 +270,7 @@ void usage(const char *argv0) {
       << "       [--progress-every N] [--ready-file PATH]\n"
       << "       [--discovery-port PORT] [--discovery-token TOKEN]\n"
       << "       [--advertise-host HOST]\n"
+      << "       [--status-port PORT] [--status-token TOKEN]\n"
       << "       [--saturate-capacity-overflow]\n"
       << "       [--directed]\n";
 }
@@ -156,6 +318,10 @@ Config parseArgs(int argc, char **argv) {
       config.discovery_token = require_value(arg);
     } else if (arg == "--advertise-host") {
       config.advertise_host = require_value(arg);
+    } else if (arg == "--status-port") {
+      config.status_port = parsePort(require_value(arg));
+    } else if (arg == "--status-token") {
+      config.status_token = require_value(arg);
     } else if (arg == "--saturate-capacity-overflow" ||
                arg == "--truncate-capacity-overflow") {
       config.saturate_capacity_overflow = true;
@@ -231,13 +397,16 @@ void writeReadyFile(const std::string &path, std::uint16_t port) {
 
 std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptFixedWorkers(
     mcpd4::SocketHandle *listener, const Config &config,
-    std::vector<mcpd4::TcpPartitionWorker *> *remote_workers) {
+    std::vector<mcpd4::TcpPartitionWorker *> *remote_workers,
+    CoordinatorStatusState *status_state) {
   std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
+  status_state->setPhase("accepting_workers");
   for (int i = 0; i < config.worker_count; ++i) {
     auto worker = mcpd4::acceptTcpPartitionWorker(
         listener, std::chrono::milliseconds(config.accept_timeout_ms));
     std::cout << "accepted worker " << worker->hello().worker_name << "\n";
     std::cout.flush();
+    status_state->recordWorker(worker->hello().worker_name);
     remote_workers->push_back(worker.get());
     workers.push_back(std::move(worker));
   }
@@ -247,9 +416,11 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptFixedWorkers(
 std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptDiscoveredWorkers(
     mcpd4::SocketHandle *listener, const mcpd4::SocketHandle &discovery_socket,
     const Config &config, std::uint16_t tcp_port,
-    std::vector<mcpd4::TcpPartitionWorker *> *remote_workers) {
+    std::vector<mcpd4::TcpPartitionWorker *> *remote_workers,
+    CoordinatorStatusState *status_state) {
   std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
   bool close_requested = false;
+  status_state->setPhase("discovery_waiting");
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::milliseconds(config.accept_timeout_ms);
 
@@ -316,11 +487,13 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptDiscoveredWorkers(
           listener, std::chrono::milliseconds(1));
       std::cout << "accepted worker " << worker->hello().worker_name << "\n";
       std::cout.flush();
+      status_state->recordWorker(worker->hello().worker_name);
       remote_workers->push_back(worker.get());
       workers.push_back(std::move(worker));
     }
   }
 
+  status_state->setPhase("discovery_closed");
   std::cout << "discovery_closed worker_count " << workers.size()
             << " min_worker_count " << config.worker_count << "\n";
   std::cout.flush();
@@ -535,8 +708,11 @@ int main(int argc, char **argv) {
     const auto total_start = std::chrono::steady_clock::now();
     RuntimeTiming timing;
     const Config config = parseArgs(argc, argv);
+    CoordinatorStatusState status_state;
+    status_state.initialize(config);
 
     auto graph_start = std::chrono::steady_clock::now();
+    status_state.setPhase("reading_graph");
     auto graph = config.directed
                      ? mcpd3::read_dimacs_directed_streaming(config.dimacs_path)
                      : mcpd3::read_dimacs(config.dimacs_path);
@@ -544,6 +720,7 @@ int main(int argc, char **argv) {
 
     CapacityScaleStats capacity_scale_stats;
     const auto scale_graph_start = std::chrono::steady_clock::now();
+    status_state.setPhase("scaling_graph");
     scaleGraph(&graph, config.capacity_multiplier,
                config.saturate_capacity_overflow, &capacity_scale_stats);
     timing.scale_graph_wall_us = elapsedUs(scale_graph_start);
@@ -558,6 +735,7 @@ int main(int argc, char **argv) {
     }
 
     const auto partition_start = std::chrono::steady_clock::now();
+    status_state.setPhase("partitioning");
     auto packages = makePartitionPackages(
         config.partition_count, std::move(graph), config.capacity_multiplier);
     timing.partition_wall_us = elapsedUs(partition_start);
@@ -576,17 +754,31 @@ int main(int argc, char **argv) {
                 << " min_worker_count " << config.worker_count << "\n";
       std::cout.flush();
     }
+    std::unique_ptr<mcpd4::StatusServer> status_server;
+    if (config.status_port != 0) {
+      status_server = std::make_unique<mcpd4::StatusServer>(
+          config.bind_host, config.status_port, config.status_token,
+          [&status_state] { return status_state.snapshot(); });
+      std::cout << "status_listening port " << status_server->port() << "\n";
+      std::cout.flush();
+    }
+    status_state.setPorts(mcpd4::localPort(listener),
+                          discovery_socket.valid()
+                              ? mcpd4::localPort(discovery_socket)
+                              : 0,
+                          status_server ? status_server->port() : 0);
     writeReadyFile(config.ready_file, mcpd4::localPort(listener));
 
     std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
     std::vector<mcpd4::TcpPartitionWorker *> remote_workers;
     const auto accept_start = std::chrono::steady_clock::now();
     if (config.discovery_port == 0) {
-      workers = acceptFixedWorkers(&listener, config, &remote_workers);
+      workers =
+          acceptFixedWorkers(&listener, config, &remote_workers, &status_state);
     } else {
       workers = acceptDiscoveredWorkers(&listener, discovery_socket, config,
                                         mcpd4::localPort(listener),
-                                        &remote_workers);
+                                        &remote_workers, &status_state);
     }
     timing.accept_workers_wall_us = elapsedUs(accept_start);
 
@@ -598,15 +790,19 @@ int main(int argc, char **argv) {
     solve_options.progress_report_interval = config.progress_every;
     solve_options.progress_callback =
         [&](const mcpd3::PartitionWorkerProgressRecord &record) {
+          status_state.recordProgress(record, remote_workers);
           printProgress(record, remote_workers);
         };
     const auto coordinator_setup_start = std::chrono::steady_clock::now();
+    status_state.setPhase("coordinator_setup");
     mcpd3::PartitionWorkerCoordinator coordinator(std::move(packages),
                                                   std::move(workers),
                                                   solve_options);
     timing.coordinator_setup_wall_us = elapsedUs(coordinator_setup_start);
     const auto solve_start = std::chrono::steady_clock::now();
+    status_state.setPhase("solving");
     const auto result = coordinator.solve();
+    status_state.recordFinal(result);
     timing.solve_wall_us = elapsedUs(solve_start);
 
     std::cout << "status " << static_cast<int>(result.status) << "\n";

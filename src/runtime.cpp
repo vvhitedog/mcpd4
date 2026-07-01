@@ -213,10 +213,14 @@ HelloMessage makeDefaultHello(const std::string &worker_name) {
 }
 
 void runWorkerClient(const std::string &host, std::uint16_t port,
-                     const HelloMessage &hello) {
+                     const HelloMessage &hello,
+                     const WorkerRuntimeStatusHooks &status_hooks) {
   validateHello(hello);
   SocketHandle socket = connectTcp(host, port);
   sendFrameBytes(socket, encodeHello(hello));
+  if (status_hooks.on_phase) {
+    status_hooks.on_phase("connected");
+  }
 
   mcpd3::InProcessPartitionWorker worker;
   while (true) {
@@ -225,33 +229,80 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
     try {
       switch (frame.type) {
       case MessageType::PARTITION_PACKAGE:
-        worker.loadPartition(decodePartitionPackage(frame_bytes));
-        sendReady(socket, hello.worker_name);
+        {
+          if (status_hooks.on_phase) {
+            status_hooks.on_phase("loading_partition");
+          }
+          const auto package = decodePartitionPackage(frame_bytes);
+          worker.loadPartition(package);
+          if (status_hooks.on_partition_loaded) {
+            status_hooks.on_partition_loaded(package.partition_id);
+          }
+          if (status_hooks.on_phase) {
+            status_hooks.on_phase("connected");
+          }
+          sendReady(socket, hello.worker_name);
+        }
         break;
       case MessageType::SOLVE_ROUND_REQUEST:
         {
           const auto request = decodeSolveRoundRequest(frame_bytes);
+          if (status_hooks.on_solve_start) {
+            status_hooks.on_solve_start(request.round_id,
+                                        {request.partition_id});
+          }
           const auto start = std::chrono::steady_clock::now();
           const auto result = worker.solveRound(request);
-          sendFrameBytes(socket, encodeSolveRoundResultWithTiming(
-                                     result, elapsedUs(start)));
+          const auto elapsed = elapsedUs(start);
+          if (status_hooks.on_solve_done) {
+            status_hooks.on_solve_done(elapsed, 1, false);
+          }
+          sendFrameBytes(
+              socket, encodeSolveRoundResultWithTiming(result, elapsed));
         }
         break;
       case MessageType::SOLVE_ROUND_BATCH_REQUEST:
         {
           const auto requests = decodeSolveRoundBatchRequest(frame_bytes);
+          if (status_hooks.on_solve_start) {
+            std::vector<int> partition_ids;
+            partition_ids.reserve(requests.size());
+            long round_id = 0;
+            for (const auto &request : requests) {
+              partition_ids.push_back(request.partition_id);
+              round_id = request.round_id;
+            }
+            status_hooks.on_solve_start(round_id, partition_ids);
+          }
           const auto start = std::chrono::steady_clock::now();
           const auto results = worker.solveRoundBatch(requests);
-          sendFrameBytes(socket, encodeSolveRoundBatchResultWithTiming(
-                                     results, elapsedUs(start)));
+          const auto elapsed = elapsedUs(start);
+          if (status_hooks.on_solve_done) {
+            status_hooks.on_solve_done(
+                elapsed, static_cast<long>(results.size()), true);
+          }
+          sendFrameBytes(
+              socket, encodeSolveRoundBatchResultWithTiming(results, elapsed));
         }
         break;
       case MessageType::SCALE_OBJECTIVE:
-        worker.scaleObjective(decodeScaleObjective(frame_bytes).factor);
-        sendReady(socket, hello.worker_name);
+        {
+          const auto factor = decodeScaleObjective(frame_bytes).factor;
+          if (status_hooks.on_scale_objective) {
+            status_hooks.on_scale_objective(factor);
+          }
+          worker.scaleObjective(factor);
+          if (status_hooks.on_phase) {
+            status_hooks.on_phase("connected");
+          }
+          sendReady(socket, hello.worker_name);
+        }
         break;
       case MessageType::STOP:
         (void)decodeStop(frame_bytes);
+        if (status_hooks.on_phase) {
+          status_hooks.on_phase("stopped");
+        }
         return;
       default:
         sendErrorBestEffort(socket, 1,
@@ -259,6 +310,9 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
         break;
       }
     } catch (const std::exception &e) {
+      if (status_hooks.on_error) {
+        status_hooks.on_error(e.what());
+      }
       sendErrorBestEffort(socket, 2, e.what());
     }
   }

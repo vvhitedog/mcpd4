@@ -18,6 +18,7 @@ target_include_directories(mcpd4_protocol PUBLIC
 add_library(mcpd4_runtime
   src/discovery.cpp
   src/runtime.cpp
+  src/status.cpp
   src/tcp.cpp
   third_party/mcpd3/maxflow/graph.cpp
   third_party/mcpd3/maxflow/maxflow.cpp)
@@ -36,6 +37,11 @@ target_link_libraries(mcpd4_worker PRIVATE
 add_executable(mcpd4_discovery
   src/discovery_main.cpp)
 target_link_libraries(mcpd4_discovery PRIVATE
+  mcpd4_runtime)
+
+add_executable(mcpd4_status
+  src/status_main.cpp)
+target_link_libraries(mcpd4_status PRIVATE
   mcpd4_runtime)
 
 add_executable(mcpd4_coordinator
@@ -76,11 +82,13 @@ if (BUILD_TESTING)
   add_dependencies(process_integration_test
     mcpd4_coordinator
     mcpd4_worker
-    mcpd4_discovery)
+    mcpd4_discovery
+    mcpd4_status)
   add_test(NAME process_integration_test
     COMMAND process_integration_test
       $<TARGET_FILE:mcpd4_coordinator>
       $<TARGET_FILE:mcpd4_worker>
       $<TARGET_FILE:mcpd4_discovery>
+      $<TARGET_FILE:mcpd4_status>
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
 endif ()

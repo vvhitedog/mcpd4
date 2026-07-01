@@ -64,6 +64,7 @@ The important outputs are:
 - `build/mcpd4_coordinator`
 - `build/mcpd4_worker`
 - `build/mcpd4_discovery`
+- `build/mcpd4_status`
 
 Run the product test suite:
 
@@ -221,7 +222,9 @@ Start the coordinator with a UDP discovery port:
   --accept-timeout-ms 600000 \
   --progress-every 50 \
   --discovery-port 50052 \
-  --discovery-token lab-run-1
+  --discovery-token lab-run-1 \
+  --status-port 50053 \
+  --status-token lab-run-1
 ```
 
 List visible coordinators from another machine:
@@ -249,7 +252,19 @@ Start workers in discovery mode:
   --discovery-host 255.255.255.255 \
   --discovery-port 50052 \
   --discovery-token lab-run-1 \
+  --status-port 51053 \
+  --status-token lab-run-1 \
   --name worker-a
+```
+
+Query coordinator or worker status while the run is waiting or solving:
+
+```bash
+./build/mcpd4_status 10.0.0.10 50053 --token lab-run-1
+```
+
+```bash
+./build/mcpd4_status 10.0.0.20 51053 --token lab-run-1
 ```
 
 After enough workers have connected, close discovery and start the solve:
@@ -273,6 +288,7 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
        [--accept-timeout-ms N] [--progress-every N] [--ready-file PATH]
        [--discovery-port PORT] [--discovery-token TOKEN]
        [--advertise-host HOST]
+       [--status-port PORT] [--status-token TOKEN]
        [--saturate-capacity-overflow] [--directed]
 ```
 
@@ -298,6 +314,9 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
   tokens. Default is `mcpd4`.
 - `--advertise-host HOST`: host or IP workers should use for the TCP
   connection. If omitted, workers use the UDP response source address.
+- `--status-port PORT`: enable a UDP status endpoint on this port.
+- `--status-token TOKEN`: token required for status queries. Default is
+  `mcpd4`.
 - `--saturate-capacity-overflow`: opt-in overflow compatibility mode. This
   clips overflowing scaled capacities and solves the clipped problem, not the
   exact original problem.
@@ -310,6 +329,7 @@ usage: mcpd4_worker HOST PORT [--name NAME]
        mcpd4_worker --discover [--discovery-host HOST]
        [--discovery-port PORT] [--discovery-token TOKEN]
        [--discovery-timeout-ms N] [--name NAME]
+       [--status-port PORT] [--status-token TOKEN]
 ```
 
 - `HOST`: coordinator host or IP.
@@ -321,6 +341,9 @@ usage: mcpd4_worker HOST PORT [--name NAME]
 - `--discovery-port PORT`: UDP discovery port. Default is `50052`.
 - `--discovery-token TOKEN`: token that must match the coordinator.
 - `--discovery-timeout-ms N`: discovery wait timeout.
+- `--status-port PORT`: enable a UDP status endpoint on this worker.
+- `--status-token TOKEN`: token required for status queries. Default is
+  `mcpd4`.
 - `--name NAME`: optional worker name used in logs and progress output.
 
 Workers receive all partition data from the coordinator after connecting. They
@@ -343,6 +366,24 @@ usage: mcpd4_discovery list [--host HOST] [--port PORT] [--token TOKEN]
 - `--port PORT`: UDP discovery port. Default is `50052`.
 - `--token TOKEN`: discovery token. Default is `mcpd4`.
 - `--timeout-ms N`: wait timeout for replies.
+
+## Status Tool Options
+
+```text
+usage: mcpd4_status HOST PORT [--token TOKEN] [--timeout-ms N]
+```
+
+- `HOST`: coordinator or worker host/IP.
+- `PORT`: UDP status port configured with `--status-port`.
+- `--token TOKEN`: status token. Default is `mcpd4`.
+- `--timeout-ms N`: wait timeout for the status response.
+
+Coordinator status includes the current phase, accepted worker count, worker
+names, partition count, objective scale, latest iteration/step state,
+lower-bound fields, disagreement count, and aggregate solve/RPC counts. Worker
+status includes its phase, coordinator endpoint, loaded partition ids, current
+round/partition ids, solve counts, batch RPC count, worker solve wall time, and
+last error.
 
 ## Interpreting Output
 

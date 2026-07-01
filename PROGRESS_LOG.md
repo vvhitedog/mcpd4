@@ -1160,3 +1160,22 @@
   connect a discovered worker, close discovery, solve `hand_bottleneck.max`,
   and compare against the in-process reference.
 - Updated `README.md` with the discovery-mode LAN workflow and CLI options.
+
+## 2026-06-30 17:06 PDT
+
+- Implemented first-pass queryable status tooling:
+  - coordinator and worker support `--status-port PORT` and
+    `--status-token TOKEN`;
+  - new `mcpd4_status HOST PORT` command queries a UDP status endpoint;
+  - coordinator status reports phase, TCP/discovery/status ports, accepted
+    workers, worker names, partition count, objective scale, latest progress
+    fields, disagreement, and aggregate solve/RPC counts;
+  - worker status reports phase, worker name, coordinator endpoint, loaded
+    partitions, current round/partitions, solve counts, batch RPC count, worker
+    solve wall time, and last error.
+- Extended the process integration test to query coordinator and worker status
+  while discovery mode is open and a discovered worker is connected, then close
+  discovery and solve the fixture against the in-process reference.
+- Verified:
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.

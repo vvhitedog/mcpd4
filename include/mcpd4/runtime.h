@@ -2,8 +2,10 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <decomp/partition_worker.h>
 #include <mcpd4/protocol.h>
@@ -49,8 +51,22 @@ private:
 };
 
 HelloMessage makeDefaultHello(const std::string &worker_name);
+
+struct WorkerRuntimeStatusHooks {
+  std::function<void(const std::string &phase)> on_phase;
+  std::function<void(int partition_id)> on_partition_loaded;
+  std::function<void(long round_id, const std::vector<int> &partition_ids)>
+      on_solve_start;
+  std::function<void(std::uint64_t elapsed_us, long partition_solve_count,
+                     bool batch)>
+      on_solve_done;
+  std::function<void(long factor)> on_scale_objective;
+  std::function<void(const std::string &message)> on_error;
+};
+
 void runWorkerClient(const std::string &host, std::uint16_t port,
-                     const HelloMessage &hello);
+                     const HelloMessage &hello,
+                     const WorkerRuntimeStatusHooks &status_hooks = {});
 
 std::unique_ptr<TcpPartitionWorker> acceptTcpPartitionWorker(
     SocketHandle *listener, std::chrono::milliseconds timeout);

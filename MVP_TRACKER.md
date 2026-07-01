@@ -183,6 +183,16 @@ The MVP is complete when:
   - `mcpd4_discovery list` for finding visible coordinators;
   - `mcpd4_discovery close` for operator-controlled transition from worker
     discovery to solving.
+- [x] Add first-pass UDP status query tooling:
+  - coordinator `--status-port`/`--status-token` status endpoint;
+  - worker `--status-port`/`--status-token` status endpoint;
+  - `mcpd4_status HOST PORT` query command;
+  - coordinator snapshots include phase, accepted workers, worker names,
+    partition count, objective scale, latest progress fields, disagreement,
+    and aggregate solve/RPC counts;
+  - worker snapshots include phase, coordinator endpoint, loaded partition ids,
+    active round/partition ids, solve counts, worker solve time, and last
+    error.
 
 ### Stage 5: Correctness And Integration Tests
 
@@ -206,6 +216,8 @@ The MVP is complete when:
 - [x] Add process-level discovery integration coverage: list a waiting
   coordinator, connect a discovered worker, close discovery, solve a fixture,
   and compare the distributed result to the in-process reference.
+- [x] Extend discovery integration coverage to query both coordinator and
+  worker status while discovery is open and the worker is connected.
 
 ### Stage 6: Failure Handling And Operational Readiness
 
@@ -238,8 +250,16 @@ The MVP is complete when:
 
 ### Post-LAN Trial Follow-Up Plan
 
-- [ ] Add a queryable distributed status surface for both coordinator and
-  workers.
+- [x] Add a first-pass queryable distributed status surface for both
+  coordinator and workers.
+  - Implemented as UDP status endpoints plus `mcpd4_status HOST PORT`.
+  - Coordinator status currently reports phase, ports, accepted workers,
+    worker names, partition count, objective scale, latest progress fields,
+    disagreement, and aggregate solve/RPC counts.
+  - Worker status currently reports phase, worker name, coordinator endpoint,
+    loaded partition ids, active round/partition ids, solve counts, batch RPC
+    count, worker solve time, and last error.
+- [ ] Expand status snapshots with the full operational field set.
   - Coordinator status should report accepted workers, worker names/resources,
     partition ownership, current solve phase, current iteration/scale state,
     objective-scale state, disagreement counts, lower-bound progress,
@@ -249,9 +269,8 @@ The MVP is complete when:
     partitions, currently executing request type, active partition ids, local
     solve counts, local solve time, bytes received/sent, memory footprint, and
     recent errors.
-  - The first implementation can be a local status file or log stream; a later
-    implementation should support explicit status queries without attaching a
-    debugger or tailing opaque logs.
+  - Status should remain queryable without attaching a debugger or tailing
+    opaque logs.
 - [ ] Standardize terminology across CLI flags, logs, docs, and code.
   - Use `objective_scale` for the proof/budget capacity multiplier `M`.
   - Keep `--capacity-multiplier` only as a compatibility alias or remove it
