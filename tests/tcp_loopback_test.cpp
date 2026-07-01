@@ -275,6 +275,22 @@ void remoteWorkerScalesLoadedObjective() {
             "direct single solve should not count as a batch RPC");
     require(stats.scale_objective_rpc_count == 1,
             "remote timing should count objective scaling");
+    require(stats.rpc_bytes.hello_rx_bytes > 0,
+            "remote telemetry should count worker hello bytes");
+    require(stats.rpc_bytes.partition_load_tx_bytes > 0,
+            "remote telemetry should count partition load bytes");
+    require(stats.rpc_bytes.solve_request_tx_bytes > 0,
+            "remote telemetry should count solve request bytes");
+    require(stats.rpc_bytes.solve_result_rx_bytes > 0,
+            "remote telemetry should count solve result bytes");
+    require(stats.rpc_bytes.scale_objective_tx_bytes > 0,
+            "remote telemetry should count objective scaling bytes");
+    require(stats.rpc_bytes.tx_bytes_total >
+                stats.rpc_bytes.partition_load_tx_bytes,
+            "remote telemetry should aggregate transmitted bytes");
+    require(stats.rpc_bytes.rx_bytes_total >
+                stats.rpc_bytes.solve_result_rx_bytes,
+            "remote telemetry should aggregate received bytes");
     require(stats.solve_round_rpc_wall_us >=
                 stats.solve_round_worker_wall_us,
             "remote timing should split RPC and worker solve time");
@@ -314,6 +330,10 @@ void remoteWorkerSolvesExplicitBatch() {
             "remote batch timing should count partition solve calls");
     require(worker->timingStats().solve_batch_rpc_count == 1,
             "remote batch timing should count batch RPCs");
+    require(worker->timingStats().rpc_bytes.solve_request_tx_bytes > 0,
+            "remote batch telemetry should count request bytes");
+    require(worker->timingStats().rpc_bytes.solve_result_rx_bytes > 0,
+            "remote batch telemetry should count result bytes");
     require(worker->timingStats().solve_round_rpc_wall_us >=
                 worker->timingStats().solve_round_worker_wall_us,
             "remote batch timing should split RPC and worker solve time");

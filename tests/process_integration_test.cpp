@@ -667,6 +667,20 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
   require(run.output.find(" worker_solve_wall_us ") != std::string::npos,
           "progress telemetry should include worker solve timing\n" +
               run.output);
+  require(run.output.find(" rpc_tx_bytes_total ") != std::string::npos,
+          "progress telemetry should include total transmitted RPC bytes\n" +
+              run.output);
+  require(run.output.find(" rpc_rx_bytes_total ") != std::string::npos,
+          "progress telemetry should include total received RPC bytes\n" +
+              run.output);
+  require(run.output.find(" rpc_solve_request_tx_bytes ") !=
+              std::string::npos,
+          "progress telemetry should include solve request bytes\n" +
+              run.output);
+  require(run.output.find(" rpc_solve_result_rx_bytes ") !=
+              std::string::npos,
+          "progress telemetry should include solve result bytes\n" +
+              run.output);
   require(run.output.find(" solve_batch_rpc_count_total ") !=
               std::string::npos,
           "progress telemetry should include batch RPC count\n" + run.output);
@@ -687,6 +701,16 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
   require(run.output.find("solve_batch_rpc_count_total ") !=
               std::string::npos,
           "final telemetry should include batch RPC count\n" + run.output);
+  require(run.output.find("rpc_partition_load_tx_bytes ") !=
+              std::string::npos,
+          "final telemetry should include partition load bytes\n" +
+              run.output);
+  require(run.output.find("rpc_tx_bytes_total ") != std::string::npos,
+          "final telemetry should include total transmitted bytes\n" +
+              run.output);
+  require(run.output.find("rpc_rx_bytes_total ") != std::string::npos,
+          "final telemetry should include total received bytes\n" +
+              run.output);
   require(run.output.find("timing_solve_round_batch_count ") ==
               std::string::npos,
           "final telemetry should not use timing prefix for counts\n" +
@@ -841,6 +865,14 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
                 std::string::npos,
             "coordinator status should use schedule_scale naming\n" +
                 coordinator_status_output);
+    require(coordinator_status_output.find("rpc_tx_bytes_total ") !=
+                std::string::npos,
+            "coordinator status should report transmitted RPC bytes\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find("rpc_rx_bytes_total ") !=
+                std::string::npos,
+            "coordinator status should report received RPC bytes\n" +
+                coordinator_status_output);
 
     std::string worker_status_output;
     while (std::chrono::steady_clock::now() < status_deadline) {
@@ -863,6 +895,14 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
             "worker status should report CPU count\n" + worker_status_output);
     require(worker_status_output.find("ram_gb ") != std::string::npos,
             "worker status should report RAM GB\n" + worker_status_output);
+    require(worker_status_output.find("rpc_rx_bytes_total ") !=
+                std::string::npos,
+            "worker status should report received RPC bytes\n" +
+                worker_status_output);
+    require(worker_status_output.find("rpc_tx_bytes_total ") !=
+                std::string::npos,
+            "worker status should report transmitted RPC bytes\n" +
+                worker_status_output);
 
     auto close = spawnProcess({discovery_bin,
                                "close",

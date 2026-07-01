@@ -89,6 +89,7 @@ struct WorkerStatusState {
   long partition_solve_call_count_total = 0;
   long solve_batch_rpc_count_total = 0;
   std::uint64_t worker_solve_wall_us = 0;
+  mcpd4::RpcByteStats rpc_bytes;
   std::string last_error = "-";
 
   void setIdentity(const mcpd4::HelloMessage &hello) {
@@ -147,6 +148,60 @@ struct WorkerStatusState {
     last_error = "scale_factor_" + std::to_string(factor);
   }
 
+  void recordFrameSent(mcpd4::MessageType type, std::uint64_t bytes) {
+    std::lock_guard<std::mutex> lock(mutex);
+    rpc_bytes.tx_bytes_total += bytes;
+    switch (type) {
+    case mcpd4::MessageType::HELLO:
+      rpc_bytes.hello_tx_bytes += bytes;
+      break;
+    case mcpd4::MessageType::READY:
+      rpc_bytes.ready_tx_bytes += bytes;
+      break;
+    case mcpd4::MessageType::SOLVE_ROUND_RESULT:
+    case mcpd4::MessageType::SOLVE_ROUND_BATCH_RESULT:
+      rpc_bytes.solve_result_tx_bytes += bytes;
+      break;
+    case mcpd4::MessageType::ERROR:
+      rpc_bytes.error_tx_bytes += bytes;
+      break;
+    case mcpd4::MessageType::PARTITION_PACKAGE:
+    case mcpd4::MessageType::SOLVE_ROUND_REQUEST:
+    case mcpd4::MessageType::SCALE_OBJECTIVE:
+    case mcpd4::MessageType::ALPHA_UPDATE:
+    case mcpd4::MessageType::STOP:
+    case mcpd4::MessageType::SOLVE_ROUND_BATCH_REQUEST:
+      break;
+    }
+  }
+
+  void recordFrameReceived(mcpd4::MessageType type, std::uint64_t bytes) {
+    std::lock_guard<std::mutex> lock(mutex);
+    rpc_bytes.rx_bytes_total += bytes;
+    switch (type) {
+    case mcpd4::MessageType::PARTITION_PACKAGE:
+      rpc_bytes.partition_load_rx_bytes += bytes;
+      break;
+    case mcpd4::MessageType::SOLVE_ROUND_REQUEST:
+    case mcpd4::MessageType::SOLVE_ROUND_BATCH_REQUEST:
+      rpc_bytes.solve_request_rx_bytes += bytes;
+      break;
+    case mcpd4::MessageType::SCALE_OBJECTIVE:
+      rpc_bytes.scale_objective_rx_bytes += bytes;
+      break;
+    case mcpd4::MessageType::STOP:
+      rpc_bytes.stop_rx_bytes += bytes;
+      break;
+    case mcpd4::MessageType::HELLO:
+    case mcpd4::MessageType::READY:
+    case mcpd4::MessageType::SOLVE_ROUND_RESULT:
+    case mcpd4::MessageType::ALPHA_UPDATE:
+    case mcpd4::MessageType::ERROR:
+    case mcpd4::MessageType::SOLVE_ROUND_BATCH_RESULT:
+      break;
+    }
+  }
+
   void recordError(const std::string &message) {
     std::lock_guard<std::mutex> lock(mutex);
     phase = "error";
@@ -173,6 +228,20 @@ struct WorkerStatusState {
         << partition_solve_call_count_total
         << " solve_batch_rpc_count_total " << solve_batch_rpc_count_total
         << " worker_solve_wall_us " << worker_solve_wall_us
+        << " rpc_tx_bytes_total " << rpc_bytes.tx_bytes_total
+        << " rpc_rx_bytes_total " << rpc_bytes.rx_bytes_total
+        << " rpc_hello_tx_bytes " << rpc_bytes.hello_tx_bytes
+        << " rpc_partition_load_rx_bytes "
+        << rpc_bytes.partition_load_rx_bytes
+        << " rpc_solve_request_rx_bytes "
+        << rpc_bytes.solve_request_rx_bytes
+        << " rpc_solve_result_tx_bytes "
+        << rpc_bytes.solve_result_tx_bytes
+        << " rpc_scale_objective_rx_bytes "
+        << rpc_bytes.scale_objective_rx_bytes
+        << " rpc_ready_tx_bytes " << rpc_bytes.ready_tx_bytes
+        << " rpc_stop_rx_bytes " << rpc_bytes.stop_rx_bytes
+        << " rpc_error_tx_bytes " << rpc_bytes.error_tx_bytes
         << " last_error " << statusValue(last_error);
     return out.str();
   }
@@ -265,6 +334,14 @@ int main(int argc, char **argv) {
     mcpd4::WorkerRuntimeStatusHooks hooks;
     hooks.on_phase = [&status_state](const std::string &phase) {
       status_state.setPhase(phase);
+    };
+    hooks.on_frame_sent = [&status_state](mcpd4::MessageType type,
+                                          std::uint64_t bytes) {
+      status_state.recordFrameSent(type, bytes);
+    };
+    hooks.on_frame_received = [&status_state](mcpd4::MessageType type,
+                                              std::uint64_t bytes) {
+      status_state.recordFrameReceived(type, bytes);
     };
     hooks.on_partition_loaded = [&status_state](int partition_id) {
       status_state.recordPartitionLoaded(partition_id);

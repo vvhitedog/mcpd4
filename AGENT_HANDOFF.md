@@ -4,6 +4,65 @@ This document is the starting point for a new Codex/agent session in this
 repository. It deliberately condenses the previous experimental context so the
 new agent does not need the full chat history.
 
+## Current State: 2026-06-30 21:43 PDT
+
+This file began as the original distributed-MVP plan. The historical sections
+below are useful background, but the implementation is far past the original
+"no TCP yet" phase. Treat this current-state section, `README.md`,
+`MVP_TRACKER.md`, and `PROGRESS_LOG.md` as authoritative.
+
+Current anchors:
+
+- Product repo path: `/home/matt/software/mcpd3-distributed`.
+- Product branch: `working`.
+- Product remote: `https://github.com/vvhitedog/mcpd4`.
+- mcpd3 submodule path: `third_party/mcpd3`.
+- mcpd3 submodule branch: `partition-worker-api`.
+- mcpd3 submodule checkpoint:
+  `8328d73 Document productized solver usage`.
+
+Implemented product surface:
+
+- mcpd4 coordinator/worker TCP runtime with one-shot partition package load.
+- Batched per-worker solve RPCs for workers owning multiple partitions.
+- Static initial partition assignment weighted by partition estimate and
+  worker CPU/RAM handshake data.
+- Remote objective-scale promotion via `SCALE_OBJECTIVE`.
+- UDP discovery mode plus `mcpd4_discovery list/close`.
+- UDP queryable status plus `mcpd4_status`.
+- Progress/final/status telemetry for solve counts, timings, regularization
+  diagnostics, worker ownership, resources, and RPC byte counters.
+- README runbook for build/test, localhost runs, discovery-mode LAN runs, and
+  status inspection.
+
+Current transport telemetry checkpoint:
+
+- Coordinator progress/final/status exposes `rpc_tx_bytes_total`,
+  `rpc_rx_bytes_total`, `rpc_partition_load_tx_bytes`,
+  `rpc_solve_request_tx_bytes`, `rpc_solve_result_rx_bytes`,
+  `rpc_ready_rx_bytes`, `rpc_stop_tx_bytes`, and related counters.
+- Worker status exposes transmitted/received totals plus partition-load,
+  solve-request, solve-result, ready, stop, and error byte categories.
+- Tiny local fixture run:
+  `rpc_tx_bytes_total=1234`, `rpc_rx_bytes_total=1544`,
+  `rpc_partition_load_tx_bytes=250`, `rpc_solve_request_tx_bytes=904`,
+  `rpc_solve_result_rx_bytes=1344`.
+- First concrete payload target: compact solve-result boundary labels. The
+  coordinator only uses `constraint_id` and `label` from repeated
+  `ConstraintLabel` records; `global_node_id` and `local_index` are already
+  setup metadata.
+
+Suggested next prompt:
+
+```text
+We are in /home/matt/software/mcpd3-distributed on branch working.
+Read AGENT_HANDOFF.md current-state, MVP_TRACKER.md, PROGRESS_LOG.md, and
+README.md. Continue RPC transport optimization. Use the existing RPC byte
+telemetry to implement and test a compact solve-result label encoding that
+stops sending per-round global_node_id/local_index when both peers are mcpd4
+protocol-compatible. Preserve correctness tests and update docs/logs.
+```
+
 ## Repository Roles
 
 There are three distinct codebases/concepts:

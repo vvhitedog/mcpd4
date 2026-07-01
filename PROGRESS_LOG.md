@@ -1198,3 +1198,44 @@
     round/partition ids, solve counts, batch RPC count, and solve time.
 - Updated the local benchmark helper and README to prefer the new terminology
   while keeping legacy aliases for existing scripts.
+
+## 2026-06-30 21:43 PDT
+
+- Added first-pass RPC byte telemetry for the TCP runtime:
+  - coordinator-side `TcpPartitionWorker` now records encoded frame bytes for
+    worker `HELLO`, partition packages, solve requests, solve results,
+    objective-scale messages, ready/error/stop control traffic, and totals;
+  - worker status now records encoded bytes sent/received by the same major
+    traffic classes;
+  - coordinator progress, final output, and UDP status snapshots now include
+    `rpc_tx_bytes_total`, `rpc_rx_bytes_total`,
+    `rpc_partition_load_tx_bytes`, `rpc_solve_request_tx_bytes`,
+    `rpc_solve_result_rx_bytes`, and related control counters;
+  - worker UDP status snapshots now include `rpc_rx_bytes_total`,
+    `rpc_tx_bytes_total`, partition-load receive bytes, solve-request receive
+    bytes, solve-result transmit bytes, ready transmit bytes, stop receive
+    bytes, and error transmit bytes.
+- Added TDD coverage:
+  - TCP loopback tests assert runtime byte counters are populated for hello,
+    partition load, solve request/result, batch request/result, and objective
+    scaling;
+  - process integration tests assert progress/final output and live
+    coordinator/worker status expose RPC byte counters.
+- Local fixture measurement:
+  - command:
+    `MCPD4_WORKERS=2 MCPD4_PARTITIONS=2 MCPD4_MAX_ITERATIONS=20 MCPD4_SCHEDULE_LEVELS=1 MCPD4_OBJECTIVE_SCALE=10000 MCPD4_PROGRESS_EVERY=1 scripts/run_local_process_benchmark.sh tests/fixtures/hand_bottleneck.max`;
+  - final counters: `rpc_tx_bytes_total=1234`,
+    `rpc_rx_bytes_total=1544`, `rpc_partition_load_tx_bytes=250`,
+    `rpc_solve_request_tx_bytes=904`, `rpc_solve_result_rx_bytes=1344`,
+    `rpc_stop_tx_bytes=80`;
+  - even on the tiny fixture, repeated solve-result traffic dominates setup
+    traffic.
+- Next transport optimization target: compact solve-result boundary labels.
+  The coordinator currently only uses `constraint_id` and `label` from each
+  repeated constrained label; `global_node_id` and `local_index` are already
+  known from partition setup, so dropping them from solve-result frames should
+  reduce repeated label payloads before considering compression.
+- Verified:
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - local benchmark command listed above.

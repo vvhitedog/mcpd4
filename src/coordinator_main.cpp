@@ -112,6 +112,28 @@ std::string joinInts(const std::vector<int> &values) {
   return joined;
 }
 
+void addRpcByteStats(mcpd4::RpcByteStats *total,
+                     const mcpd4::RpcByteStats &stats) {
+  total->tx_bytes_total += stats.tx_bytes_total;
+  total->rx_bytes_total += stats.rx_bytes_total;
+  total->hello_tx_bytes += stats.hello_tx_bytes;
+  total->hello_rx_bytes += stats.hello_rx_bytes;
+  total->partition_load_tx_bytes += stats.partition_load_tx_bytes;
+  total->partition_load_rx_bytes += stats.partition_load_rx_bytes;
+  total->solve_request_tx_bytes += stats.solve_request_tx_bytes;
+  total->solve_request_rx_bytes += stats.solve_request_rx_bytes;
+  total->solve_result_tx_bytes += stats.solve_result_tx_bytes;
+  total->solve_result_rx_bytes += stats.solve_result_rx_bytes;
+  total->scale_objective_tx_bytes += stats.scale_objective_tx_bytes;
+  total->scale_objective_rx_bytes += stats.scale_objective_rx_bytes;
+  total->ready_tx_bytes += stats.ready_tx_bytes;
+  total->ready_rx_bytes += stats.ready_rx_bytes;
+  total->stop_tx_bytes += stats.stop_tx_bytes;
+  total->stop_rx_bytes += stats.stop_rx_bytes;
+  total->error_tx_bytes += stats.error_tx_bytes;
+  total->error_rx_bytes += stats.error_rx_bytes;
+}
+
 struct CoordinatorStatusState {
   mutable std::mutex mutex;
   std::string phase = "starting";
@@ -142,6 +164,7 @@ struct CoordinatorStatusState {
   long active_worker_count = 0;
   long partition_solve_call_count_total = 0;
   long solve_batch_rpc_count_total = 0;
+  mcpd4::RpcByteStats rpc_bytes;
   std::vector<std::string> worker_names;
   std::vector<std::string> worker_resources;
   std::vector<std::string> partition_ownership;
@@ -187,6 +210,7 @@ struct CoordinatorStatusState {
     worker_details.clear();
     assigned_partition_count = 0;
     active_worker_count = 0;
+    rpc_bytes = {};
     for (const auto *worker : remote_workers) {
       const auto snapshot = worker->statusSnapshot();
       const std::string name = statusValue(snapshot.worker_name);
@@ -207,10 +231,15 @@ struct CoordinatorStatusState {
           std::to_string(snapshot.timing.partition_solve_call_count) +
           ":batches=" +
           std::to_string(snapshot.timing.solve_batch_rpc_count) +
+          ":rpc_tx_bytes=" +
+          std::to_string(snapshot.timing.rpc_bytes.tx_bytes_total) +
+          ":rpc_rx_bytes=" +
+          std::to_string(snapshot.timing.rpc_bytes.rx_bytes_total) +
           ":solve_rpc_us=" +
           std::to_string(snapshot.timing.solve_round_rpc_wall_us) +
           ":worker_solve_us=" +
           std::to_string(snapshot.timing.solve_round_worker_wall_us));
+      addRpcByteStats(&rpc_bytes, snapshot.timing.rpc_bytes);
     }
   }
 
@@ -221,6 +250,7 @@ struct CoordinatorStatusState {
     long active_workers = 0;
     long partition_solves = 0;
     long batch_rpcs = 0;
+    mcpd4::RpcByteStats rpc_totals;
     for (const auto *worker : remote_workers) {
       const auto &stats = worker->timingStats();
       assigned_partitions += stats.load_partition_rpc_count;
@@ -229,6 +259,7 @@ struct CoordinatorStatusState {
       }
       partition_solves += stats.partition_solve_call_count;
       batch_rpcs += stats.solve_batch_rpc_count;
+      addRpcByteStats(&rpc_totals, stats.rpc_bytes);
     }
     std::lock_guard<std::mutex> lock(mutex);
     phase = "solving";
@@ -252,6 +283,7 @@ struct CoordinatorStatusState {
     active_worker_count = active_workers;
     partition_solve_call_count_total = partition_solves;
     solve_batch_rpc_count_total = batch_rpcs;
+    rpc_bytes = rpc_totals;
     worker_details.clear();
     for (const auto *worker : remote_workers) {
       const auto snapshot = worker->statusSnapshot();
@@ -263,6 +295,10 @@ struct CoordinatorStatusState {
           std::to_string(snapshot.timing.partition_solve_call_count) +
           ":batches=" +
           std::to_string(snapshot.timing.solve_batch_rpc_count) +
+          ":rpc_tx_bytes=" +
+          std::to_string(snapshot.timing.rpc_bytes.tx_bytes_total) +
+          ":rpc_rx_bytes=" +
+          std::to_string(snapshot.timing.rpc_bytes.rx_bytes_total) +
           ":solve_rpc_us=" +
           std::to_string(snapshot.timing.solve_round_rpc_wall_us) +
           ":worker_solve_us=" +
@@ -326,6 +362,20 @@ struct CoordinatorStatusState {
         << " partition_solve_call_count_total "
         << partition_solve_call_count_total
         << " solve_batch_rpc_count_total " << solve_batch_rpc_count_total
+        << " rpc_tx_bytes_total " << rpc_bytes.tx_bytes_total
+        << " rpc_rx_bytes_total " << rpc_bytes.rx_bytes_total
+        << " rpc_hello_rx_bytes " << rpc_bytes.hello_rx_bytes
+        << " rpc_partition_load_tx_bytes "
+        << rpc_bytes.partition_load_tx_bytes
+        << " rpc_solve_request_tx_bytes "
+        << rpc_bytes.solve_request_tx_bytes
+        << " rpc_solve_result_rx_bytes "
+        << rpc_bytes.solve_result_rx_bytes
+        << " rpc_scale_objective_tx_bytes "
+        << rpc_bytes.scale_objective_tx_bytes
+        << " rpc_ready_rx_bytes " << rpc_bytes.ready_rx_bytes
+        << " rpc_stop_tx_bytes " << rpc_bytes.stop_tx_bytes
+        << " rpc_error_rx_bytes " << rpc_bytes.error_rx_bytes
         << " worker_names " << joinStatusValues(worker_names)
         << " worker_resources " << joinStatusValues(worker_resources)
         << " partition_ownership " << joinStatusValues(partition_ownership)
@@ -653,6 +703,16 @@ SolveCounterStats gatherSolveCounters(
   return counters;
 }
 
+mcpd4::RpcByteStats gatherRpcByteStats(
+    const std::vector<mcpd4::TcpPartitionWorker *>
+        &remote_workers) {
+  mcpd4::RpcByteStats totals;
+  for (const auto *worker : remote_workers) {
+    addRpcByteStats(&totals, worker->timingStats().rpc_bytes);
+  }
+  return totals;
+}
+
 void printTiming(const RuntimeTiming &timing,
                  const std::vector<mcpd4::TcpPartitionWorker *>
                      &remote_workers) {
@@ -668,6 +728,7 @@ void printTiming(const RuntimeTiming &timing,
     scale_rpc_us += stats.scale_objective_rpc_wall_us;
   }
   const auto counters = gatherSolveCounters(remote_workers);
+  const auto rpc_bytes = gatherRpcByteStats(remote_workers);
 
   const auto coordinator_compute_us =
       saturatedSubtract(timing.solve_wall_us, solve_rpc_us);
@@ -711,6 +772,20 @@ void printTiming(const RuntimeTiming &timing,
             << counters.solve_batch_rpc_count_total << "\n";
   std::cout << "scale_objective_rpc_count "
             << counters.scale_objective_rpc_count << "\n";
+  std::cout << "rpc_tx_bytes_total " << rpc_bytes.tx_bytes_total << "\n";
+  std::cout << "rpc_rx_bytes_total " << rpc_bytes.rx_bytes_total << "\n";
+  std::cout << "rpc_hello_rx_bytes " << rpc_bytes.hello_rx_bytes << "\n";
+  std::cout << "rpc_partition_load_tx_bytes "
+            << rpc_bytes.partition_load_tx_bytes << "\n";
+  std::cout << "rpc_solve_request_tx_bytes "
+            << rpc_bytes.solve_request_tx_bytes << "\n";
+  std::cout << "rpc_solve_result_rx_bytes "
+            << rpc_bytes.solve_result_rx_bytes << "\n";
+  std::cout << "rpc_scale_objective_tx_bytes "
+            << rpc_bytes.scale_objective_tx_bytes << "\n";
+  std::cout << "rpc_ready_rx_bytes " << rpc_bytes.ready_rx_bytes << "\n";
+  std::cout << "rpc_stop_tx_bytes " << rpc_bytes.stop_tx_bytes << "\n";
+  std::cout << "rpc_error_rx_bytes " << rpc_bytes.error_rx_bytes << "\n";
 }
 
 void printObjectiveScaleStats(const Config &config,
@@ -742,6 +817,7 @@ void printProgress(
     worker_solve_us += stats.solve_round_worker_wall_us;
   }
   const auto counters = gatherSolveCounters(remote_workers);
+  const auto rpc_bytes = gatherRpcByteStats(remote_workers);
   const auto worker_rpc_overhead_us =
       saturatedSubtract(solve_rpc_us, worker_solve_us);
 
@@ -786,7 +862,19 @@ void printProgress(
             << counters.solve_batch_rpc_count_total
             << " solve_rpc_wall_us " << solve_rpc_us
             << " worker_solve_wall_us " << worker_solve_us
-            << " worker_rpc_overhead_us " << worker_rpc_overhead_us << "\n";
+            << " worker_rpc_overhead_us " << worker_rpc_overhead_us
+            << " rpc_tx_bytes_total " << rpc_bytes.tx_bytes_total
+            << " rpc_rx_bytes_total " << rpc_bytes.rx_bytes_total
+            << " rpc_partition_load_tx_bytes "
+            << rpc_bytes.partition_load_tx_bytes
+            << " rpc_solve_request_tx_bytes "
+            << rpc_bytes.solve_request_tx_bytes
+            << " rpc_solve_result_rx_bytes "
+            << rpc_bytes.solve_result_rx_bytes
+            << " rpc_scale_objective_tx_bytes "
+            << rpc_bytes.scale_objective_tx_bytes
+            << " rpc_ready_rx_bytes " << rpc_bytes.ready_rx_bytes
+            << "\n";
 
   for (const auto *worker : remote_workers) {
     const auto &stats = worker->timingStats();
@@ -805,6 +893,16 @@ void printProgress(
               << " worker_rpc_overhead_us "
               << saturatedSubtract(stats.solve_round_rpc_wall_us,
                                    stats.solve_round_worker_wall_us)
+              << " rpc_tx_bytes_total "
+              << stats.rpc_bytes.tx_bytes_total
+              << " rpc_rx_bytes_total "
+              << stats.rpc_bytes.rx_bytes_total
+              << " rpc_partition_load_tx_bytes "
+              << stats.rpc_bytes.partition_load_tx_bytes
+              << " rpc_solve_request_tx_bytes "
+              << stats.rpc_bytes.solve_request_tx_bytes
+              << " rpc_solve_result_rx_bytes "
+              << stats.rpc_bytes.solve_result_rx_bytes
               << "\n";
   }
   std::cout.flush();

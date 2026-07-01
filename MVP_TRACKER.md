@@ -1,6 +1,6 @@
 # mcpd4 MVP Tracker
 
-Last updated: 2026-06-30 11:46 PDT
+Last updated: 2026-06-30 21:43 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -9,10 +9,10 @@ usable localhost distributed MVP. Chronological implementation notes live in
 
 ## Current Branches
 
-- Product repo: `network-free-worker-api`
+- Product repo: `working`
 - mcpd3 submodule: `partition-worker-api`
 - Current submodule checkpoint:
-  `95391f5 Remove selected objective public reporting`
+  `8328d73 Document productized solver usage`
 
 ## MVP Definition
 
@@ -229,16 +229,18 @@ The MVP is complete when:
 - [x] Add streaming optimizer-health telemetry with worker names, round counts,
   per-worker solve timing, batch RPC counts, lower-bound progress,
   disagreement count, and regularization diagnostics.
+- [x] Add RPC byte telemetry for coordinator progress/final output plus
+  coordinator and worker status snapshots.
 - [ ] Add failure logging that identifies worker name, partition ids, round id,
   and message type for protocol/solver failures.
 
 ### Stage 7: Docs And Runbook
 
-- [ ] Document build steps for product repo and mcpd3 submodule.
-- [ ] Document localhost coordinator/worker invocation.
-- [ ] Document test commands.
-- [ ] Document current MVP limitations.
-- [ ] Document exactness semantics:
+- [x] Document build steps for product repo and mcpd3 submodule.
+- [x] Document localhost coordinator/worker invocation.
+- [x] Document test commands.
+- [x] Document current MVP limitations.
+- [x] Document exactness semantics:
   - zero disagreement with zero regularization can be exact;
   - scaled-epsilon regularized agreement can be exact when the summed active
     regularization budget is strictly below the objective scale;
@@ -266,20 +268,19 @@ The MVP is complete when:
     per-worker solve timing.
   - Worker status now includes CPU/RAM, temp path, loaded partitions, active
     round/partition ids, solve counts, batch RPC count, and solve time.
-- [ ] Add transport/memory fields to status snapshots after RPC telemetry
+- [x] Add transport byte fields to status snapshots after RPC telemetry
   exists.
-  - Coordinator status should report accepted workers, worker names/resources,
+  - Coordinator status reports accepted workers, worker names/resources,
     partition ownership, current solve phase, current iteration/scale state,
     objective-scale state, disagreement counts, lower-bound progress,
-    regularization diagnostics, per-worker solve counts, per-worker elapsed
-    compute time, per-worker wait time, bytes sent/received, and recent
-    errors.
-  - Worker status should report connection/session identity, assigned
-    partitions, currently executing request type, active partition ids, local
-    solve counts, local solve time, bytes received/sent, memory footprint, and
-    recent errors.
-  - Status should remain queryable without attaching a debugger or tailing
-    opaque logs.
+    regularization diagnostics, per-worker solve counts/timing, and
+    bytes sent/received.
+  - Worker status reports connection/session identity, assigned partitions,
+    current phase/request, active partition ids, local solve counts, local
+    solve time, bytes received/sent, and last error.
+  - Status remains queryable without attaching a debugger or tailing opaque
+    logs.
+- [ ] Add memory footprint fields to status snapshots.
 - [x] Standardize product terminology across CLI flags, logs, docs, and tests.
   - Use `--objective-scale` for the proof/budget multiplier `M`.
   - Keep `--capacity-multiplier` only as a compatibility alias.
@@ -288,13 +289,25 @@ The MVP is complete when:
   - Keep `--initial-step` and `--num-scales` only as compatibility aliases.
   - Rename progress fields from ambiguous `scale`/`step_size` to
     `schedule_scale`/`schedule_step`/`effective_schedule_step`.
-- [ ] Add RPC transfer telemetry and use it to prioritize transport
+- [x] Add RPC transfer byte telemetry and use it to prioritize transport
   optimization.
   - Measure bytes sent/received by message type: partition load, solve batch
     request, solve batch result, objective-scale promotion, stop, and errors.
+  - Local tiny-fixture measurement: final `rpc_tx_bytes_total=1234`,
+    `rpc_rx_bytes_total=1544`, `rpc_partition_load_tx_bytes=250`,
+    `rpc_solve_request_tx_bytes=904`, and
+    `rpc_solve_result_rx_bytes=1344`, showing repeated solve-result traffic
+    dominates setup traffic even on the smallest current fixture.
+- [ ] Add deeper RPC timing and payload-shape telemetry.
   - Measure serialization/deserialization time separately from socket I/O and
     worker maxflow compute time.
   - Report payload counts and byte totals per worker and per round batch.
+- [ ] Reduce repeated solve-result payload size.
+  - Coordinator currently only uses `constraint_id` and `label` from each
+    repeated constrained label; `global_node_id` and `local_index` are already
+    known from partition setup.
+  - Evaluate a compact solve-result label encoding before adding compression.
+- [ ] Evaluate compression and other transport optimizations with telemetry.
   - Use this telemetry to evaluate less wasteful encodings, result deltas,
     compression, smaller label/result payloads, batching boundaries, and
     avoiding unnecessary resend/copy paths.

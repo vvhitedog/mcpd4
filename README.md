@@ -387,10 +387,11 @@ usage: mcpd4_status HOST PORT [--token TOKEN] [--timeout-ms N]
 Coordinator status includes the current phase, accepted worker count, worker
 names/resources, partition ownership, partition count, objective scale, latest
 schedule/iteration state, lower-bound fields, regularization diagnostics,
-disagreement count, aggregate solve/RPC counts, and per-worker solve timing.
+disagreement count, aggregate solve/RPC counts, RPC byte counters, and
+per-worker solve timing.
 Worker status includes its phase, CPU/RAM, temp path, coordinator endpoint,
 loaded partition ids, current round/partition ids, solve counts, batch RPC
-count, worker solve wall time, and last error.
+count, worker solve wall time, RPC byte counters, and last error.
 
 ## Interpreting Output
 
@@ -451,9 +452,25 @@ With `--progress-every`, the coordinator also prints:
   including `schedule_scale`, `schedule_step`, and
   `effective_schedule_step`.
 - `progress_worker ...`: per-worker assigned partition counts, solve counts,
-  batch RPC counts, solve wall time, and RPC overhead.
+  batch RPC counts, solve wall time, RPC overhead, and RPC byte counters.
 
-These fields are useful for detecting stalled workers or partition imbalance.
+RPC byte counters are cumulative and include encoded frame headers. Useful
+fields:
+
+- `rpc_tx_bytes_total` and `rpc_rx_bytes_total`: total bytes sent and received
+  from the coordinator perspective.
+- `rpc_partition_load_tx_bytes`: one-time partition package bytes sent to
+  workers.
+- `rpc_solve_request_tx_bytes`: repeated solve request bytes sent during the
+  optimization loop.
+- `rpc_solve_result_rx_bytes`: repeated solve result bytes received during
+  the optimization loop.
+- `rpc_ready_rx_bytes`, `rpc_stop_tx_bytes`, and `rpc_error_rx_bytes`: control
+  traffic.
+
+These fields are useful for detecting stalled workers, partition imbalance,
+and whether transport overhead is dominated by setup packages or repeated
+solve traffic.
 
 ## Objective Scale And Exactness
 

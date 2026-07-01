@@ -32,15 +32,96 @@ std::runtime_error remoteError(const std::vector<std::uint8_t> &frame) {
   return std::runtime_error("remote worker error: " + error.message);
 }
 
-Frame receiveTypedFrame(const SocketHandle &socket,
-                        std::vector<std::uint8_t> *frame_bytes) {
-  *frame_bytes = receiveFrameBytes(socket);
-  return decodeFrame(*frame_bytes);
+void recordFrameSent(RpcByteStats *stats, MessageType type,
+                     std::uint64_t bytes) {
+  if (stats == nullptr) {
+    return;
+  }
+  stats->tx_bytes_total += bytes;
+  switch (type) {
+  case MessageType::HELLO:
+    stats->hello_tx_bytes += bytes;
+    break;
+  case MessageType::PARTITION_PACKAGE:
+    stats->partition_load_tx_bytes += bytes;
+    break;
+  case MessageType::SOLVE_ROUND_REQUEST:
+  case MessageType::SOLVE_ROUND_BATCH_REQUEST:
+    stats->solve_request_tx_bytes += bytes;
+    break;
+  case MessageType::SOLVE_ROUND_RESULT:
+  case MessageType::SOLVE_ROUND_BATCH_RESULT:
+    stats->solve_result_tx_bytes += bytes;
+    break;
+  case MessageType::SCALE_OBJECTIVE:
+    stats->scale_objective_tx_bytes += bytes;
+    break;
+  case MessageType::READY:
+    stats->ready_tx_bytes += bytes;
+    break;
+  case MessageType::STOP:
+    stats->stop_tx_bytes += bytes;
+    break;
+  case MessageType::ERROR:
+    stats->error_tx_bytes += bytes;
+    break;
+  case MessageType::ALPHA_UPDATE:
+    break;
+  }
 }
 
-ReadyMessage receiveReadyOrThrow(const SocketHandle &socket) {
+void recordFrameReceived(RpcByteStats *stats, MessageType type,
+                         std::uint64_t bytes) {
+  if (stats == nullptr) {
+    return;
+  }
+  stats->rx_bytes_total += bytes;
+  switch (type) {
+  case MessageType::HELLO:
+    stats->hello_rx_bytes += bytes;
+    break;
+  case MessageType::PARTITION_PACKAGE:
+    stats->partition_load_rx_bytes += bytes;
+    break;
+  case MessageType::SOLVE_ROUND_REQUEST:
+  case MessageType::SOLVE_ROUND_BATCH_REQUEST:
+    stats->solve_request_rx_bytes += bytes;
+    break;
+  case MessageType::SOLVE_ROUND_RESULT:
+  case MessageType::SOLVE_ROUND_BATCH_RESULT:
+    stats->solve_result_rx_bytes += bytes;
+    break;
+  case MessageType::SCALE_OBJECTIVE:
+    stats->scale_objective_rx_bytes += bytes;
+    break;
+  case MessageType::READY:
+    stats->ready_rx_bytes += bytes;
+    break;
+  case MessageType::STOP:
+    stats->stop_rx_bytes += bytes;
+    break;
+  case MessageType::ERROR:
+    stats->error_rx_bytes += bytes;
+    break;
+  case MessageType::ALPHA_UPDATE:
+    break;
+  }
+}
+
+Frame receiveTypedFrame(const SocketHandle &socket,
+                        std::vector<std::uint8_t> *frame_bytes,
+                        RpcByteStats *stats = nullptr) {
+  *frame_bytes = receiveFrameBytes(socket);
+  const auto frame = decodeFrame(*frame_bytes);
+  recordFrameReceived(stats, frame.type,
+                      static_cast<std::uint64_t>(frame_bytes->size()));
+  return frame;
+}
+
+ReadyMessage receiveReadyOrThrow(const SocketHandle &socket,
+                                 RpcByteStats *stats = nullptr) {
   std::vector<std::uint8_t> frame_bytes;
-  const auto frame = receiveTypedFrame(socket, &frame_bytes);
+  const auto frame = receiveTypedFrame(socket, &frame_bytes, stats);
   if (frame.type == MessageType::ERROR) {
     throw remoteError(frame_bytes);
   }
@@ -50,21 +131,28 @@ ReadyMessage receiveReadyOrThrow(const SocketHandle &socket) {
   return decodeReady(frame_bytes);
 }
 
-void sendReady(const SocketHandle &socket, const std::string &worker_name) {
+std::uint64_t sendReady(const SocketHandle &socket,
+                        const std::string &worker_name) {
   ReadyMessage ready;
   ready.worker_name = worker_name;
-  sendFrameBytes(socket, encodeReady(ready));
+  const auto frame = encodeReady(ready);
+  sendFrameBytes(socket, frame);
+  return static_cast<std::uint64_t>(frame.size());
 }
 
-void sendErrorBestEffort(const SocketHandle &socket, std::uint32_t code,
-                         const std::string &message) {
+std::uint64_t sendErrorBestEffort(const SocketHandle &socket,
+                                  std::uint32_t code,
+                                  const std::string &message) {
   try {
     ErrorMessage error;
     error.code = code;
     error.message = message;
-    sendFrameBytes(socket, encodeError(error));
+    const auto frame = encodeError(error);
+    sendFrameBytes(socket, frame);
+    return static_cast<std::uint64_t>(frame.size());
   } catch (...) {
   }
+  return 0;
 }
 
 std::uint64_t hostRamGb() {
@@ -97,16 +185,22 @@ std::uint64_t elapsedUs(std::chrono::steady_clock::time_point start) {
 
 } // namespace
 
-TcpPartitionWorker::TcpPartitionWorker(SocketHandle socket, HelloMessage hello)
+TcpPartitionWorker::TcpPartitionWorker(SocketHandle socket, HelloMessage hello,
+                                       std::uint64_t hello_rx_bytes)
     : socket_(std::move(socket)), hello_(std::move(hello)) {
   validateHello(hello_);
+  recordFrameReceived(&timing_stats_.rpc_bytes, MessageType::HELLO,
+                      hello_rx_bytes);
 }
 
 void TcpPartitionWorker::loadPartition(
     const mcpd3::PartitionPackage &package) {
   const auto start = std::chrono::steady_clock::now();
-  sendFrameBytes(socket_, encodePartitionPackage(package));
-  (void)receiveReadyOrThrow(socket_);
+  const auto frame = encodePartitionPackage(package);
+  sendFrameBytes(socket_, frame);
+  recordFrameSent(&timing_stats_.rpc_bytes, MessageType::PARTITION_PACKAGE,
+                  static_cast<std::uint64_t>(frame.size()));
+  (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes);
   timing_stats_.load_partition_rpc_wall_us += elapsedUs(start);
   ++timing_stats_.load_partition_rpc_count;
   partition_ids_.push_back(package.partition_id);
@@ -131,9 +225,14 @@ TcpPartitionWorker::resourceEstimate() const {
 mcpd3::PartitionSolveResult TcpPartitionWorker::solveRound(
     const mcpd3::PartitionSolveRequest &request) {
   const auto start = std::chrono::steady_clock::now();
-  sendFrameBytes(socket_, encodeSolveRoundRequest(request));
+  const auto request_frame = encodeSolveRoundRequest(request);
+  sendFrameBytes(socket_, request_frame);
+  recordFrameSent(&timing_stats_.rpc_bytes,
+                  MessageType::SOLVE_ROUND_REQUEST,
+                  static_cast<std::uint64_t>(request_frame.size()));
   std::vector<std::uint8_t> frame_bytes;
-  const auto frame = receiveTypedFrame(socket_, &frame_bytes);
+  const auto frame =
+      receiveTypedFrame(socket_, &frame_bytes, &timing_stats_.rpc_bytes);
   if (frame.type == MessageType::ERROR) {
     throw remoteError(frame_bytes);
   }
@@ -153,9 +252,14 @@ std::vector<mcpd3::PartitionSolveResult> TcpPartitionWorker::solveRoundBatch(
     return {};
   }
   const auto start = std::chrono::steady_clock::now();
-  sendFrameBytes(socket_, encodeSolveRoundBatchRequest(requests));
+  const auto request_frame = encodeSolveRoundBatchRequest(requests);
+  sendFrameBytes(socket_, request_frame);
+  recordFrameSent(&timing_stats_.rpc_bytes,
+                  MessageType::SOLVE_ROUND_BATCH_REQUEST,
+                  static_cast<std::uint64_t>(request_frame.size()));
   std::vector<std::uint8_t> frame_bytes;
-  const auto frame = receiveTypedFrame(socket_, &frame_bytes);
+  const auto frame =
+      receiveTypedFrame(socket_, &frame_bytes, &timing_stats_.rpc_bytes);
   if (frame.type == MessageType::ERROR) {
     throw remoteError(frame_bytes);
   }
@@ -175,8 +279,11 @@ void TcpPartitionWorker::scaleObjective(long factor) {
   const auto start = std::chrono::steady_clock::now();
   ScaleObjectiveMessage message;
   message.factor = factor;
-  sendFrameBytes(socket_, encodeScaleObjective(message));
-  (void)receiveReadyOrThrow(socket_);
+  const auto frame = encodeScaleObjective(message);
+  sendFrameBytes(socket_, frame);
+  recordFrameSent(&timing_stats_.rpc_bytes, MessageType::SCALE_OBJECTIVE,
+                  static_cast<std::uint64_t>(frame.size()));
+  (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes);
   timing_stats_.scale_objective_rpc_wall_us += elapsedUs(start);
   ++timing_stats_.scale_objective_rpc_count;
 }
@@ -190,7 +297,10 @@ void TcpPartitionWorker::stop(std::uint32_t reason,
     StopMessage stop;
     stop.reason = reason;
     stop.message = message;
-    sendFrameBytes(socket_, encodeStop(stop));
+    const auto frame = encodeStop(stop);
+    sendFrameBytes(socket_, frame);
+    recordFrameSent(&timing_stats_.rpc_bytes, MessageType::STOP,
+                    static_cast<std::uint64_t>(frame.size()));
   } catch (...) {
   }
   socket_.reset();
@@ -228,7 +338,12 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
                      const WorkerRuntimeStatusHooks &status_hooks) {
   validateHello(hello);
   SocketHandle socket = connectTcp(host, port);
-  sendFrameBytes(socket, encodeHello(hello));
+  const auto hello_frame = encodeHello(hello);
+  sendFrameBytes(socket, hello_frame);
+  if (status_hooks.on_frame_sent) {
+    status_hooks.on_frame_sent(MessageType::HELLO,
+                               static_cast<std::uint64_t>(hello_frame.size()));
+  }
   if (status_hooks.on_phase) {
     status_hooks.on_phase("connected");
   }
@@ -237,6 +352,10 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
   while (true) {
     const auto frame_bytes = receiveFrameBytes(socket);
     const auto frame = decodeFrame(frame_bytes);
+    if (status_hooks.on_frame_received) {
+      status_hooks.on_frame_received(
+          frame.type, static_cast<std::uint64_t>(frame_bytes.size()));
+    }
     try {
       switch (frame.type) {
       case MessageType::PARTITION_PACKAGE:
@@ -252,7 +371,10 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
           if (status_hooks.on_phase) {
             status_hooks.on_phase("connected");
           }
-          sendReady(socket, hello.worker_name);
+          const auto bytes = sendReady(socket, hello.worker_name);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::READY, bytes);
+          }
         }
         break;
       case MessageType::SOLVE_ROUND_REQUEST:
@@ -268,8 +390,14 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
           if (status_hooks.on_solve_done) {
             status_hooks.on_solve_done(elapsed, 1, false);
           }
-          sendFrameBytes(
-              socket, encodeSolveRoundResultWithTiming(result, elapsed));
+          const auto result_frame =
+              encodeSolveRoundResultWithTiming(result, elapsed);
+          sendFrameBytes(socket, result_frame);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(
+                MessageType::SOLVE_ROUND_RESULT,
+                static_cast<std::uint64_t>(result_frame.size()));
+          }
         }
         break;
       case MessageType::SOLVE_ROUND_BATCH_REQUEST:
@@ -292,8 +420,14 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
             status_hooks.on_solve_done(
                 elapsed, static_cast<long>(results.size()), true);
           }
-          sendFrameBytes(
-              socket, encodeSolveRoundBatchResultWithTiming(results, elapsed));
+          const auto result_frame =
+              encodeSolveRoundBatchResultWithTiming(results, elapsed);
+          sendFrameBytes(socket, result_frame);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(
+                MessageType::SOLVE_ROUND_BATCH_RESULT,
+                static_cast<std::uint64_t>(result_frame.size()));
+          }
         }
         break;
       case MessageType::SCALE_OBJECTIVE:
@@ -306,7 +440,10 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
           if (status_hooks.on_phase) {
             status_hooks.on_phase("connected");
           }
-          sendReady(socket, hello.worker_name);
+          const auto bytes = sendReady(socket, hello.worker_name);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::READY, bytes);
+          }
         }
         break;
       case MessageType::STOP:
@@ -316,15 +453,23 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
         }
         return;
       default:
-        sendErrorBestEffort(socket, 1,
-                            "worker received unexpected message type");
+        {
+          const auto bytes = sendErrorBestEffort(
+              socket, 1, "worker received unexpected message type");
+          if (bytes != 0 && status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::ERROR, bytes);
+          }
+        }
         break;
       }
     } catch (const std::exception &e) {
       if (status_hooks.on_error) {
         status_hooks.on_error(e.what());
       }
-      sendErrorBestEffort(socket, 2, e.what());
+      const auto bytes = sendErrorBestEffort(socket, 2, e.what());
+      if (bytes != 0 && status_hooks.on_frame_sent) {
+        status_hooks.on_frame_sent(MessageType::ERROR, bytes);
+      }
     }
   }
 }
@@ -340,7 +485,8 @@ std::unique_ptr<TcpPartitionWorker> acceptTcpPartitionWorker(
   auto hello = decodeHello(frame_bytes);
   validateHello(hello);
   return std::make_unique<TcpPartitionWorker>(std::move(socket),
-                                              std::move(hello));
+                                              std::move(hello),
+                                              frame_bytes.size());
 }
 
 } // namespace mcpd4
