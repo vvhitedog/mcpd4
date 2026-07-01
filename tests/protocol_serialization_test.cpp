@@ -36,6 +36,17 @@ void requireAlphaUpdateEqual(const mcpd3::AlphaUpdate &lhs,
           "alpha update momentum mismatch");
 }
 
+void requireCompactAlphaUpdateEqual(const mcpd3::AlphaUpdate &lhs,
+                                    const mcpd3::AlphaUpdate &rhs) {
+  require(lhs.constraint_id == rhs.constraint_id,
+          "alpha update constraint id mismatch");
+  require(lhs.alpha == rhs.alpha, "alpha update alpha mismatch");
+  require(lhs.last_alpha == 0,
+          "compact alpha update should omit last alpha");
+  require(lhs.alpha_momentum == 0,
+          "compact alpha update should omit momentum");
+}
+
 void requireEndpointEqual(const mcpd3::ConstraintEndpointBinding &lhs,
                           const mcpd3::ConstraintEndpointBinding &rhs) {
   require(lhs.constraint_id == rhs.constraint_id,
@@ -195,8 +206,10 @@ void roundTripsSolveRoundRequest() {
                           /*last_alpha=*/-6,
                           /*alpha_momentum=*/-1.5f});
 
-  const auto decoded = mcpd4::decodeSolveRoundRequest(
-      mcpd4::encodeSolveRoundRequest(message));
+  const auto encoded = mcpd4::encodeSolveRoundRequest(message);
+  require(encoded.size() == 64,
+          "solve request should use compact 12-byte alpha updates");
+  const auto decoded = mcpd4::decodeSolveRoundRequest(encoded);
   require(decoded.round_id == message.round_id, "request round mismatch");
   require(decoded.partition_id == message.partition_id,
           "request partition mismatch");
@@ -206,7 +219,8 @@ void roundTripsSolveRoundRequest() {
   require(decoded.alpha_updates.size() == message.alpha_updates.size(),
           "request alpha count mismatch");
   for (size_t i = 0; i < message.alpha_updates.size(); ++i) {
-    requireAlphaUpdateEqual(decoded.alpha_updates[i], message.alpha_updates[i]);
+    requireCompactAlphaUpdateEqual(decoded.alpha_updates[i],
+                                   message.alpha_updates[i]);
   }
 }
 
@@ -234,8 +248,10 @@ void roundTripsSolveRoundBatchRequest() {
                           /*alpha_momentum=*/-1.5f});
 
   const std::vector<mcpd3::PartitionSolveRequest> messages{first, second};
-  const auto decoded = mcpd4::decodeSolveRoundBatchRequest(
-      mcpd4::encodeSolveRoundBatchRequest(messages));
+  const auto encoded = mcpd4::encodeSolveRoundBatchRequest(messages);
+  require(encoded.size() == 96,
+          "batch request should use compact 12-byte alpha updates");
+  const auto decoded = mcpd4::decodeSolveRoundBatchRequest(encoded);
 
   require(decoded.size() == messages.size(),
           "batch request count mismatch");
@@ -253,8 +269,8 @@ void roundTripsSolveRoundBatchRequest() {
                 messages[i].alpha_updates.size(),
             "batch request alpha count mismatch");
     for (size_t j = 0; j < messages[i].alpha_updates.size(); ++j) {
-      requireAlphaUpdateEqual(decoded[i].alpha_updates[j],
-                              messages[i].alpha_updates[j]);
+      requireCompactAlphaUpdateEqual(decoded[i].alpha_updates[j],
+                                     messages[i].alpha_updates[j]);
     }
   }
 }
@@ -419,12 +435,15 @@ void roundTripsAlphaUpdate() {
                           /*alpha=*/7,
                           /*last_alpha=*/8,
                           /*alpha_momentum=*/2.25f});
-  const auto decoded = mcpd4::decodeAlphaUpdate(
-      mcpd4::encodeAlphaUpdate(message));
+  const auto encoded = mcpd4::encodeAlphaUpdate(message);
+  require(encoded.size() == 32,
+          "standalone alpha message should use compact 12-byte alpha updates");
+  const auto decoded = mcpd4::decodeAlphaUpdate(encoded);
   require(decoded.partition_id == message.partition_id,
           "alpha message partition mismatch");
   require(decoded.alpha_updates.size() == 1, "alpha message count mismatch");
-  requireAlphaUpdateEqual(decoded.alpha_updates[0], message.alpha_updates[0]);
+  requireCompactAlphaUpdateEqual(decoded.alpha_updates[0],
+                                 message.alpha_updates[0]);
 }
 
 void roundTripsStop() {

@@ -468,9 +468,14 @@ fields:
 - `rpc_ready_rx_bytes`, `rpc_stop_tx_bytes`, and `rpc_error_rx_bytes`: control
   traffic.
 
-Protocol version 3 compacts solve-result boundary labels: result frames send
-only `constraint_id` and `label`; `global_node_id` and `local_index` are
-one-time partition-package metadata.
+Protocol version 4 compacts the hot-path boundary exchange:
+
+- solve-result boundary labels send only `constraint_id` and `label`;
+- alpha updates send only `constraint_id` and current `alpha`.
+
+`global_node_id`, `local_index`, and initial alpha state are one-time
+partition-package metadata. `last_alpha` is maintained by each worker from its
+local previous alpha, and `alpha_momentum` remains coordinator-owned.
 
 These fields are useful for detecting stalled workers, partition imbalance,
 and whether transport overhead is dominated by setup packages or repeated

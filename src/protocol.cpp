@@ -211,16 +211,12 @@ Frame decodeExpectedFrame(const std::vector<std::uint8_t> &frame,
 void writeAlphaUpdate(Writer *writer, const mcpd3::AlphaUpdate &update) {
   writer->writeI32(update.constraint_id);
   writer->writeI64(update.alpha);
-  writer->writeI64(update.last_alpha);
-  writer->writeFloat(update.alpha_momentum);
 }
 
 mcpd3::AlphaUpdate readAlphaUpdate(Reader *reader) {
   mcpd3::AlphaUpdate update;
   update.constraint_id = reader->readI32();
   update.alpha = checkedIntegerCast<long>(reader->readI64());
-  update.last_alpha = checkedIntegerCast<long>(reader->readI64());
-  update.alpha_momentum = reader->readFloat();
   return update;
 }
 

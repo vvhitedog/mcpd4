@@ -1,6 +1,6 @@
 # mcpd4 MVP Tracker
 
-Last updated: 2026-06-30 21:48 PDT
+Last updated: 2026-06-30 22:27 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -310,6 +310,15 @@ The MVP is complete when:
     protocol version to `3`.
   - Tiny fixture result traffic dropped from `rpc_solve_result_rx_bytes=1344`
     to `1232`, saving 8 bytes for each partition-solve result label.
+- [x] Reduce repeated alpha-update payload size.
+  - Workers now derive `last_alpha` from their local previous alpha and catch
+    it up after each local solve.
+  - `alpha_momentum` remains coordinator-owned and is not sent to workers.
+  - mcpd4 protocol version `4` encodes alpha updates as `constraint_id` plus
+    current `alpha`, reducing each record from 24 bytes to 12 bytes.
+  - Tiny fixture request traffic dropped from `rpc_solve_request_tx_bytes=904`
+    to `760`; full `adhead` dirty syncs should save roughly `15.7 MB` per
+    iteration.
 - [ ] Evaluate compression and other transport optimizations with telemetry.
   - Use this telemetry to evaluate less wasteful encodings, result deltas,
     compression, smaller label/result payloads, batching boundaries, and

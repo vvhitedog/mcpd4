@@ -1267,3 +1267,38 @@
   - `./build/process_integration_test ./build/mcpd4_coordinator ./build/mcpd4_worker ./build/mcpd4_discovery ./build/mcpd4_status tests/fixtures`;
   - `ctest --test-dir build --output-on-failure`;
   - local benchmark command listed in the prior entry.
+
+## 2026-06-30 22:27 PDT
+
+- Implemented compact per-round alpha updates:
+  - `SOLVE_ROUND_REQUEST`, `SOLVE_ROUND_BATCH_REQUEST`, and standalone
+    `ALPHA_UPDATE` frames now encode each alpha update as `constraint_id` plus
+    current `alpha` only;
+  - `last_alpha` is now worker-local state: workers set it from their
+    persisted previous alpha when an update arrives, then catch it up to
+    `alpha` after the local solve completes;
+  - `alpha_momentum` remains coordinator-owned and is no longer transmitted to
+    workers;
+  - bumped the mcpd4 worker protocol version to `4`.
+- Added test coverage:
+  - protocol serialization asserts compact 12-byte alpha update records in
+    single solve requests, batched solve requests, and standalone alpha update
+    messages;
+  - partition-worker smoke coverage sends bogus `last_alpha` and
+    `alpha_momentum` metadata and verifies the worker result matches the
+    result from correct metadata.
+- Re-ran the same local fixture benchmark:
+  - final objective stayed `4`, final raw objective stayed `40000`, and
+    `final_disagreement_count` stayed `0`;
+  - after compact result labels but before compact alpha updates:
+    `rpc_solve_request_tx_bytes=904`;
+  - after compact alpha updates: `rpc_solve_request_tx_bytes=760`;
+  - for `adhead`, the full-sync estimate drops from about `31.5 MB` of alpha
+    updates per iteration to about `15.7 MB`, saving roughly `15.7 MB` per
+    full dirty sync iteration.
+- Verified:
+  - `cmake --build build -j`;
+  - `./build/protocol_serialization_test`;
+  - `./build/distributed_partition_worker_smoke_test`;
+  - `ctest --test-dir build --output-on-failure`;
+  - local benchmark command listed in the 21:43 entry.

@@ -32,7 +32,8 @@ Implemented product surface:
 - UDP queryable status plus `mcpd4_status`.
 - Progress/final/status telemetry for solve counts, timings, regularization
   diagnostics, worker ownership, resources, and RPC byte counters.
-- Compact solve-result boundary-label encoding in protocol version `3`.
+- Compact solve-result boundary-label and alpha-update encoding in protocol
+  version `4`.
 - README runbook for build/test, localhost runs, discovery-mode LAN runs, and
   status inspection.
 
@@ -44,15 +45,23 @@ Current transport telemetry checkpoint:
   `rpc_ready_rx_bytes`, `rpc_stop_tx_bytes`, and related counters.
 - Worker status exposes transmitted/received totals plus partition-load,
   solve-request, solve-result, ready, stop, and error byte categories.
-- Tiny local fixture run:
-  `rpc_tx_bytes_total=1234`, `rpc_rx_bytes_total=1544`,
-  `rpc_partition_load_tx_bytes=250`, `rpc_solve_request_tx_bytes=904`,
-  `rpc_solve_result_rx_bytes=1344`.
-- First concrete payload reduction is complete: solve-result boundary labels
-  now transmit only `constraint_id` and `label`; `global_node_id` and
-  `local_index` remain setup metadata in partition packages.
+- Current tiny local fixture run:
+  `rpc_tx_bytes_total=1090`, `rpc_rx_bytes_total=1432`,
+  `rpc_partition_load_tx_bytes=250`, `rpc_solve_request_tx_bytes=760`,
+  `rpc_solve_result_rx_bytes=1232`.
+- First concrete payload reductions are complete:
+  - solve-result boundary labels now transmit only `constraint_id` and
+    `label`;
+  - alpha updates now transmit only `constraint_id` and current `alpha`;
+  - `global_node_id`, `local_index`, and initial alpha state remain setup
+    metadata in partition packages;
+  - workers derive `last_alpha` from their local previous alpha, and
+    `alpha_momentum` remains coordinator-owned.
 - Tiny fixture result traffic dropped from `rpc_solve_result_rx_bytes=1344` to
   `1232`, saving 8 bytes for each of 14 partition-solve result labels.
+- Tiny fixture request traffic dropped from `rpc_solve_request_tx_bytes=904`
+  to `760`; a full dirty `adhead` alpha sync should save roughly `15.7 MB`
+  per iteration.
 
 Suggested next prompt:
 
@@ -60,10 +69,11 @@ Suggested next prompt:
 We are in /home/matt/software/mcpd3-distributed on branch working.
 Read AGENT_HANDOFF.md current-state, MVP_TRACKER.md, PROGRESS_LOG.md, and
 README.md. Continue RPC transport optimization. Compact solve-result labels
-are already implemented in protocol version 3, so use the existing byte
-telemetry to evaluate serialization/deserialization timing, compression of
-large one-time partition packages, and any remaining repeated solve payload.
-Preserve correctness tests and update docs/logs.
+and compact alpha updates are already implemented in protocol version 4, so
+use the existing byte telemetry to evaluate serialization/deserialization
+timing, compression of large one-time partition packages, bit-packed boundary
+labels, and any remaining repeated solve payload. Preserve correctness tests
+and update docs/logs.
 ```
 
 ## Repository Roles
