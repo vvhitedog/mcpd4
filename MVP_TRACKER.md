@@ -1,6 +1,6 @@
 # mcpd4 MVP Tracker
 
-Last updated: 2026-06-30 23:57 PDT
+Last updated: 2026-07-01 01:08 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -12,7 +12,7 @@ usable localhost distributed MVP. Chronological implementation notes live in
 - Product repo: `working`
 - mcpd3 submodule: `partition-worker-api`
 - Current submodule checkpoint:
-  `8328d73 Document productized solver usage`
+  `1df33d7 Derive worker last alpha locally`
 
 ## MVP Definition
 
@@ -322,7 +322,11 @@ The MVP is complete when:
 - [ ] Add deeper RPC timing and payload-shape telemetry.
   - Measure serialization/deserialization time separately from socket I/O and
     worker maxflow compute time.
-  - Report payload counts and byte totals per worker and per round batch.
+  - [x] Add raw CSV telemetry for post-run analysis:
+    per-iteration optimizer state, per-worker per-iteration solve/RPC timing
+    deltas, long-form RPC counter deltas, partition metadata, worker
+    ownership, and final summary fields.
+  - [x] Report byte totals per worker and per round batch through CSV deltas.
 - [x] Reduce repeated solve-result payload size.
   - Coordinator currently only uses `constraint_id` and `label` from each
     repeated constrained label; `global_node_id` and `local_index` are already

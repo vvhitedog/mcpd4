@@ -4,7 +4,7 @@ This document is the starting point for a new Codex/agent session in this
 repository. It deliberately condenses the previous experimental context so the
 new agent does not need the full chat history.
 
-## Current State: 2026-06-30 23:57 PDT
+## Current State: 2026-07-01 01:08 PDT
 
 This file began as the original distributed-MVP plan. The historical sections
 below are useful background, but the implementation is far past the original
@@ -33,6 +33,10 @@ Implemented product surface:
 - UDP queryable status plus `mcpd4_status`.
 - Progress/final/status telemetry for solve counts, timings, regularization
   diagnostics, worker ownership, resources, and RPC byte counters.
+- Optional raw CSV telemetry via `--telemetry-csv-prefix PATH`, writing
+  per-iteration optimizer state, per-worker solve/RPC timing deltas,
+  long-form RPC counter deltas, partition metadata, worker metadata, and final
+  summary fields to `PATH.*.csv`.
 - Coordinator status includes live algorithm segment timing in `segments`:
   started segments report elapsed time; completed segments report final
   elapsed time and stats; running segments report ETA/remaining time when a
@@ -63,6 +67,10 @@ Current transport telemetry checkpoint:
   `coordinator_setup`, `solve`, and `stop_workers`.
 - Solve segment progress is updated whenever status is enabled, even when
   stdout progress streaming is disabled.
+- CSV telemetry also forces per-iteration progress callbacks internally so
+  `PATH.iterations.csv`, `PATH.worker_iterations.csv`, and
+  `PATH.worker_rpc_metrics.csv` can be used for post-run histograms without
+  enabling noisy stdout progress.
 - Current tiny local fixture run:
   `rpc_tx_bytes_total=1090`, `rpc_rx_bytes_total=1432`,
   `rpc_partition_load_tx_bytes=250`, `rpc_solve_request_tx_bytes=760`,
@@ -93,8 +101,9 @@ We are in /home/matt/software/mcpd3-distributed on branch working.
 Read AGENT_HANDOFF.md current-state, MVP_TRACKER.md, PROGRESS_LOG.md, and
 README.md. Continue RPC transport optimization. Compact solve-result labels,
 compact alpha updates, and optional Snappy transport compression are already
-implemented. Use the logical-vs-wire byte telemetry, compression timing, and
-worker RPC overhead to evaluate large LAN runs, serialization/deserialization
+implemented. Use --telemetry-csv-prefix on large LAN runs to analyze
+per-iteration worker solve time, RPC overhead, logical-vs-wire byte deltas,
+compression timing, and payload shape. Evaluate serialization/deserialization
 timing, bit-packed boundary labels, result deltas, compression thresholds, and
 any remaining repeated solve payload. Preserve correctness tests and update
 docs/logs.

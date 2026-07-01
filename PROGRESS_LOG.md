@@ -1,5 +1,36 @@
 # Progress Log
 
+## 2026-07-01 01:08 PDT
+
+- Added optional raw CSV telemetry for coordinator runs:
+  - `--telemetry-csv-prefix PATH` writes `PATH.metadata.csv`,
+    `PATH.partitions.csv`, `PATH.workers.csv`, `PATH.iterations.csv`,
+    `PATH.worker_iterations.csv`, `PATH.worker_rpc_metrics.csv`, and
+    `PATH.final.csv`;
+  - enabling CSV telemetry forces per-iteration progress callbacks internally
+    so every optimizer iteration is recorded, while stdout progress still
+    follows `--progress-every`;
+  - `iterations.csv` records global optimizer state, iteration wall time,
+    solve elapsed time, bounds, disagreement, schedule, and regularization
+    fields;
+  - `worker_iterations.csv` records per-worker per-iteration solve RPC wall
+    deltas, worker solve-time deltas, derived RPC overhead deltas, assignment,
+    and cumulative solve counts;
+  - `worker_rpc_metrics.csv` records long-form per-worker per-iteration deltas
+    and cumulative values for every RPC byte, wire-byte, compression-time, and
+    frame-count counter.
+- Updated README runbook docs with the CSV flag, emitted files, and the basic
+  join path for histogram analysis.
+- Added process integration coverage proving a coordinator run writes the CSV
+  files and includes the expected timing, RPC, metadata, partition, worker, and
+  final-summary fields.
+- Verified so far:
+  - `cmake --build build -j`;
+  - `./build/process_integration_test ./build/mcpd4_coordinator ./build/mcpd4_worker ./build/mcpd4_discovery ./build/mcpd4_status tests/fixtures`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`.
+
 ## 2026-06-30 23:57 PDT
 
 - Added live coordinator algorithm segment tracking to the UDP status

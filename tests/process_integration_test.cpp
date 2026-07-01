@@ -13,6 +13,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <netinet/in.h>
@@ -240,6 +241,30 @@ void waitForReadyFile(const std::string &path,
     std::this_thread::sleep_for(10ms);
   }
   throw std::runtime_error("coordinator did not write ready file: " + path);
+}
+
+std::vector<std::string> telemetryCsvSuffixes() {
+  return {".metadata.csv",
+          ".partitions.csv",
+          ".workers.csv",
+          ".iterations.csv",
+          ".worker_iterations.csv",
+          ".worker_rpc_metrics.csv",
+          ".final.csv"};
+}
+
+void removeTelemetryCsvFiles(const std::string &prefix) {
+  for (const auto &suffix : telemetryCsvSuffixes()) {
+    std::remove((prefix + suffix).c_str());
+  }
+}
+
+std::string readTextFile(const std::string &path) {
+  std::ifstream in(path);
+  require(in.good(), "failed to open expected file: " + path);
+  std::ostringstream out;
+  out << in.rdbuf();
+  return out.str();
 }
 
 int checkedScaleInt(int value, long factor) {
@@ -744,6 +769,97 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
               run.output);
 }
 
+void telemetryCsvIsWritten(const std::string &coordinator_bin,
+                           const std::string &worker_bin,
+                           const std::string &fixture_dir) {
+  const std::string prefix =
+      "/tmp/mcpd4-telemetry-" + std::to_string(::getpid());
+  removeTelemetryCsvFiles(prefix);
+  try {
+    const auto run = runDistributedProcess(
+        coordinator_bin, worker_bin, fixture_dir,
+        CaseConfig{/*name=*/"telemetry",
+                   /*fixture=*/"hand_bottleneck.max",
+                   /*worker_count=*/2,
+                   /*partition_count=*/2,
+                   /*max_iterations=*/10,
+                   /*schedule_levels=*/1,
+                   /*schedule_start=*/10000,
+                   /*objective_scale=*/10000},
+        {"--telemetry-csv-prefix", prefix});
+
+    require(run.output.find("telemetry_csv_prefix " + prefix) !=
+                std::string::npos,
+            "coordinator should report telemetry CSV prefix\n" + run.output);
+    require(run.output.find("telemetry_csv_worker_rpc_metrics " + prefix +
+                            ".worker_rpc_metrics.csv") != std::string::npos,
+            "coordinator should report RPC telemetry CSV path\n" +
+                run.output);
+
+    const auto metadata = readTextFile(prefix + ".metadata.csv");
+    const auto partitions = readTextFile(prefix + ".partitions.csv");
+    const auto workers = readTextFile(prefix + ".workers.csv");
+    const auto iterations = readTextFile(prefix + ".iterations.csv");
+    const auto worker_iterations =
+        readTextFile(prefix + ".worker_iterations.csv");
+    const auto worker_rpc_metrics =
+        readTextFile(prefix + ".worker_rpc_metrics.csv");
+    const auto final = readTextFile(prefix + ".final.csv");
+
+    require(metadata.find("schema_version,1,") != std::string::npos,
+            "metadata CSV should include schema version\n" + metadata);
+    require(metadata.find("rpc_compression,none,") != std::string::npos,
+            "metadata CSV should include compression mode\n" + metadata);
+    require(partitions.find("partition_id,local_node_count") == 0,
+            "partition CSV should include documented header\n" + partitions);
+    require(partitions.find("\n0,") != std::string::npos,
+            "partition CSV should include partition rows\n" + partitions);
+    require(workers.find("telemetry-worker-0") != std::string::npos,
+            "worker CSV should include worker names\n" + workers);
+    require(iterations.find("iteration_wall_us") != std::string::npos,
+            "iteration CSV should include wall-time delta column\n" +
+                iterations);
+    require(iterations.find("solve_elapsed_us") != std::string::npos,
+            "iteration CSV should include solve elapsed column\n" +
+                iterations);
+    require(iterations.find("\n1,") != std::string::npos,
+            "iteration CSV should include per-iteration rows\n" + iterations);
+    require(worker_iterations.find("solve_rpc_wall_us_delta") !=
+                std::string::npos,
+            "worker iteration CSV should include RPC timing deltas\n" +
+                worker_iterations);
+    require(worker_iterations.find("worker_solve_wall_us_delta") !=
+                std::string::npos,
+            "worker iteration CSV should include solve timing deltas\n" +
+                worker_iterations);
+    require(worker_iterations.find("worker_rpc_overhead_us_delta") !=
+                std::string::npos,
+            "worker iteration CSV should include overhead timing deltas\n" +
+                worker_iterations);
+    require(worker_iterations.find("telemetry-worker-0") !=
+                std::string::npos,
+            "worker iteration CSV should include worker rows\n" +
+                worker_iterations);
+    require(worker_rpc_metrics.find("solve_request_tx_bytes") !=
+                std::string::npos,
+            "worker RPC metric CSV should include solve request bytes\n" +
+                worker_rpc_metrics);
+    require(worker_rpc_metrics.find("solve_result_rx_bytes") !=
+                std::string::npos,
+            "worker RPC metric CSV should include solve result bytes\n" +
+                worker_rpc_metrics);
+    require(final.find("timing_worker_rpc_overhead_us") != std::string::npos,
+            "final CSV should include aggregate RPC overhead timing\n" +
+                final);
+    require(final.find("total_iterations") != std::string::npos,
+            "final CSV should include total iterations\n" + final);
+  } catch (...) {
+    removeTelemetryCsvFiles(prefix);
+    throw;
+  }
+  removeTelemetryCsvFiles(prefix);
+}
+
 void snappyCompressionProcessMatchesReference(
     const std::string &coordinator_bin, const std::string &worker_bin,
     const std::string &fixture_dir) {
@@ -1095,6 +1211,7 @@ int main(int argc, char **argv) {
     capacityOverflowSaturationIsOptIn(coordinator_bin, worker_bin,
                                       fixture_dir);
     progressTelemetryIsStreamed(coordinator_bin, worker_bin, fixture_dir);
+    telemetryCsvIsWritten(coordinator_bin, worker_bin, fixture_dir);
     snappyCompressionProcessMatchesReference(coordinator_bin, worker_bin,
                                              fixture_dir);
     discoveryModeAcceptsDiscoveredWorkersAndClose(

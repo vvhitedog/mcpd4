@@ -14,8 +14,10 @@
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <poll.h>
@@ -67,6 +69,7 @@ struct Config {
   std::string advertise_host;
   std::uint16_t status_port = 0;
   std::string status_token = mcpd4::kDefaultStatusToken;
+  std::string telemetry_csv_prefix;
   mcpd4::TransportCompression rpc_compression =
       mcpd4::TransportCompression::NONE;
   bool saturate_capacity_overflow = false;
@@ -116,6 +119,10 @@ std::string joinInts(const std::vector<int> &values) {
 
 std::string boolString(bool value) { return value ? "1" : "0"; }
 
+std::uint64_t saturatedSubtract(std::uint64_t lhs, std::uint64_t rhs) {
+  return lhs > rhs ? lhs - rhs : 0;
+}
+
 void addRpcByteStats(mcpd4::RpcByteStats *total,
                      const mcpd4::RpcByteStats &stats) {
   total->tx_bytes_total += stats.tx_bytes_total;
@@ -145,6 +152,510 @@ void addRpcByteStats(mcpd4::RpcByteStats *total,
   total->error_tx_bytes += stats.error_tx_bytes;
   total->error_rx_bytes += stats.error_rx_bytes;
 }
+
+std::string csvValue(const std::string &value) {
+  bool quote = value.empty();
+  for (const char ch : value) {
+    if (ch == ',' || ch == '"' || ch == '\n' || ch == '\r') {
+      quote = true;
+      break;
+    }
+  }
+  if (!quote) {
+    return value;
+  }
+  std::string escaped;
+  escaped.reserve(value.size() + 2);
+  escaped.push_back('"');
+  for (const char ch : value) {
+    escaped.push_back(ch);
+    if (ch == '"') {
+      escaped.push_back('"');
+    }
+  }
+  escaped.push_back('"');
+  return escaped;
+}
+
+std::string csvDouble(double value) {
+  std::ostringstream out;
+  out << std::setprecision(17) << value;
+  return out.str();
+}
+
+class TelemetryRecorder {
+public:
+  void open(const Config &config) {
+    if (config.telemetry_csv_prefix.empty()) {
+      return;
+    }
+    prefix_ = config.telemetry_csv_prefix;
+    openFile(&metadata_, ".metadata.csv");
+    openFile(&partitions_, ".partitions.csv");
+    openFile(&workers_, ".workers.csv");
+    openFile(&iterations_, ".iterations.csv");
+    openFile(&worker_iterations_, ".worker_iterations.csv");
+    openFile(&worker_rpc_metrics_, ".worker_rpc_metrics.csv");
+    openFile(&final_, ".final.csv");
+    enabled_ = true;
+    writeHeaders();
+    const auto created_unix_seconds =
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+    insertMetadata("schema_version", "1",
+                   "Telemetry CSV schema version for mcpd4 coordinator runs.");
+    insertMetadata("created_unix_seconds",
+                   std::to_string(created_unix_seconds),
+                   "Unix timestamp when the telemetry recorder was opened.");
+    insertMetadata("dimacs_path", config.dimacs_path,
+                   "DIMACS input path read by the coordinator.");
+    insertMetadata("directed", boolString(config.directed),
+                   "1 when the directed DIMACS reader was used.");
+    insertMetadata("worker_count", std::to_string(config.worker_count),
+                   "Requested number of worker processes.");
+    insertMetadata("partition_count", std::to_string(config.partition_count),
+                   "Requested number of graph partitions.");
+    insertMetadata("max_iterations", std::to_string(config.max_iterations),
+                   "Maximum iterations per schedule level.");
+    insertMetadata("schedule_levels", std::to_string(config.schedule_levels),
+                   "Number of base-10 schedule levels.");
+    insertMetadata("schedule_start", std::to_string(config.schedule_start),
+                   "Initial dual-decomposition schedule step.");
+    insertMetadata("objective_scale", std::to_string(config.objective_scale),
+                   "Initial exact objective/regularization quantum.");
+    insertMetadata("rpc_compression",
+                   mcpd4::transportCompressionName(config.rpc_compression),
+                   "Transport compression mode requested for RPC frames.");
+  }
+
+  bool enabled() const { return enabled_; }
+
+  void recordGraph(const mcpd3::MinCutGraph &graph,
+                   const ObjectiveScaleStats &scale_stats) {
+    if (!enabled_) {
+      return;
+    }
+    insertMetadata("graph_node_count", std::to_string(graph.nnode),
+                   "Node count reported by the DIMACS reader.");
+    insertMetadata("graph_arc_count", std::to_string(graph.narc),
+                   "Arc count reported by the DIMACS reader.");
+    insertMetadata("objective_scale_arc_saturation_count",
+                   std::to_string(scale_stats.arc_saturation_count),
+                   "Number of arc capacities clipped by saturating scale mode.");
+    insertMetadata(
+        "objective_scale_terminal_saturation_count",
+        std::to_string(scale_stats.terminal_saturation_count),
+        "Number of terminal capacities clipped by saturating scale mode.");
+  }
+
+  void recordPackages(const std::vector<mcpd3::PartitionPackage> &packages) {
+    if (!enabled_) {
+      return;
+    }
+    for (const auto &package : packages) {
+      partitions_ << package.partition_id << "," << package.local_node_count
+                  << "," << package.arcs.size() << ","
+                  << package.arcs.size() / 2 << ","
+                  << package.terminal_capacities.size() << ","
+                  << package.constraint_endpoints.size() << "\n";
+    }
+  }
+
+  void beginSolve(const std::vector<mcpd4::TcpPartitionWorker *>
+                      &remote_workers) {
+    if (!enabled_) {
+      return;
+    }
+    solve_started_at_ = std::chrono::steady_clock::now();
+    previous_progress_at_ = solve_started_at_;
+    previous_workers_.clear();
+    for (const auto *worker : remote_workers) {
+      const auto snapshot = worker->statusSnapshot();
+      previous_workers_[snapshot.worker_name] = snapshot.timing;
+      workers_ << csvValue(snapshot.worker_name) << ","
+               << snapshot.cpu_count << "," << snapshot.ram_gb << ","
+               << csvValue(worker->hello().temp_path) << ","
+               << csvValue(joinInts(snapshot.partition_ids)) << ","
+               << snapshot.partition_ids.size() << "\n";
+    }
+  }
+
+  void recordProgress(const mcpd3::PartitionWorkerProgressRecord &record,
+                      const std::vector<mcpd4::TcpPartitionWorker *>
+                          &remote_workers) {
+    if (!enabled_) {
+      return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    const auto iteration_wall_us = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            now - previous_progress_at_)
+            .count());
+    const auto solve_elapsed_us = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            now - solve_started_at_)
+            .count());
+    previous_progress_at_ = now;
+
+    iterations_ << record.total_iteration << "," << record.scale << ","
+                << record.iteration << "," << record.max_iteration << ","
+                << iteration_wall_us << "," << solve_elapsed_us << ","
+                << record.lower_bound << "," << record.best_lower_bound
+                << "," << record.certified_lower_bound << ","
+                << record.best_certified_lower_bound << ","
+                << record.regularized_objective << ","
+                << record.best_regularized_objective << ","
+                << record.disagreement_count << ","
+                << csvDouble(record.disagreement_norm_sq) << ","
+                << record.step_size << "," << record.effective_step_size
+                << "," << record.regularization_strength << ","
+                << record.regularization_budget << ","
+                << record.regularization_contribution << ","
+                << record.regularization_anchor_sink_count << ","
+                << record.regularization_active_sink_count << ","
+                << record.iterations_since_improvement << "\n";
+
+    for (const auto *worker : remote_workers) {
+      recordWorkerProgress(record.total_iteration, *worker);
+    }
+  }
+
+  void recordFinal(const RuntimeTiming &timing,
+                   const mcpd3::PartitionWorkerCoordinatorSolveResult &result,
+                   const std::vector<mcpd4::TcpPartitionWorker *>
+                       &remote_workers) {
+    if (!enabled_) {
+      return;
+    }
+    std::uint64_t solve_rpc_us = 0;
+    std::uint64_t worker_solve_us = 0;
+    std::uint64_t load_rpc_us = 0;
+    std::uint64_t scale_rpc_us = 0;
+    mcpd4::RpcByteStats rpc_bytes;
+    for (const auto *worker : remote_workers) {
+      const auto &stats = worker->timingStats();
+      load_rpc_us += stats.load_partition_rpc_wall_us;
+      solve_rpc_us += stats.solve_round_rpc_wall_us;
+      worker_solve_us += stats.solve_round_worker_wall_us;
+      scale_rpc_us += stats.scale_objective_rpc_wall_us;
+      addRpcByteStats(&rpc_bytes, stats.rpc_bytes);
+    }
+    insertFinal("status", std::to_string(static_cast<int>(result.status)),
+                "Final coordinator status enum value.");
+    insertFinal("stop_reason",
+                std::to_string(static_cast<int>(result.stop_reason)),
+                "Final coordinator stop reason enum value.");
+    insertFinal("final_objective_raw",
+                std::to_string(result.final_objective_raw),
+                "Final unscaled objective in raw integer units.");
+    insertFinal("final_certified_lower_bound_raw",
+                std::to_string(result.final_certified_lower_bound_raw),
+                "Final certified lower bound in raw integer units.");
+    insertFinal("final_regularized_objective_raw",
+                std::to_string(result.final_regularized_objective_raw),
+                "Final regularized objective in raw integer units.");
+    insertFinal("best_lower_bound_raw",
+                std::to_string(result.best_lower_bound_raw),
+                "Best raw lower bound observed.");
+    insertFinal("best_certified_lower_bound_raw",
+                std::to_string(result.best_certified_lower_bound_raw),
+                "Best certified lower bound observed in raw integer units.");
+    insertFinal("best_regularized_objective_raw",
+                std::to_string(result.best_regularized_objective_raw),
+                "Best regularized objective observed in raw integer units.");
+    insertFinal("objective_scale", std::to_string(result.scale),
+                "Final objective scale after any promotions.");
+    insertFinal("objective_scale_promotions",
+                std::to_string(result.objective_scale_promotion_count),
+                "Number of objective scale promotions.");
+    insertFinal("total_iterations", std::to_string(result.total_iterations),
+                "Total optimizer iterations completed.");
+    insertFinal("final_disagreement_count",
+                std::to_string(result.final_disagreement_count),
+                "Boundary disagreement count at termination.");
+    insertFinal("final_regularization_budget",
+                std::to_string(result.final_regularization_budget),
+                "Final active regularization budget in raw integer units.");
+    insertFinal("final_regularization_contribution",
+                std::to_string(result.final_regularization_contribution),
+                "Final regularization contribution in raw integer units.");
+    insertFinal("final_regularization_anchor_sink_count",
+                std::to_string(
+                    result.final_regularization_anchor_sink_count),
+                "Final count of sink-side regularization anchors.");
+    insertFinal("final_regularization_active_sink_count",
+                std::to_string(
+                    result.final_regularization_active_sink_count),
+                "Final count of active sink-side regularized labels.");
+    insertFinal("timing_total_wall_us", std::to_string(timing.total_wall_us),
+                "Total coordinator process wall time.");
+    insertFinal("timing_read_graph_wall_us",
+                std::to_string(timing.read_graph_wall_us),
+                "Coordinator wall time spent reading the graph.");
+    insertFinal("timing_scale_graph_wall_us",
+                std::to_string(timing.scale_graph_wall_us),
+                "Coordinator wall time spent applying the initial objective scale.");
+    insertFinal("timing_partition_wall_us",
+                std::to_string(timing.partition_wall_us),
+                "Coordinator wall time spent partitioning the graph.");
+    insertFinal("timing_accept_workers_wall_us",
+                std::to_string(timing.accept_workers_wall_us),
+                "Coordinator wall time spent accepting workers.");
+    insertFinal("timing_coordinator_setup_wall_us",
+                std::to_string(timing.coordinator_setup_wall_us),
+                "Coordinator wall time spent constructing coordinator state.");
+    insertFinal("timing_solve_wall_us", std::to_string(timing.solve_wall_us),
+                "Coordinator wall time spent in the solve segment.");
+    insertFinal("timing_coordinator_wait_worker_us",
+                std::to_string(solve_rpc_us),
+                "Aggregate coordinator wall time waiting on worker solve RPCs.");
+    insertFinal("timing_worker_solve_us", std::to_string(worker_solve_us),
+                "Aggregate worker-reported solve wall time.");
+    insertFinal("timing_worker_rpc_overhead_us",
+                std::to_string(saturatedSubtract(solve_rpc_us,
+                                                 worker_solve_us)),
+                "Aggregate solve RPC wall time not spent in worker solves.");
+    insertFinal("timing_load_partition_rpc_us", std::to_string(load_rpc_us),
+                "Aggregate partition load RPC wall time.");
+    insertFinal("timing_scale_objective_rpc_us", std::to_string(scale_rpc_us),
+                "Aggregate objective-scale promotion RPC wall time.");
+    insertFinal("timing_stop_workers_wall_us",
+                std::to_string(timing.stop_workers_wall_us),
+                "Coordinator wall time spent sending stop messages to workers.");
+    insertFinal("rpc_tx_bytes_total", std::to_string(rpc_bytes.tx_bytes_total),
+                "Total logical bytes transmitted by coordinator RPC handles.");
+    insertFinal("rpc_rx_bytes_total", std::to_string(rpc_bytes.rx_bytes_total),
+                "Total logical bytes received by coordinator RPC handles.");
+    insertFinal("rpc_tx_wire_bytes_total",
+                std::to_string(rpc_bytes.tx_wire_bytes_total),
+                "Total wire bytes transmitted after compression framing.");
+    insertFinal("rpc_rx_wire_bytes_total",
+                std::to_string(rpc_bytes.rx_wire_bytes_total),
+                "Total wire bytes received after compression framing.");
+    insertFinal("rpc_compression_wall_us",
+                std::to_string(rpc_bytes.compression_wall_us),
+                "Total compression wall time across coordinator RPC handles.");
+    insertFinal("rpc_decompression_wall_us",
+                std::to_string(rpc_bytes.decompression_wall_us),
+                "Total decompression wall time across coordinator RPC handles.");
+    insertFinal("rpc_partition_load_tx_bytes",
+                std::to_string(rpc_bytes.partition_load_tx_bytes),
+                "Logical partition package bytes transmitted.");
+    insertFinal("rpc_solve_request_tx_bytes",
+                std::to_string(rpc_bytes.solve_request_tx_bytes),
+                "Logical solve request bytes transmitted.");
+    insertFinal("rpc_solve_result_rx_bytes",
+                std::to_string(rpc_bytes.solve_result_rx_bytes),
+                "Logical solve result bytes received.");
+    insertFinal("rpc_scale_objective_tx_bytes",
+                std::to_string(rpc_bytes.scale_objective_tx_bytes),
+                "Logical objective-scale promotion bytes transmitted.");
+  }
+
+  void finish() {
+    if (!enabled_ || finished_) {
+      return;
+    }
+    metadata_.close();
+    partitions_.close();
+    workers_.close();
+    iterations_.close();
+    worker_iterations_.close();
+    worker_rpc_metrics_.close();
+    final_.close();
+    finished_ = true;
+  }
+
+  const std::string &prefix() const { return prefix_; }
+
+private:
+  void openFile(std::ofstream *file, const std::string &suffix) {
+    const std::string path = prefix_ + suffix;
+    file->open(path, std::ios::out | std::ios::trunc);
+    if (!*file) {
+      throw std::runtime_error("failed to open telemetry CSV file: " + path);
+    }
+  }
+
+  void writeHeaders() {
+    metadata_ << "key,value,description\n";
+    partitions_ << "partition_id,local_node_count,arc_int_count,arc_count,"
+                   "terminal_capacity_count,constraint_endpoint_count\n";
+    workers_ << "worker_name,cpu_count,ram_gb,temp_path,"
+                "assigned_partition_ids,assigned_partition_count\n";
+    iterations_
+        << "total_iteration,schedule_scale,scale_iteration,max_iteration,"
+           "iteration_wall_us,solve_elapsed_us,lower_bound,best_lower_bound,"
+           "certified_lower_bound,best_certified_lower_bound,"
+           "regularized_objective,best_regularized_objective,"
+           "disagreement_count,disagreement_norm_sq,schedule_step,"
+           "effective_schedule_step,regularization_strength,"
+           "regularization_budget,regularization_contribution,"
+           "regularization_anchor_sink_count,"
+           "regularization_active_sink_count,iterations_since_improvement\n";
+    worker_iterations_
+        << "total_iteration,worker_name,assigned_partition_ids,"
+           "assigned_partition_count,partition_solve_call_count_delta,"
+           "solve_batch_rpc_count_delta,solve_rpc_wall_us_delta,"
+           "worker_solve_wall_us_delta,worker_rpc_overhead_us_delta,"
+           "partition_solve_call_count_cumulative,"
+           "solve_batch_rpc_count_cumulative,solve_rpc_wall_us_cumulative,"
+           "worker_solve_wall_us_cumulative,load_partition_rpc_count,"
+           "load_partition_rpc_wall_us,scale_objective_rpc_count,"
+           "scale_objective_rpc_wall_us\n";
+    worker_rpc_metrics_
+        << "total_iteration,worker_name,metric,delta_value,"
+           "cumulative_value\n";
+    final_ << "key,value,description\n";
+  }
+
+  void insertMetadata(const std::string &key, const std::string &value,
+                      const std::string &description) {
+    metadata_ << csvValue(key) << "," << csvValue(value) << ","
+              << csvValue(description) << "\n";
+  }
+
+  void insertFinal(const std::string &key, const std::string &value,
+                   const std::string &description) {
+    final_ << csvValue(key) << "," << csvValue(value) << ","
+           << csvValue(description) << "\n";
+  }
+
+  void recordWorkerProgress(long total_iteration,
+                            const mcpd4::TcpPartitionWorker &worker) {
+    const auto snapshot = worker.statusSnapshot();
+    const std::string &name = snapshot.worker_name;
+    const auto previous_iter = previous_workers_.find(name);
+    const auto previous =
+        previous_iter == previous_workers_.end()
+            ? mcpd4::TcpPartitionWorkerTimingStats{}
+            : previous_iter->second;
+    const auto &current = snapshot.timing;
+    const auto solve_rpc_delta = saturatedSubtract(
+        current.solve_round_rpc_wall_us, previous.solve_round_rpc_wall_us);
+    const auto worker_solve_delta = saturatedSubtract(
+        current.solve_round_worker_wall_us,
+        previous.solve_round_worker_wall_us);
+    worker_iterations_
+        << total_iteration << "," << csvValue(name) << ","
+        << csvValue(joinInts(snapshot.partition_ids)) << ","
+        << snapshot.partition_ids.size() << ","
+        << current.partition_solve_call_count -
+               previous.partition_solve_call_count
+        << ","
+        << current.solve_batch_rpc_count - previous.solve_batch_rpc_count
+        << "," << solve_rpc_delta << "," << worker_solve_delta << ","
+        << saturatedSubtract(solve_rpc_delta, worker_solve_delta) << ","
+        << current.partition_solve_call_count << ","
+        << current.solve_batch_rpc_count << ","
+        << current.solve_round_rpc_wall_us << ","
+        << current.solve_round_worker_wall_us << ","
+        << current.load_partition_rpc_count << ","
+        << current.load_partition_rpc_wall_us << ","
+        << current.scale_objective_rpc_count << ","
+        << current.scale_objective_rpc_wall_us << "\n";
+    recordRpcMetrics(total_iteration, name, current.rpc_bytes,
+                     previous.rpc_bytes);
+    previous_workers_[name] = current;
+  }
+
+  void recordRpcMetric(long total_iteration, const std::string &worker_name,
+                       const std::string &metric, std::uint64_t current,
+                       std::uint64_t previous) {
+    worker_rpc_metrics_ << total_iteration << "," << csvValue(worker_name)
+                        << "," << csvValue(metric) << ","
+                        << saturatedSubtract(current, previous) << ","
+                        << current << "\n";
+  }
+
+  void recordRpcMetrics(long total_iteration, const std::string &worker_name,
+                        const mcpd4::RpcByteStats &current,
+                        const mcpd4::RpcByteStats &previous) {
+    recordRpcMetric(total_iteration, worker_name, "tx_bytes_total",
+                    current.tx_bytes_total, previous.tx_bytes_total);
+    recordRpcMetric(total_iteration, worker_name, "rx_bytes_total",
+                    current.rx_bytes_total, previous.rx_bytes_total);
+    recordRpcMetric(total_iteration, worker_name, "tx_wire_bytes_total",
+                    current.tx_wire_bytes_total, previous.tx_wire_bytes_total);
+    recordRpcMetric(total_iteration, worker_name, "rx_wire_bytes_total",
+                    current.rx_wire_bytes_total, previous.rx_wire_bytes_total);
+    recordRpcMetric(total_iteration, worker_name, "compression_wall_us",
+                    current.compression_wall_us, previous.compression_wall_us);
+    recordRpcMetric(total_iteration, worker_name, "decompression_wall_us",
+                    current.decompression_wall_us,
+                    previous.decompression_wall_us);
+    recordRpcMetric(total_iteration, worker_name,
+                    "tx_compressed_frame_count",
+                    current.tx_compressed_frame_count,
+                    previous.tx_compressed_frame_count);
+    recordRpcMetric(total_iteration, worker_name, "tx_stored_frame_count",
+                    current.tx_stored_frame_count,
+                    previous.tx_stored_frame_count);
+    recordRpcMetric(total_iteration, worker_name,
+                    "rx_compressed_frame_count",
+                    current.rx_compressed_frame_count,
+                    previous.rx_compressed_frame_count);
+    recordRpcMetric(total_iteration, worker_name, "rx_stored_frame_count",
+                    current.rx_stored_frame_count,
+                    previous.rx_stored_frame_count);
+    recordRpcMetric(total_iteration, worker_name, "hello_tx_bytes",
+                    current.hello_tx_bytes, previous.hello_tx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "hello_rx_bytes",
+                    current.hello_rx_bytes, previous.hello_rx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "partition_load_tx_bytes",
+                    current.partition_load_tx_bytes,
+                    previous.partition_load_tx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "partition_load_rx_bytes",
+                    current.partition_load_rx_bytes,
+                    previous.partition_load_rx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "solve_request_tx_bytes",
+                    current.solve_request_tx_bytes,
+                    previous.solve_request_tx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "solve_request_rx_bytes",
+                    current.solve_request_rx_bytes,
+                    previous.solve_request_rx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "solve_result_tx_bytes",
+                    current.solve_result_tx_bytes,
+                    previous.solve_result_tx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "solve_result_rx_bytes",
+                    current.solve_result_rx_bytes,
+                    previous.solve_result_rx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "scale_objective_tx_bytes",
+                    current.scale_objective_tx_bytes,
+                    previous.scale_objective_tx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "scale_objective_rx_bytes",
+                    current.scale_objective_rx_bytes,
+                    previous.scale_objective_rx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "ready_tx_bytes",
+                    current.ready_tx_bytes, previous.ready_tx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "ready_rx_bytes",
+                    current.ready_rx_bytes, previous.ready_rx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "stop_tx_bytes",
+                    current.stop_tx_bytes, previous.stop_tx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "stop_rx_bytes",
+                    current.stop_rx_bytes, previous.stop_rx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "error_tx_bytes",
+                    current.error_tx_bytes, previous.error_tx_bytes);
+    recordRpcMetric(total_iteration, worker_name, "error_rx_bytes",
+                    current.error_rx_bytes, previous.error_rx_bytes);
+  }
+
+  bool enabled_ = false;
+  bool finished_ = false;
+  std::string prefix_;
+  std::ofstream metadata_;
+  std::ofstream partitions_;
+  std::ofstream workers_;
+  std::ofstream iterations_;
+  std::ofstream worker_iterations_;
+  std::ofstream worker_rpc_metrics_;
+  std::ofstream final_;
+  std::chrono::steady_clock::time_point solve_started_at_;
+  std::chrono::steady_clock::time_point previous_progress_at_;
+  std::map<std::string, mcpd4::TcpPartitionWorkerTimingStats>
+      previous_workers_;
+};
 
 struct CoordinatorStatusState {
   struct SegmentState {
@@ -653,6 +1164,7 @@ void usage(const char *argv0) {
       << "       [--discovery-port PORT] [--discovery-token TOKEN]\n"
       << "       [--advertise-host HOST]\n"
       << "       [--status-port PORT] [--status-token TOKEN]\n"
+      << "       [--telemetry-csv-prefix PATH]\n"
       << "       [--rpc-compression none|snappy]\n"
       << "       [--saturate-capacity-overflow]\n"
       << "       [--directed]\n";
@@ -705,6 +1217,8 @@ Config parseArgs(int argc, char **argv) {
       config.status_port = parsePort(require_value(arg));
     } else if (arg == "--status-token") {
       config.status_token = require_value(arg);
+    } else if (arg == "--telemetry-csv-prefix") {
+      config.telemetry_csv_prefix = require_value(arg);
     } else if (arg == "--rpc-compression") {
       config.rpc_compression =
           mcpd4::parseTransportCompression(require_value(arg));
@@ -932,10 +1446,6 @@ std::vector<mcpd3::PartitionPackage> makePartitionPackages(
       std::move(graph.arc_capacities), std::move(graph.terminal_capacities),
       package_options);
   return package_source.getPartitionPackages();
-}
-
-std::uint64_t saturatedSubtract(std::uint64_t lhs, std::uint64_t rhs) {
-  return lhs > rhs ? lhs - rhs : 0;
 }
 
 struct SolveCounterStats {
@@ -1223,6 +1733,8 @@ int main(int argc, char **argv) {
     const auto total_start = std::chrono::steady_clock::now();
     RuntimeTiming timing;
     const Config config = parseArgs(argc, argv);
+    TelemetryRecorder telemetry;
+    telemetry.open(config);
     CoordinatorStatusState status_state;
     status_state.initialize(config);
     std::unique_ptr<mcpd4::StatusServer> status_server;
@@ -1265,6 +1777,7 @@ int main(int argc, char **argv) {
             std::to_string(objective_scale_stats.arc_saturation_count) +
             ":terminal_saturations=" +
             std::to_string(objective_scale_stats.terminal_saturation_count));
+    telemetry.recordGraph(graph, objective_scale_stats);
     if (objective_scale_stats.arc_saturation_count +
             objective_scale_stats.terminal_saturation_count >
         0) {
@@ -1281,6 +1794,7 @@ int main(int argc, char **argv) {
         "requested_partitions=" + std::to_string(config.partition_count));
     auto packages = makePartitionPackages(
         config.partition_count, std::move(graph), config.objective_scale);
+    telemetry.recordPackages(packages);
     timing.partition_wall_us = elapsedUs(partition_start);
     long package_boundary_count = 0;
     long package_node_count = 0;
@@ -1356,10 +1870,12 @@ int main(int argc, char **argv) {
     solve_options.initial_step_size = config.schedule_start;
     solve_options.objective_scale = config.objective_scale;
     solve_options.progress_report_interval =
-        config.status_port != 0 ? 1 : config.progress_every;
+        (config.status_port != 0 || telemetry.enabled()) ? 1
+                                                         : config.progress_every;
     solve_options.progress_callback =
         [&](const mcpd3::PartitionWorkerProgressRecord &record) {
           status_state.recordProgress(record, remote_workers);
+          telemetry.recordProgress(record, remote_workers);
           if (config.progress_every > 0 &&
               record.total_iteration % config.progress_every == 0) {
             printProgress(record, remote_workers);
@@ -1379,6 +1895,7 @@ int main(int argc, char **argv) {
         "coordinator_setup",
         "assigned_partitions=" + std::to_string(config.partition_count) +
             ":active_workers=" + std::to_string(remote_workers.size()));
+    telemetry.beginSolve(remote_workers);
     const auto solve_start = std::chrono::steady_clock::now();
     const long solve_iteration_budget =
         static_cast<long>(config.max_iterations) *
@@ -1448,6 +1965,17 @@ int main(int argc, char **argv) {
         "stop_workers",
         "workers=" + std::to_string(remote_workers.size()));
     timing.total_wall_us = elapsedUs(total_start);
+    telemetry.recordFinal(timing, result, remote_workers);
+    telemetry.finish();
+    if (telemetry.enabled()) {
+      std::cout << "telemetry_csv_prefix " << telemetry.prefix() << "\n";
+      std::cout << "telemetry_csv_iterations "
+                << telemetry.prefix() << ".iterations.csv\n";
+      std::cout << "telemetry_csv_worker_iterations "
+                << telemetry.prefix() << ".worker_iterations.csv\n";
+      std::cout << "telemetry_csv_worker_rpc_metrics "
+                << telemetry.prefix() << ".worker_rpc_metrics.csv\n";
+    }
     printTiming(timing, remote_workers);
   } catch (const std::exception &e) {
     std::cerr << "mcpd4_coordinator failed: " << e.what() << "\n";

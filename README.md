@@ -371,6 +371,7 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
        [--discovery-port PORT] [--discovery-token TOKEN]
        [--advertise-host HOST]
        [--status-port PORT] [--status-token TOKEN]
+       [--telemetry-csv-prefix PATH]
        [--rpc-compression none|snappy]
        [--saturate-capacity-overflow] [--directed]
 ```
@@ -400,6 +401,9 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
 - `--status-port PORT`: enable a UDP status endpoint on this port.
 - `--status-token TOKEN`: token required for status queries. Default is
   `mcpd4`.
+- `--telemetry-csv-prefix PATH`: write raw post-run telemetry CSVs at
+  `PATH.*.csv`. This records every optimizer iteration even when
+  `--progress-every 0`.
 - `--rpc-compression none|snappy`: transport compression mode. Default is
   `none`. If set to `snappy`, every worker must also use
   `--rpc-compression snappy`.
@@ -594,6 +598,48 @@ local previous alpha, and `alpha_momentum` remains coordinator-owned.
 These fields are useful for detecting stalled workers, partition imbalance,
 and whether transport overhead is dominated by setup packages or repeated
 solve traffic.
+
+## CSV Telemetry
+
+Use `--telemetry-csv-prefix /tmp/run-name` when you want raw data for offline
+analysis instead of live summaries:
+
+```bash
+./build/mcpd4_coordinator /data/adhead.n6c10.max \
+  --directed \
+  --bind 0.0.0.0 \
+  --port 50051 \
+  --workers 2 \
+  --partitions 10 \
+  --max-iterations 10000 \
+  --schedule-levels 5 \
+  --schedule-start 10000 \
+  --objective-scale 1000 \
+  --telemetry-csv-prefix /tmp/adhead-lan
+```
+
+The coordinator writes these files:
+
+- `/tmp/adhead-lan.metadata.csv`: run configuration and graph metadata.
+- `/tmp/adhead-lan.partitions.csv`: per-partition node, arc, and boundary
+  endpoint counts.
+- `/tmp/adhead-lan.workers.csv`: worker resources and assigned partitions.
+- `/tmp/adhead-lan.iterations.csv`: one row per optimizer iteration with
+  iteration wall time, solve elapsed time, bounds, disagreement, schedule, and
+  regularization fields.
+- `/tmp/adhead-lan.worker_iterations.csv`: one row per worker per iteration
+  with solve RPC wall-time deltas, worker solve-time deltas, RPC overhead
+  deltas, and cumulative solve counts.
+- `/tmp/adhead-lan.worker_rpc_metrics.csv`: long-form per-worker per-iteration
+  RPC counter deltas and cumulative values for byte, wire-byte,
+  compression-time, and frame-count fields.
+- `/tmp/adhead-lan.final.csv`: final objective, iteration, timing, and
+  aggregate RPC summary fields.
+
+For histograms of RPC or solve contribution per iteration, start from
+`worker_iterations.csv`: compare `worker_solve_wall_us_delta` and
+`worker_rpc_overhead_us_delta` to `solve_rpc_wall_us_delta`, then join to
+`iterations.csv` on `total_iteration` when the global iteration state matters.
 
 ## Objective Scale And Exactness
 
