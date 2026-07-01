@@ -4,7 +4,7 @@ This document is the starting point for a new Codex/agent session in this
 repository. It deliberately condenses the previous experimental context so the
 new agent does not need the full chat history.
 
-## Current State: 2026-06-30 21:43 PDT
+## Current State: 2026-06-30 22:46 PDT
 
 This file began as the original distributed-MVP plan. The historical sections
 below are useful background, but the implementation is far past the original
@@ -19,7 +19,8 @@ Current anchors:
 - mcpd3 submodule path: `third_party/mcpd3`.
 - mcpd3 submodule branch: `partition-worker-api`.
 - mcpd3 submodule checkpoint:
-  `8328d73 Document productized solver usage`.
+  `1df33d7 Derive worker last alpha locally`.
+- Optional Snappy transport dependency path: `third_party/snappy`.
 
 Implemented product surface:
 
@@ -34,17 +35,24 @@ Implemented product surface:
   diagnostics, worker ownership, resources, and RPC byte counters.
 - Compact solve-result boundary-label and alpha-update encoding in protocol
   version `4`.
+- Optional Snappy RPC compression via `--rpc-compression snappy` on both
+  coordinator and workers. `HELLO` stays uncompressed and normal RPC frames
+  use the compressed envelope after feature-bit negotiation.
 - README runbook for build/test, localhost runs, discovery-mode LAN runs, and
-  status inspection.
+  status inspection, including Snappy A/B comparison commands.
 
 Current transport telemetry checkpoint:
 
-- Coordinator progress/final/status exposes `rpc_tx_bytes_total`,
-  `rpc_rx_bytes_total`, `rpc_partition_load_tx_bytes`,
-  `rpc_solve_request_tx_bytes`, `rpc_solve_result_rx_bytes`,
-  `rpc_ready_rx_bytes`, `rpc_stop_tx_bytes`, and related counters.
+- Coordinator progress/final/status exposes logical byte counters
+  (`rpc_tx_bytes_total`, `rpc_rx_bytes_total`,
+  `rpc_partition_load_tx_bytes`, `rpc_solve_request_tx_bytes`,
+  `rpc_solve_result_rx_bytes`, `rpc_ready_rx_bytes`, `rpc_stop_tx_bytes`)
+  plus transport counters (`rpc_tx_wire_bytes_total`,
+  `rpc_rx_wire_bytes_total`, compression/decompression wall time, and
+  compressed/stored frame counts).
 - Worker status exposes transmitted/received totals plus partition-load,
-  solve-request, solve-result, ready, stop, and error byte categories.
+  solve-request, solve-result, ready, stop, and error byte categories, with
+  matching wire/timing compression counters.
 - Current tiny local fixture run:
   `rpc_tx_bytes_total=1090`, `rpc_rx_bytes_total=1432`,
   `rpc_partition_load_tx_bytes=250`, `rpc_solve_request_tx_bytes=760`,
@@ -62,18 +70,24 @@ Current transport telemetry checkpoint:
 - Tiny fixture request traffic dropped from `rpc_solve_request_tx_bytes=904`
   to `760`; a full dirty `adhead` alpha sync should save roughly `15.7 MB`
   per iteration.
+- Tiny fixture Snappy A/B sanity check preserves
+  `final_objective_raw=40000` and `final_disagreement_count=0`, but total wire
+  bytes were slightly worse on this tiny run because many frames were stored in
+  the compression envelope. Use larger LAN runs and the wire/timing counters
+  before enabling Snappy for performance.
 
 Suggested next prompt:
 
 ```text
 We are in /home/matt/software/mcpd3-distributed on branch working.
 Read AGENT_HANDOFF.md current-state, MVP_TRACKER.md, PROGRESS_LOG.md, and
-README.md. Continue RPC transport optimization. Compact solve-result labels
-and compact alpha updates are already implemented in protocol version 4, so
-use the existing byte telemetry to evaluate serialization/deserialization
-timing, compression of large one-time partition packages, bit-packed boundary
-labels, and any remaining repeated solve payload. Preserve correctness tests
-and update docs/logs.
+README.md. Continue RPC transport optimization. Compact solve-result labels,
+compact alpha updates, and optional Snappy transport compression are already
+implemented. Use the logical-vs-wire byte telemetry, compression timing, and
+worker RPC overhead to evaluate large LAN runs, serialization/deserialization
+timing, bit-packed boundary labels, result deltas, compression thresholds, and
+any remaining repeated solve payload. Preserve correctness tests and update
+docs/logs.
 ```
 
 ## Repository Roles

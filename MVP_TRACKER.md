@@ -1,6 +1,6 @@
 # mcpd4 MVP Tracker
 
-Last updated: 2026-06-30 22:27 PDT
+Last updated: 2026-06-30 22:46 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -193,6 +193,15 @@ The MVP is complete when:
   - worker snapshots include phase, coordinator endpoint, loaded partition ids,
     active round/partition ids, solve counts, worker solve time, and last
     error.
+- [x] Add optional Snappy RPC compression.
+  - Snappy is built from the `third_party/snappy` submodule by default and can
+    be disabled with `-DMCPD4_ENABLE_SNAPPY=OFF`.
+  - Coordinator and workers accept `--rpc-compression none|snappy`.
+  - `HELLO` remains uncompressed; after a Snappy feature-bit handshake, normal
+    RPC frames use the compressed transport envelope.
+  - Existing `rpc_*_bytes` fields remain logical protocol bytes; new
+    `rpc_*_wire_bytes`, compression timing, and compressed/stored frame counts
+    expose the transport tradeoff.
 
 ### Stage 5: Correctness And Integration Tests
 
@@ -319,10 +328,16 @@ The MVP is complete when:
   - Tiny fixture request traffic dropped from `rpc_solve_request_tx_bytes=904`
     to `760`; full `adhead` dirty syncs should save roughly `15.7 MB` per
     iteration.
-- [ ] Evaluate compression and other transport optimizations with telemetry.
-  - Use this telemetry to evaluate less wasteful encodings, result deltas,
-    compression, smaller label/result payloads, batching boundaries, and
-    avoiding unnecessary resend/copy paths.
+- [x] Add optional compression and enough telemetry to evaluate it.
+  - Snappy mode preserves solve results in process integration tests.
+  - Tiny localhost A/B shows correctness is preserved but tiny messages can
+    make total wire bytes slightly worse; larger LAN cases should compare
+    `rpc_*_wire_bytes`, compression/decompression time, RPC overhead, and wall
+    time.
+- [ ] Continue transport optimization with telemetry.
+  - Evaluate less wasteful encodings, result deltas, bit-packed labels,
+    compression thresholds, batching boundaries, and unnecessary resend/copy
+    paths on real larger runs.
 - [ ] Improve worker participation and waiting policy.
   - Document that the coordinator host can also volunteer compute by starting a
     local `mcpd4_worker` and including it in `--workers`.
@@ -377,6 +392,11 @@ The MVP is complete when:
   batched path reaches agreement and improved wall time from `3:45.06` to
   `3:22.74` versus the previous 4-worker batched run, but static ownership can
   still leave partition-balance tails.
+- Optional Snappy RPC compression is implemented and measurable. It is not a
+  default performance win for every case: tiny localhost fixture traffic had
+  slightly higher total wire bytes because many frames were stored in the
+  compression envelope. Use large-case `rpc_*_wire_bytes` and
+  compression/decompression timing before enabling it by default for a run.
 - `--saturate-capacity-overflow` is an opt-in benchmark/compatibility mode for
   the current 32-bit capacity path. Runs with nonzero
   `capacity_scale_saturation_count` solve a clipped-capacity problem, not the

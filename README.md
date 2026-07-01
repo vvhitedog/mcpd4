@@ -14,6 +14,7 @@ planning details live in [AGENT_HANDOFF.md](AGENT_HANDOFF.md), progress is in
 
 - `include/mcpd4`, `src`: mcpd4 protocol, TCP runtime, coordinator, worker.
 - `third_party/mcpd3`: pinned solver dependency and partition-worker API.
+- `third_party/snappy`: optional RPC compression dependency.
 - `tests/fixtures`: small committed DIMACS graphs for smoke tests.
 - `scripts/run_local_process_benchmark.sh`: starts one coordinator and local
   workers for a quick localhost distributed run.
@@ -26,12 +27,13 @@ planning details live in [AGENT_HANDOFF.md](AGENT_HANDOFF.md), progress is in
 - `git` with submodule support.
 - `python3` only for the local benchmark helper script.
 
-The current runtime is plain IPv4 TCP. It does not provide authentication or
-encryption, so run it on a trusted network or behind an SSH/VPN tunnel.
+The current runtime is IPv4 TCP. It can optionally compress RPC frames with
+Snappy, but it does not provide authentication or encryption, so run it on a
+trusted network or behind an SSH/VPN tunnel.
 
 ## Get The Code
 
-Clone the product repo and initialize the solver submodule:
+Clone the product repo and initialize the solver and compression submodules:
 
 ```bash
 git clone --recurse-submodules https://github.com/vvhitedog/mcpd4.git
@@ -48,7 +50,9 @@ git submodule update --init --recursive
 ```
 
 The expected solver dependency is `third_party/mcpd3`. Do not rename that
-submodule or the `mcpd3::` API when working on mcpd4.
+submodule or the `mcpd3::` API when working on mcpd4. Snappy support is built
+from `third_party/snappy` by default; configure with `-DMCPD4_ENABLE_SNAPPY=OFF`
+to build without RPC compression support.
 
 ## Build And Test
 
@@ -73,7 +77,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 The current suite includes protocol serialization, TCP loopback, worker error
-handling, objective-scale promotion, and localhost process integration tests.
+handling, objective-scale promotion, optional Snappy transport coverage, and
+localhost process integration tests.
 
 ## Quick Localhost Run
 
@@ -105,6 +110,7 @@ MCPD4_OBJECTIVE_SCALE              default: 10000
 MCPD4_ACCEPT_TIMEOUT_MS            default: 30000
 MCPD4_READY_TIMEOUT_SEC            default: 300
 MCPD4_PROGRESS_EVERY               default: 0
+MCPD4_RPC_COMPRESSION              default: none
 MCPD4_SATURATE_CAPACITY_OVERFLOW   default: 0
 ```
 
@@ -128,17 +134,18 @@ first in terminal 1:
   --schedule-start 10000 \
   --objective-scale 10000 \
   --accept-timeout-ms 30000 \
-  --progress-every 100
+  --progress-every 100 \
+  --rpc-compression none
 ```
 
 Then start exactly two workers, matching `--workers 2`:
 
 ```bash
-./build/mcpd4_worker 127.0.0.1 50051 --name local-a
+./build/mcpd4_worker 127.0.0.1 50051 --name local-a --rpc-compression none
 ```
 
 ```bash
-./build/mcpd4_worker 127.0.0.1 50051 --name local-b
+./build/mcpd4_worker 127.0.0.1 50051 --name local-b --rpc-compression none
 ```
 
 The coordinator waits for all requested workers before solving. If a worker
@@ -164,25 +171,26 @@ firewall. Use `0.0.0.0` to accept connections on all IPv4 interfaces:
   --schedule-start 10000 \
   --objective-scale 10000 \
   --accept-timeout-ms 600000 \
-  --progress-every 50
+  --progress-every 50 \
+  --rpc-compression none
 ```
 
 On each worker machine, use the coordinator machine's reachable IP or DNS name:
 
 ```bash
-./build/mcpd4_worker 10.0.0.10 50051 --name worker-a
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-a --rpc-compression none
 ```
 
 ```bash
-./build/mcpd4_worker 10.0.0.10 50051 --name worker-b
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-b --rpc-compression none
 ```
 
 ```bash
-./build/mcpd4_worker 10.0.0.10 50051 --name worker-c
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-c --rpc-compression none
 ```
 
 ```bash
-./build/mcpd4_worker 10.0.0.10 50051 --name worker-d
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-d --rpc-compression none
 ```
 
 Use one worker process per machine to start. A worker can own multiple
@@ -199,8 +207,78 @@ For directed DIMACS inputs, add `--directed` to the coordinator command:
   --port 50051 \
   --workers 4 \
   --partitions 10 \
-  --objective-scale 10000
+  --objective-scale 10000 \
+  --rpc-compression none
 ```
+
+## RPC Compression
+
+`--rpc-compression none` is the default. Use `--rpc-compression snappy` on the
+coordinator and every worker to compress all RPC frames after the initial
+uncompressed `HELLO` handshake. Snappy is useful to test when partition-package
+setup traffic or repeated boundary traffic is large enough to offset
+compression/decompression CPU time.
+
+Baseline run:
+
+```bash
+./build/mcpd4_coordinator /data/adhead.n6c10.max \
+  --directed \
+  --bind 0.0.0.0 \
+  --port 50051 \
+  --workers 4 \
+  --partitions 10 \
+  --max-iterations 10000 \
+  --schedule-levels 5 \
+  --schedule-start 10000 \
+  --objective-scale 100 \
+  --accept-timeout-ms 600000 \
+  --progress-every 50 \
+  --rpc-compression none
+```
+
+```bash
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-a \
+  --rpc-compression none
+```
+
+Compressed run:
+
+```bash
+./build/mcpd4_coordinator /data/adhead.n6c10.max \
+  --directed \
+  --bind 0.0.0.0 \
+  --port 50051 \
+  --workers 4 \
+  --partitions 10 \
+  --max-iterations 10000 \
+  --schedule-levels 5 \
+  --schedule-start 10000 \
+  --objective-scale 100 \
+  --accept-timeout-ms 600000 \
+  --progress-every 50 \
+  --rpc-compression snappy
+```
+
+```bash
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-a \
+  --rpc-compression snappy
+```
+
+Compare these fields between the baseline and compressed logs:
+
+- `timing_total_wall_us`: full process wall time.
+- `timing_worker_rpc_overhead_us`: coordinator-observed worker RPC time not
+  spent inside worker solve calls.
+- `rpc_tx_bytes_total` / `rpc_rx_bytes_total`: logical protocol bytes.
+- `rpc_tx_wire_bytes_total` / `rpc_rx_wire_bytes_total`: actual transport
+  bytes after compression envelopes.
+- `rpc_compression_wall_us` / `rpc_decompression_wall_us`: CPU time spent in
+  transport compression and decompression.
+- `rpc_tx_compressed_frame_count` / `rpc_rx_compressed_frame_count`: frames
+  that Snappy made smaller.
+- `rpc_tx_stored_frame_count` / `rpc_rx_stored_frame_count`: frames sent in
+  the Snappy envelope without compression because compression would not help.
 
 ## Discovery Mode
 
@@ -226,7 +304,8 @@ Start the coordinator with a UDP discovery port:
   --discovery-port 50052 \
   --discovery-token lab-run-1 \
   --status-port 50053 \
-  --status-token lab-run-1
+  --status-token lab-run-1 \
+  --rpc-compression none
 ```
 
 List visible coordinators from another machine:
@@ -256,7 +335,8 @@ Start workers in discovery mode:
   --discovery-token lab-run-1 \
   --status-port 51053 \
   --status-token lab-run-1 \
-  --name worker-a
+  --name worker-a \
+  --rpc-compression none
 ```
 
 Query coordinator or worker status while the run is waiting or solving:
@@ -291,6 +371,7 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
        [--discovery-port PORT] [--discovery-token TOKEN]
        [--advertise-host HOST]
        [--status-port PORT] [--status-token TOKEN]
+       [--rpc-compression none|snappy]
        [--saturate-capacity-overflow] [--directed]
 ```
 
@@ -319,6 +400,9 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
 - `--status-port PORT`: enable a UDP status endpoint on this port.
 - `--status-token TOKEN`: token required for status queries. Default is
   `mcpd4`.
+- `--rpc-compression none|snappy`: transport compression mode. Default is
+  `none`. If set to `snappy`, every worker must also use
+  `--rpc-compression snappy`.
 - `--saturate-capacity-overflow`: opt-in overflow compatibility mode. This
   clips overflowing scaled capacities and solves the clipped problem, not the
   exact original problem.
@@ -336,6 +420,7 @@ usage: mcpd4_worker HOST PORT [--name NAME]
        [--discovery-port PORT] [--discovery-token TOKEN]
        [--discovery-timeout-ms N] [--name NAME]
        [--status-port PORT] [--status-token TOKEN]
+       [--rpc-compression none|snappy]
 ```
 
 - `HOST`: coordinator host or IP.
@@ -350,6 +435,8 @@ usage: mcpd4_worker HOST PORT [--name NAME]
 - `--status-port PORT`: enable a UDP status endpoint on this worker.
 - `--status-token TOKEN`: token required for status queries. Default is
   `mcpd4`.
+- `--rpc-compression none|snappy`: transport compression mode. Must match the
+  coordinator's setting.
 - `--name NAME`: optional worker name used in logs and progress output.
 
 Workers receive all partition data from the coordinator after connecting. They
@@ -387,11 +474,12 @@ usage: mcpd4_status HOST PORT [--token TOKEN] [--timeout-ms N]
 Coordinator status includes the current phase, accepted worker count, worker
 names/resources, partition ownership, partition count, objective scale, latest
 schedule/iteration state, lower-bound fields, regularization diagnostics,
-disagreement count, aggregate solve/RPC counts, RPC byte counters, and
-per-worker solve timing.
+disagreement count, aggregate solve/RPC counts, RPC byte/wire counters,
+compression timing, and per-worker solve timing.
 Worker status includes its phase, CPU/RAM, temp path, coordinator endpoint,
 loaded partition ids, current round/partition ids, solve counts, batch RPC
-count, worker solve wall time, RPC byte counters, and last error.
+count, worker solve wall time, RPC byte/wire counters, compression timing, and
+last error.
 
 ## Interpreting Output
 
@@ -454,11 +542,22 @@ With `--progress-every`, the coordinator also prints:
 - `progress_worker ...`: per-worker assigned partition counts, solve counts,
   batch RPC counts, solve wall time, RPC overhead, and RPC byte counters.
 
-RPC byte counters are cumulative and include encoded frame headers. Useful
-fields:
+RPC byte counters are cumulative. Logical byte counters include encoded
+protocol frame headers before transport compression. Wire byte counters report
+actual bytes written to the TCP connection, including any Snappy envelope.
+Useful fields:
 
 - `rpc_tx_bytes_total` and `rpc_rx_bytes_total`: total bytes sent and received
-  from the coordinator perspective.
+  from the coordinator perspective before transport compression.
+- `rpc_tx_wire_bytes_total` and `rpc_rx_wire_bytes_total`: actual transport
+  bytes sent and received after any compression envelope.
+- `rpc_compression_wall_us` and `rpc_decompression_wall_us`: cumulative
+  Snappy CPU time spent compressing sent frames and decompressing received
+  frames.
+- `rpc_tx_compressed_frame_count` and `rpc_rx_compressed_frame_count`: frames
+  that were actually Snappy-compressed.
+- `rpc_tx_stored_frame_count` and `rpc_rx_stored_frame_count`: Snappy-mode
+  frames sent uncompressed because the compressed payload was not smaller.
 - `rpc_partition_load_tx_bytes`: one-time partition package bytes sent to
   workers.
 - `rpc_solve_request_tx_bytes`: repeated solve request bytes sent during the

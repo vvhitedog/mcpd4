@@ -2,3 +2,6 @@
 	path = third_party/mcpd3
 	url = https://github.com/vvhitedog/mcpd3.git
 	branch = distributed-mvp-start
+[submodule "third_party/snappy"]
+	path = third_party/snappy
+	url = https://github.com/google/snappy.git

@@ -7,6 +7,20 @@
 
 namespace mcpd4 {
 
+enum class TransportCompression {
+  NONE,
+  SNAPPY,
+};
+
+struct FrameTransferStats {
+  std::uint64_t logical_bytes = 0;
+  std::uint64_t wire_bytes = 0;
+  std::uint64_t compression_wall_us = 0;
+  std::uint64_t decompression_wall_us = 0;
+  bool compression_requested = false;
+  bool compressed = false;
+};
+
 class SocketHandle {
 public:
   SocketHandle() = default;
@@ -36,10 +50,18 @@ SocketHandle acceptTcp(SocketHandle *listener,
                        std::chrono::milliseconds timeout);
 std::uint16_t localPort(const SocketHandle &socket);
 
-void sendFrameBytes(const SocketHandle &socket,
-                    const std::vector<std::uint8_t> &frame);
+bool snappyCompressionAvailable();
+const char *transportCompressionName(TransportCompression compression);
+TransportCompression parseTransportCompression(const std::string &value);
+
+void sendFrameBytes(
+    const SocketHandle &socket, const std::vector<std::uint8_t> &frame,
+    TransportCompression compression = TransportCompression::NONE,
+    FrameTransferStats *stats = nullptr);
 std::vector<std::uint8_t> receiveFrameBytes(
     const SocketHandle &socket,
-    std::size_t max_payload_bytes = 256ULL * 1024ULL * 1024ULL);
+    std::size_t max_payload_bytes = 256ULL * 1024ULL * 1024ULL,
+    TransportCompression compression = TransportCompression::NONE,
+    FrameTransferStats *stats = nullptr);
 
 } // namespace mcpd4

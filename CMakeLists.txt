@@ -9,6 +9,20 @@ include(CTest)
 
 find_package(Threads REQUIRED)
 
+option(MCPD4_ENABLE_SNAPPY "Build Snappy transport compression support" ON)
+if (MCPD4_ENABLE_SNAPPY)
+  if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/snappy/CMakeLists.txt")
+    message(FATAL_ERROR
+      "MCPD4_ENABLE_SNAPPY=ON requires third_party/snappy. "
+      "Run git submodule update --init --recursive or disable it with "
+      "-DMCPD4_ENABLE_SNAPPY=OFF.")
+  endif ()
+  set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+  set(SNAPPY_INSTALL OFF CACHE BOOL "" FORCE)
+  add_subdirectory(third_party/snappy EXCLUDE_FROM_ALL)
+endif ()
+
 add_library(mcpd4_protocol
   src/protocol.cpp)
 target_include_directories(mcpd4_protocol PUBLIC
@@ -28,6 +42,10 @@ target_include_directories(mcpd4_runtime PUBLIC
 target_link_libraries(mcpd4_runtime PUBLIC
   mcpd4_protocol
   Threads::Threads)
+if (MCPD4_ENABLE_SNAPPY)
+  target_compile_definitions(mcpd4_runtime PUBLIC MCPD4_ENABLE_SNAPPY=1)
+  target_link_libraries(mcpd4_runtime PUBLIC snappy)
+endif ()
 
 add_executable(mcpd4_worker
   src/worker_main.cpp)

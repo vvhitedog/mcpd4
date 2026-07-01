@@ -14,10 +14,19 @@
 namespace mcpd4 {
 
 constexpr std::uint32_t kProtocolVersion = 4;
+constexpr std::uint64_t kFeatureSnappyCompression = 1ULL << 0;
 
 struct RpcByteStats {
   std::uint64_t tx_bytes_total = 0;
   std::uint64_t rx_bytes_total = 0;
+  std::uint64_t tx_wire_bytes_total = 0;
+  std::uint64_t rx_wire_bytes_total = 0;
+  std::uint64_t compression_wall_us = 0;
+  std::uint64_t decompression_wall_us = 0;
+  std::uint64_t tx_compressed_frame_count = 0;
+  std::uint64_t tx_stored_frame_count = 0;
+  std::uint64_t rx_compressed_frame_count = 0;
+  std::uint64_t rx_stored_frame_count = 0;
   std::uint64_t hello_tx_bytes = 0;
   std::uint64_t hello_rx_bytes = 0;
   std::uint64_t partition_load_tx_bytes = 0;
@@ -59,7 +68,9 @@ struct TcpPartitionWorkerStatusSnapshot {
 class TcpPartitionWorker final : public mcpd3::PartitionWorker {
 public:
   TcpPartitionWorker(SocketHandle socket, HelloMessage hello,
-                     std::uint64_t hello_rx_bytes = 0);
+                     std::uint64_t hello_rx_bytes = 0,
+                     TransportCompression compression =
+                         TransportCompression::NONE);
 
   void loadPartition(const mcpd3::PartitionPackage &package) override;
   mcpd3::PartitionWorkerResourceEstimate resourceEstimate() const override;
@@ -79,6 +90,7 @@ public:
 private:
   SocketHandle socket_;
   HelloMessage hello_;
+  TransportCompression compression_ = TransportCompression::NONE;
   TcpPartitionWorkerTimingStats timing_stats_;
   std::vector<int> partition_ids_;
 };
@@ -87,8 +99,10 @@ HelloMessage makeDefaultHello(const std::string &worker_name);
 
 struct WorkerRuntimeStatusHooks {
   std::function<void(const std::string &phase)> on_phase;
-  std::function<void(MessageType type, std::uint64_t bytes)> on_frame_sent;
-  std::function<void(MessageType type, std::uint64_t bytes)> on_frame_received;
+  std::function<void(MessageType type, const FrameTransferStats &transfer)>
+      on_frame_sent;
+  std::function<void(MessageType type, const FrameTransferStats &transfer)>
+      on_frame_received;
   std::function<void(int partition_id)> on_partition_loaded;
   std::function<void(long round_id, const std::vector<int> &partition_ids)>
       on_solve_start;
@@ -101,9 +115,12 @@ struct WorkerRuntimeStatusHooks {
 
 void runWorkerClient(const std::string &host, std::uint16_t port,
                      const HelloMessage &hello,
-                     const WorkerRuntimeStatusHooks &status_hooks = {});
+                     const WorkerRuntimeStatusHooks &status_hooks = {},
+                     TransportCompression compression =
+                         TransportCompression::NONE);
 
 std::unique_ptr<TcpPartitionWorker> acceptTcpPartitionWorker(
-    SocketHandle *listener, std::chrono::milliseconds timeout);
+    SocketHandle *listener, std::chrono::milliseconds timeout,
+    TransportCompression compression = TransportCompression::NONE);
 
 } // namespace mcpd4

@@ -67,6 +67,8 @@ struct Config {
   std::string advertise_host;
   std::uint16_t status_port = 0;
   std::string status_token = mcpd4::kDefaultStatusToken;
+  mcpd4::TransportCompression rpc_compression =
+      mcpd4::TransportCompression::NONE;
   bool saturate_capacity_overflow = false;
   bool directed = false;
 };
@@ -116,6 +118,14 @@ void addRpcByteStats(mcpd4::RpcByteStats *total,
                      const mcpd4::RpcByteStats &stats) {
   total->tx_bytes_total += stats.tx_bytes_total;
   total->rx_bytes_total += stats.rx_bytes_total;
+  total->tx_wire_bytes_total += stats.tx_wire_bytes_total;
+  total->rx_wire_bytes_total += stats.rx_wire_bytes_total;
+  total->compression_wall_us += stats.compression_wall_us;
+  total->decompression_wall_us += stats.decompression_wall_us;
+  total->tx_compressed_frame_count += stats.tx_compressed_frame_count;
+  total->tx_stored_frame_count += stats.tx_stored_frame_count;
+  total->rx_compressed_frame_count += stats.rx_compressed_frame_count;
+  total->rx_stored_frame_count += stats.rx_stored_frame_count;
   total->hello_tx_bytes += stats.hello_tx_bytes;
   total->hello_rx_bytes += stats.hello_rx_bytes;
   total->partition_load_tx_bytes += stats.partition_load_tx_bytes;
@@ -140,6 +150,7 @@ struct CoordinatorStatusState {
   std::uint16_t tcp_port = 0;
   std::uint16_t discovery_port = 0;
   std::uint16_t status_port = 0;
+  std::string rpc_compression = "none";
   int min_worker_count = 0;
   int worker_count = 0;
   int partition_count = 0;
@@ -176,6 +187,8 @@ struct CoordinatorStatusState {
     partition_count = config.partition_count;
     objective_scale = config.objective_scale;
     initial_objective_scale = config.objective_scale;
+    rpc_compression =
+        mcpd4::transportCompressionName(config.rpc_compression);
   }
 
   void setPhase(const std::string &value) {
@@ -235,6 +248,10 @@ struct CoordinatorStatusState {
           std::to_string(snapshot.timing.rpc_bytes.tx_bytes_total) +
           ":rpc_rx_bytes=" +
           std::to_string(snapshot.timing.rpc_bytes.rx_bytes_total) +
+          ":rpc_tx_wire_bytes=" +
+          std::to_string(snapshot.timing.rpc_bytes.tx_wire_bytes_total) +
+          ":rpc_rx_wire_bytes=" +
+          std::to_string(snapshot.timing.rpc_bytes.rx_wire_bytes_total) +
           ":solve_rpc_us=" +
           std::to_string(snapshot.timing.solve_round_rpc_wall_us) +
           ":worker_solve_us=" +
@@ -299,6 +316,10 @@ struct CoordinatorStatusState {
           std::to_string(snapshot.timing.rpc_bytes.tx_bytes_total) +
           ":rpc_rx_bytes=" +
           std::to_string(snapshot.timing.rpc_bytes.rx_bytes_total) +
+          ":rpc_tx_wire_bytes=" +
+          std::to_string(snapshot.timing.rpc_bytes.tx_wire_bytes_total) +
+          ":rpc_rx_wire_bytes=" +
+          std::to_string(snapshot.timing.rpc_bytes.rx_wire_bytes_total) +
           ":solve_rpc_us=" +
           std::to_string(snapshot.timing.solve_round_rpc_wall_us) +
           ":worker_solve_us=" +
@@ -340,6 +361,7 @@ struct CoordinatorStatusState {
         << " partition_count " << partition_count
         << " objective_scale " << objective_scale
         << " initial_objective_scale " << initial_objective_scale
+        << " rpc_compression " << rpc_compression
         << " total_iteration " << total_iteration
         << " schedule_scale " << schedule_scale
         << " schedule_step " << schedule_step
@@ -364,6 +386,19 @@ struct CoordinatorStatusState {
         << " solve_batch_rpc_count_total " << solve_batch_rpc_count_total
         << " rpc_tx_bytes_total " << rpc_bytes.tx_bytes_total
         << " rpc_rx_bytes_total " << rpc_bytes.rx_bytes_total
+        << " rpc_tx_wire_bytes_total " << rpc_bytes.tx_wire_bytes_total
+        << " rpc_rx_wire_bytes_total " << rpc_bytes.rx_wire_bytes_total
+        << " rpc_compression_wall_us " << rpc_bytes.compression_wall_us
+        << " rpc_decompression_wall_us "
+        << rpc_bytes.decompression_wall_us
+        << " rpc_tx_compressed_frame_count "
+        << rpc_bytes.tx_compressed_frame_count
+        << " rpc_tx_stored_frame_count "
+        << rpc_bytes.tx_stored_frame_count
+        << " rpc_rx_compressed_frame_count "
+        << rpc_bytes.rx_compressed_frame_count
+        << " rpc_rx_stored_frame_count "
+        << rpc_bytes.rx_stored_frame_count
         << " rpc_hello_rx_bytes " << rpc_bytes.hello_rx_bytes
         << " rpc_partition_load_tx_bytes "
         << rpc_bytes.partition_load_tx_bytes
@@ -430,6 +465,7 @@ void usage(const char *argv0) {
       << "       [--discovery-port PORT] [--discovery-token TOKEN]\n"
       << "       [--advertise-host HOST]\n"
       << "       [--status-port PORT] [--status-token TOKEN]\n"
+      << "       [--rpc-compression none|snappy]\n"
       << "       [--saturate-capacity-overflow]\n"
       << "       [--directed]\n";
 }
@@ -481,6 +517,9 @@ Config parseArgs(int argc, char **argv) {
       config.status_port = parsePort(require_value(arg));
     } else if (arg == "--status-token") {
       config.status_token = require_value(arg);
+    } else if (arg == "--rpc-compression") {
+      config.rpc_compression =
+          mcpd4::parseTransportCompression(require_value(arg));
     } else if (arg == "--saturate-capacity-overflow" ||
                arg == "--truncate-capacity-overflow") {
       config.saturate_capacity_overflow = true;
@@ -492,6 +531,12 @@ Config parseArgs(int argc, char **argv) {
   }
   if (config.port == 0) {
     throw std::runtime_error("--port is required");
+  }
+  if (config.rpc_compression == mcpd4::TransportCompression::SNAPPY &&
+      !mcpd4::snappyCompressionAvailable()) {
+    throw std::runtime_error(
+        "--rpc-compression snappy requested but this binary was built without "
+        "Snappy support");
   }
   return config;
 }
@@ -562,7 +607,8 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptFixedWorkers(
   status_state->setPhase("accepting_workers");
   for (int i = 0; i < config.worker_count; ++i) {
     auto worker = mcpd4::acceptTcpPartitionWorker(
-        listener, std::chrono::milliseconds(config.accept_timeout_ms));
+        listener, std::chrono::milliseconds(config.accept_timeout_ms),
+        config.rpc_compression);
     std::cout << "accepted worker " << worker->hello().worker_name << "\n";
     std::cout.flush();
     status_state->recordWorker(*worker);
@@ -643,7 +689,8 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptDiscoveredWorkers(
 
     if ((fds[0].revents & POLLIN) != 0) {
       auto worker = mcpd4::acceptTcpPartitionWorker(
-          listener, std::chrono::milliseconds(1));
+          listener, std::chrono::milliseconds(1),
+          config.rpc_compression);
       std::cout << "accepted worker " << worker->hello().worker_name << "\n";
       std::cout.flush();
       status_state->recordWorker(*worker);
@@ -774,6 +821,22 @@ void printTiming(const RuntimeTiming &timing,
             << counters.scale_objective_rpc_count << "\n";
   std::cout << "rpc_tx_bytes_total " << rpc_bytes.tx_bytes_total << "\n";
   std::cout << "rpc_rx_bytes_total " << rpc_bytes.rx_bytes_total << "\n";
+  std::cout << "rpc_tx_wire_bytes_total "
+            << rpc_bytes.tx_wire_bytes_total << "\n";
+  std::cout << "rpc_rx_wire_bytes_total "
+            << rpc_bytes.rx_wire_bytes_total << "\n";
+  std::cout << "rpc_compression_wall_us "
+            << rpc_bytes.compression_wall_us << "\n";
+  std::cout << "rpc_decompression_wall_us "
+            << rpc_bytes.decompression_wall_us << "\n";
+  std::cout << "rpc_tx_compressed_frame_count "
+            << rpc_bytes.tx_compressed_frame_count << "\n";
+  std::cout << "rpc_tx_stored_frame_count "
+            << rpc_bytes.tx_stored_frame_count << "\n";
+  std::cout << "rpc_rx_compressed_frame_count "
+            << rpc_bytes.rx_compressed_frame_count << "\n";
+  std::cout << "rpc_rx_stored_frame_count "
+            << rpc_bytes.rx_stored_frame_count << "\n";
   std::cout << "rpc_hello_rx_bytes " << rpc_bytes.hello_rx_bytes << "\n";
   std::cout << "rpc_partition_load_tx_bytes "
             << rpc_bytes.partition_load_tx_bytes << "\n";
@@ -793,6 +856,9 @@ void printObjectiveScaleStats(const Config &config,
   const long total_saturation_count =
       stats.arc_saturation_count + stats.terminal_saturation_count;
   std::cout << "initial_objective_scale " << config.objective_scale
+            << "\n";
+  std::cout << "rpc_compression "
+            << mcpd4::transportCompressionName(config.rpc_compression)
             << "\n";
   std::cout << "objective_scale_overflow_mode "
             << (config.saturate_capacity_overflow ? "saturate" : "strict")
@@ -865,6 +931,22 @@ void printProgress(
             << " worker_rpc_overhead_us " << worker_rpc_overhead_us
             << " rpc_tx_bytes_total " << rpc_bytes.tx_bytes_total
             << " rpc_rx_bytes_total " << rpc_bytes.rx_bytes_total
+            << " rpc_tx_wire_bytes_total "
+            << rpc_bytes.tx_wire_bytes_total
+            << " rpc_rx_wire_bytes_total "
+            << rpc_bytes.rx_wire_bytes_total
+            << " rpc_compression_wall_us "
+            << rpc_bytes.compression_wall_us
+            << " rpc_decompression_wall_us "
+            << rpc_bytes.decompression_wall_us
+            << " rpc_tx_compressed_frame_count "
+            << rpc_bytes.tx_compressed_frame_count
+            << " rpc_tx_stored_frame_count "
+            << rpc_bytes.tx_stored_frame_count
+            << " rpc_rx_compressed_frame_count "
+            << rpc_bytes.rx_compressed_frame_count
+            << " rpc_rx_stored_frame_count "
+            << rpc_bytes.rx_stored_frame_count
             << " rpc_partition_load_tx_bytes "
             << rpc_bytes.partition_load_tx_bytes
             << " rpc_solve_request_tx_bytes "
@@ -897,6 +979,18 @@ void printProgress(
               << stats.rpc_bytes.tx_bytes_total
               << " rpc_rx_bytes_total "
               << stats.rpc_bytes.rx_bytes_total
+              << " rpc_tx_wire_bytes_total "
+              << stats.rpc_bytes.tx_wire_bytes_total
+              << " rpc_rx_wire_bytes_total "
+              << stats.rpc_bytes.rx_wire_bytes_total
+              << " rpc_compression_wall_us "
+              << stats.rpc_bytes.compression_wall_us
+              << " rpc_decompression_wall_us "
+              << stats.rpc_bytes.decompression_wall_us
+              << " rpc_tx_compressed_frame_count "
+              << stats.rpc_bytes.tx_compressed_frame_count
+              << " rpc_rx_compressed_frame_count "
+              << stats.rpc_bytes.rx_compressed_frame_count
               << " rpc_partition_load_tx_bytes "
               << stats.rpc_bytes.partition_load_tx_bytes
               << " rpc_solve_request_tx_bytes "

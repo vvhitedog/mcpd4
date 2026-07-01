@@ -411,7 +411,9 @@ DistributedRun runDistributedProcess(const std::string &coordinator_bin,
                                      const std::string &worker_bin,
                                      const std::string &fixture_dir,
                                      const CaseConfig &config,
-                                     std::vector<std::string> extra_args = {}) {
+                                     std::vector<std::string> extra_args = {},
+                                     std::vector<std::string>
+                                         worker_extra_args = {}) {
   const auto port = reservePort();
   const std::string port_string = std::to_string(port);
   const std::string ready_file =
@@ -450,10 +452,15 @@ DistributedRun runDistributedProcess(const std::string &coordinator_bin,
     waitForReadyFile(ready_file, 5s);
 
     for (int i = 0; i < config.worker_count; ++i) {
-      workers.push_back(spawnProcess({worker_bin, "127.0.0.1", port_string,
-                                      "--name",
-                                      config.name + "-worker-" +
-                                          std::to_string(i)}));
+      std::vector<std::string> worker_args{
+          worker_bin,
+          "127.0.0.1",
+          port_string,
+          "--name",
+          config.name + "-worker-" + std::to_string(i)};
+      worker_args.insert(worker_args.end(), worker_extra_args.begin(),
+                         worker_extra_args.end());
+      workers.push_back(spawnProcess(std::move(worker_args)));
     }
 
     const int coordinator_exit = waitForExit(&coordinator, 20s);
@@ -673,6 +680,18 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
   require(run.output.find(" rpc_rx_bytes_total ") != std::string::npos,
           "progress telemetry should include total received RPC bytes\n" +
               run.output);
+  require(run.output.find(" rpc_tx_wire_bytes_total ") !=
+              std::string::npos,
+          "progress telemetry should include total transmitted wire bytes\n" +
+              run.output);
+  require(run.output.find(" rpc_rx_wire_bytes_total ") !=
+              std::string::npos,
+          "progress telemetry should include total received wire bytes\n" +
+              run.output);
+  require(run.output.find(" rpc_compression_wall_us ") !=
+              std::string::npos,
+          "progress telemetry should include compression timing\n" +
+              run.output);
   require(run.output.find(" rpc_solve_request_tx_bytes ") !=
               std::string::npos,
           "progress telemetry should include solve request bytes\n" +
@@ -711,10 +730,67 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
   require(run.output.find("rpc_rx_bytes_total ") != std::string::npos,
           "final telemetry should include total received bytes\n" +
               run.output);
+  require(run.output.find("rpc_tx_wire_bytes_total ") !=
+              std::string::npos,
+          "final telemetry should include total transmitted wire bytes\n" +
+              run.output);
+  require(run.output.find("rpc_rx_wire_bytes_total ") !=
+              std::string::npos,
+          "final telemetry should include total received wire bytes\n" +
+              run.output);
   require(run.output.find("timing_solve_round_batch_count ") ==
               std::string::npos,
           "final telemetry should not use timing prefix for counts\n" +
               run.output);
+}
+
+void snappyCompressionProcessMatchesReference(
+    const std::string &coordinator_bin, const std::string &worker_bin,
+    const std::string &fixture_dir) {
+  if (!mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  const CaseConfig config{/*name=*/"snappy",
+                          /*fixture=*/"hand_bottleneck.max",
+                          /*worker_count=*/2,
+                          /*partition_count=*/2,
+                          /*max_iterations=*/80,
+                          /*schedule_levels=*/5,
+                          /*schedule_start=*/10000,
+                          /*objective_scale=*/10000};
+  const auto reference = runInProcessReference(fixture_dir, config);
+  const auto compressed = runDistributedProcess(
+      coordinator_bin, worker_bin, fixture_dir, config,
+      {"--rpc-compression", "snappy"},
+      {"--rpc-compression", "snappy"});
+  requireEqual(compressed.summary, reference, "snappy");
+  require(compressed.output.find("rpc_compression snappy") !=
+              std::string::npos,
+          "snappy run should report compression mode\n" + compressed.output);
+  require(compressed.output.find("rpc_tx_wire_bytes_total ") !=
+              std::string::npos,
+          "snappy run should report transmitted wire bytes\n" +
+              compressed.output);
+  require(compressed.output.find("rpc_rx_wire_bytes_total ") !=
+              std::string::npos,
+          "snappy run should report received wire bytes\n" +
+              compressed.output);
+  require(compressed.output.find("rpc_compression_wall_us ") !=
+              std::string::npos,
+          "snappy run should report compression timing\n" +
+              compressed.output);
+  require(compressed.output.find("rpc_decompression_wall_us ") !=
+              std::string::npos,
+          "snappy run should report decompression timing\n" +
+              compressed.output);
+  require(compressed.output.find("rpc_tx_compressed_frame_count ") !=
+              std::string::npos,
+          "snappy run should report compressed send frame count\n" +
+              compressed.output);
+  require(compressed.output.find("rpc_rx_compressed_frame_count ") !=
+              std::string::npos,
+          "snappy run should report compressed receive frame count\n" +
+              compressed.output);
 }
 
 void discoveryModeAcceptsDiscoveredWorkersAndClose(
@@ -981,6 +1057,8 @@ int main(int argc, char **argv) {
     capacityOverflowSaturationIsOptIn(coordinator_bin, worker_bin,
                                       fixture_dir);
     progressTelemetryIsStreamed(coordinator_bin, worker_bin, fixture_dir);
+    snappyCompressionProcessMatchesReference(coordinator_bin, worker_bin,
+                                             fixture_dir);
     discoveryModeAcceptsDiscoveredWorkersAndClose(
         coordinator_bin, worker_bin, discovery_bin, status_bin, fixture_dir);
   } catch (const std::exception &e) {

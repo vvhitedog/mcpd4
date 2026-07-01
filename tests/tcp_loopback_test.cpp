@@ -64,10 +64,13 @@ ConnectedPair makeConnectedPair() {
 class WorkerClientThread {
 public:
   WorkerClientThread(std::uint16_t port,
-                     mcpd4::HelloMessage hello)
-      : thread_([this, port, hello] {
+                     mcpd4::HelloMessage hello,
+                     mcpd4::TransportCompression compression =
+                         mcpd4::TransportCompression::NONE)
+      : thread_([this, port, hello, compression] {
           try {
-            mcpd4::runWorkerClient("127.0.0.1", port, hello);
+            mcpd4::runWorkerClient("127.0.0.1", port, hello, {},
+                                   compression);
           } catch (...) {
             exception_ = std::current_exception();
           }
@@ -135,11 +138,16 @@ std::vector<mcpd3::PartitionPackage> makeTieBreakRegularizationPackages() {
 
 std::unique_ptr<mcpd4::TcpPartitionWorker> startRemoteWorker(
     mcpd4::SocketHandle *listener, WorkerClientThread **client,
-    const std::string &worker_name) {
+    const std::string &worker_name,
+    mcpd4::TransportCompression compression =
+        mcpd4::TransportCompression::NONE) {
   const auto port = mcpd4::localPort(*listener);
   auto hello = makeHello(worker_name);
-  *client = new WorkerClientThread(port, hello);
-  return mcpd4::acceptTcpPartitionWorker(listener, 2s);
+  if (compression == mcpd4::TransportCompression::SNAPPY) {
+    hello.feature_bits |= mcpd4::kFeatureSnappyCompression;
+  }
+  *client = new WorkerClientThread(port, hello, compression);
+  return mcpd4::acceptTcpPartitionWorker(listener, 2s, compression);
 }
 
 void stopAndJoin(mcpd4::TcpPartitionWorker *worker,
@@ -177,6 +185,39 @@ void rejectsOversizedPayloadBeforeReadingBody() {
   requireThrows(
       [&] { (void)mcpd4::receiveFrameBytes(pair.server, 3); },
       "oversized TCP frame should be rejected");
+}
+
+void snappyCompressedFrameRoundTrips() {
+  if (!mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto pair = makeConnectedPair();
+  mcpd4::ReadyMessage ready;
+  ready.worker_name = std::string(1024 * 1024, 'a');
+  const auto frame = mcpd4::encodeReady(ready);
+
+  mcpd4::FrameTransferStats sent;
+  mcpd4::sendFrameBytes(pair.client, frame,
+                        mcpd4::TransportCompression::SNAPPY, &sent);
+  mcpd4::FrameTransferStats received;
+  const auto decoded_frame = mcpd4::receiveFrameBytes(
+      pair.server, 2ULL * 1024ULL * 1024ULL,
+      mcpd4::TransportCompression::SNAPPY, &received);
+  const auto decoded = mcpd4::decodeReady(decoded_frame);
+  require(decoded.worker_name == ready.worker_name,
+          "snappy transport frame should decode after round trip");
+  require(sent.logical_bytes == frame.size(),
+          "snappy send stats should preserve logical frame size");
+  require(received.logical_bytes == frame.size(),
+          "snappy receive stats should preserve logical frame size");
+  require(sent.compression_requested && received.compression_requested,
+          "snappy transfer stats should record compression mode");
+  require(sent.compressed && received.compressed,
+          "compressible frame should use snappy payload");
+  require(sent.wire_bytes < sent.logical_bytes,
+          "compressible frame should use fewer wire bytes than logical bytes");
+  require(received.wire_bytes == sent.wire_bytes,
+          "receiver should report the same compressed wire byte count");
 }
 
 void rejectsInvalidWorkerHello() {
@@ -344,6 +385,41 @@ void remoteWorkerSolvesExplicitBatch() {
   }
 }
 
+void remoteWorkerUsesSnappyCompression() {
+  if (!mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(&listener, &client, "snappy-worker",
+                                  mcpd4::TransportCompression::SNAPPY);
+  try {
+    mcpd3::PartitionPackage package;
+    package.partition_id = 0;
+    package.local_node_count = 8192;
+    package.terminal_capacities.assign(package.local_node_count, 0);
+    package.local_to_global.reserve(package.local_node_count);
+    for (int i = 0; i < package.local_node_count; ++i) {
+      package.local_to_global.push_back(i);
+    }
+
+    worker->loadPartition(package);
+    const auto &bytes = worker->timingStats().rpc_bytes;
+    require(bytes.partition_load_tx_bytes > 0,
+            "snappy worker test should send a partition package");
+    require(bytes.tx_wire_bytes_total > 0,
+            "snappy worker test should record wire bytes");
+    require(bytes.tx_compressed_frame_count > 0,
+            "large package should be transmitted as a compressed frame");
+    require(bytes.tx_wire_bytes_total < bytes.tx_bytes_total,
+            "compressed remote load should reduce coordinator wire bytes");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
 void remoteWorkerCoordinatorSolvesRegularizedAgreement() {
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
@@ -448,11 +524,13 @@ int main() {
   try {
     receivesFrameSplitAcrossTcpPackets();
     rejectsOversizedPayloadBeforeReadingBody();
+    snappyCompressedFrameRoundTrips();
     rejectsInvalidWorkerHello();
     remoteWorkerExposesHandshakeResources();
     remoteWorkerReportsErrorsAsExceptions();
     remoteWorkerScalesLoadedObjective();
     remoteWorkerSolvesExplicitBatch();
+    remoteWorkerUsesSnappyCompression();
     remoteWorkerCoordinatorSolvesRegularizedAgreement();
     remoteWorkerCoordinatorPromotesObjectiveScale();
   } catch (const std::exception &e) {

@@ -1,5 +1,55 @@
 # Progress Log
 
+## 2026-06-30 22:46 PDT
+
+- Added optional Snappy RPC compression as a product transport feature:
+  - added `third_party/snappy` as a submodule;
+  - added `MCPD4_ENABLE_SNAPPY` CMake option, default `ON`;
+  - coordinator and worker now accept `--rpc-compression none|snappy`;
+  - workers advertise Snappy support with a `HELLO` feature bit;
+  - `HELLO` remains uncompressed and all subsequent frames use the selected
+    transport mode.
+- Added a Snappy transport envelope that compresses complete protocol frames:
+  - compressed frames carry logical byte count and compressed payload count;
+  - frames that do not shrink are sent stored inside the Snappy envelope;
+  - uncompressed mode keeps the original protocol framing exactly.
+- Extended coordinator/worker telemetry:
+  - existing `rpc_*_bytes` fields remain logical protocol bytes;
+  - new `rpc_*_wire_bytes` fields report actual TCP bytes;
+  - added compression/decompression wall time and compressed/stored frame
+    counters.
+- Added test coverage:
+  - TCP loopback test for a large compressible Snappy frame;
+  - TCP loopback test proving a remote worker can negotiate Snappy and reduce
+    wire bytes for a large partition package;
+  - process integration test proving `--rpc-compression snappy` preserves
+    fixture solve results and emits compression telemetry.
+- Added runbook docs for two-machine Snappy A/B testing and comparison
+  fields.
+- Added `MCPD4_RPC_COMPRESSION` to the local benchmark helper.
+- Local tiny fixture A/B sanity check:
+  - no compression:
+    `final_objective_raw=40000`, `final_disagreement_count=0`,
+    `rpc_tx_wire_bytes_total=1090`, `rpc_rx_wire_bytes_total=1432`,
+    `timing_total_wall_us=20743`;
+  - Snappy:
+    `final_objective_raw=40000`, `final_disagreement_count=0`,
+    `rpc_tx_wire_bytes_total=1409`, `rpc_rx_wire_bytes_total=1154`,
+    `rpc_compression_wall_us=8`, `rpc_decompression_wall_us=2`,
+    `timing_total_wall_us=21273`;
+  - total wire bytes were slightly worse on this tiny fixture because many
+    coordinator-to-worker frames were too small and were stored in the
+    compression envelope. Larger two-machine cases should be compared with the
+    new wire/timing counters before deciding whether to enable Snappy.
+- Verified:
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake -S . -B build/no-snappy -DCMAKE_BUILD_TYPE=Release -DMCPD4_ENABLE_SNAPPY=OFF`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`;
+  - local benchmark helper A/B commands with `MCPD4_RPC_COMPRESSION=none` and
+    `MCPD4_RPC_COMPRESSION=snappy`.
+
 ## 2026-06-30 11:18 PDT
 
 - Removed the separate public `selected_objective` /
