@@ -10,15 +10,16 @@ Environment overrides:
   MCPD4_WORKERS                2
   MCPD4_PARTITIONS             2
   MCPD4_MAX_ITERATIONS         10000
-  MCPD4_NUM_SCALES             5
-  MCPD4_INITIAL_STEP           10000
-  MCPD4_CAPACITY_MULTIPLIER    10000
+  MCPD4_SCHEDULE_LEVELS        5
+  MCPD4_SCHEDULE_START         10000
+  MCPD4_OBJECTIVE_SCALE        10000
   MCPD4_ACCEPT_TIMEOUT_MS      30000
   MCPD4_READY_TIMEOUT_SEC      300
   MCPD4_PROGRESS_EVERY         0
   MCPD4_SATURATE_CAPACITY_OVERFLOW  0
 
-Legacy MCPD3_* aliases are still accepted for compatibility.
+Legacy MCPD4_NUM_SCALES, MCPD4_INITIAL_STEP, MCPD4_CAPACITY_MULTIPLIER, and
+MCPD3_* aliases are still accepted for compatibility.
 USAGE
   exit 2
 fi
@@ -30,9 +31,9 @@ build_dir=${MCPD4_BUILD_DIR:-${MCPD3_BUILD_DIR:-build}}
 workers=${MCPD4_WORKERS:-${MCPD3_WORKERS:-2}}
 partitions=${MCPD4_PARTITIONS:-${MCPD3_PARTITIONS:-2}}
 max_iterations=${MCPD4_MAX_ITERATIONS:-${MCPD3_MAX_ITERATIONS:-10000}}
-num_scales=${MCPD4_NUM_SCALES:-${MCPD3_NUM_SCALES:-5}}
-initial_step=${MCPD4_INITIAL_STEP:-${MCPD3_INITIAL_STEP:-10000}}
-capacity_multiplier=${MCPD4_CAPACITY_MULTIPLIER:-${MCPD3_CAPACITY_MULTIPLIER:-10000}}
+schedule_levels=${MCPD4_SCHEDULE_LEVELS:-${MCPD4_NUM_SCALES:-${MCPD3_NUM_SCALES:-5}}}
+schedule_start=${MCPD4_SCHEDULE_START:-${MCPD4_INITIAL_STEP:-${MCPD3_INITIAL_STEP:-10000}}}
+objective_scale=${MCPD4_OBJECTIVE_SCALE:-${MCPD4_CAPACITY_MULTIPLIER:-${MCPD3_CAPACITY_MULTIPLIER:-10000}}}
 accept_timeout_ms=${MCPD4_ACCEPT_TIMEOUT_MS:-${MCPD3_ACCEPT_TIMEOUT_MS:-30000}}
 ready_timeout_sec=${MCPD4_READY_TIMEOUT_SEC:-${MCPD3_READY_TIMEOUT_SEC:-300}}
 progress_every=${MCPD4_PROGRESS_EVERY:-${MCPD3_PROGRESS_EVERY:-0}}
@@ -78,9 +79,9 @@ fi
   --workers "$workers" \
   --partitions "$partitions" \
   --max-iterations "$max_iterations" \
-  --num-scales "$num_scales" \
-  --initial-step "$initial_step" \
-  --capacity-multiplier "$capacity_multiplier" \
+  --schedule-levels "$schedule_levels" \
+  --schedule-start "$schedule_start" \
+  --objective-scale "$objective_scale" \
   --accept-timeout-ms "$accept_timeout_ms" \
   --progress-every "$progress_every" \
   --ready-file "$ready_file" \

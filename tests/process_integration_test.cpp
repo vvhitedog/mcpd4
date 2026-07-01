@@ -38,9 +38,9 @@ struct CaseConfig {
   int worker_count = 2;
   int partition_count = 2;
   int max_iterations = 80;
-  int num_scales = 5;
-  long initial_step_size = 10000;
-  long capacity_multiplier = 10000;
+  int schedule_levels = 5;
+  long schedule_start = 10000;
+  long objective_scale = 10000;
 };
 
 struct SolveSummary {
@@ -246,7 +246,7 @@ int checkedScaleInt(int value, long factor) {
   const long scaled = static_cast<long>(value) * factor;
   if (scaled > std::numeric_limits<int>::max() ||
       scaled < std::numeric_limits<int>::min()) {
-    throw std::overflow_error("test capacity multiplier exceeds int range");
+    throw std::overflow_error("test objective scale exceeds int range");
   }
   return static_cast<int>(scaled);
 }
@@ -301,13 +301,13 @@ SolveSummary summarize(const mcpd3::PartitionWorkerCoordinatorSolveResult &r) {
 SolveSummary runInProcessReference(const std::string &fixture_dir,
                                    const CaseConfig &config) {
   auto graph = mcpd3::read_dimacs(fixture_dir + "/" + config.fixture);
-  scaleGraph(&graph, config.capacity_multiplier);
+  scaleGraph(&graph, config.objective_scale);
 
   mcpd3::DualDecompositionOptions package_options;
   package_options.track_primal_upper_bound = false;
   package_options.verbose = false;
   package_options.thread_count = 1;
-  package_options.objective_scale = config.capacity_multiplier;
+  package_options.objective_scale = config.objective_scale;
   mcpd3::DualDecomposition package_source(
       config.partition_count, graph.nnode, graph.narc, std::move(graph.arcs),
       std::move(graph.arc_capacities), std::move(graph.terminal_capacities),
@@ -315,9 +315,9 @@ SolveSummary runInProcessReference(const std::string &fixture_dir,
 
   mcpd3::PartitionWorkerCoordinatorOptions solve_options;
   solve_options.max_iteration_count = config.max_iterations;
-  solve_options.num_optimization_scales = config.num_scales;
-  solve_options.initial_step_size = config.initial_step_size;
-  solve_options.objective_scale = config.capacity_multiplier;
+  solve_options.num_optimization_scales = config.schedule_levels;
+  solve_options.initial_step_size = config.schedule_start;
+  solve_options.objective_scale = config.objective_scale;
 
   mcpd3::PartitionWorkerCoordinator coordinator(
       package_source.getPartitionPackages(),
@@ -433,12 +433,12 @@ DistributedRun runDistributedProcess(const std::string &coordinator_bin,
         std::to_string(config.partition_count),
         "--max-iterations",
         std::to_string(config.max_iterations),
-        "--num-scales",
-        std::to_string(config.num_scales),
-        "--initial-step",
-        std::to_string(config.initial_step_size),
-        "--capacity-multiplier",
-        std::to_string(config.capacity_multiplier),
+        "--schedule-levels",
+        std::to_string(config.schedule_levels),
+        "--schedule-start",
+        std::to_string(config.schedule_start),
+        "--objective-scale",
+        std::to_string(config.objective_scale),
         "--accept-timeout-ms",
         "5000",
         "--ready-file",
@@ -585,14 +585,14 @@ void capacityOverflowSaturationIsOptIn(const std::string &coordinator_bin,
                                 "1",
                                 "--partitions",
                                 "1",
-                                "--capacity-multiplier",
+                                "--objective-scale",
                                 "10000",
                                 "--accept-timeout-ms",
                                 "50"});
   const int rejected_exit = waitForExit(&rejected, 5s);
   require(rejected_exit != 0,
           "capacity overflow should fail in strict mode");
-  require(rejected.output.find("capacity multiplier exceeds int range") !=
+  require(rejected.output.find("objective scale exceeds int range") !=
               std::string::npos,
           "strict overflow should explain int range failure\n" +
               rejected.output);
@@ -604,14 +604,14 @@ void capacityOverflowSaturationIsOptIn(const std::string &coordinator_bin,
                  /*worker_count=*/1,
                  /*partition_count=*/1,
                  /*max_iterations=*/5,
-                 /*num_scales=*/1,
-                 /*initial_step_size=*/10000,
-                 /*capacity_multiplier=*/10000},
+                 /*schedule_levels=*/1,
+                 /*schedule_start=*/10000,
+                 /*objective_scale=*/10000},
       {"--saturate-capacity-overflow"});
-  require(saturated.output.find("capacity_scale_overflow_mode saturate") !=
+  require(saturated.output.find("objective_scale_overflow_mode saturate") !=
               std::string::npos,
           "saturated run should report saturate mode\n" + saturated.output);
-  require(saturated.output.find("capacity_scale_saturation_count 1") !=
+  require(saturated.output.find("objective_scale_saturation_count 1") !=
               std::string::npos,
           "saturated run should report one clipped capacity\n" +
               saturated.output);
@@ -629,13 +629,28 @@ void progressTelemetryIsStreamed(const std::string &coordinator_bin,
                  /*worker_count=*/2,
                  /*partition_count=*/2,
                  /*max_iterations=*/10,
-                 /*num_scales=*/1,
-                 /*initial_step_size=*/10000,
-                 /*capacity_multiplier=*/10000},
+                 /*schedule_levels=*/1,
+                 /*schedule_start=*/10000,
+                 /*objective_scale=*/10000},
       {"--progress-every", "1"});
 
   require(run.output.find("progress total_iteration ") != std::string::npos,
           "progress telemetry should include coordinator progress\n" +
+              run.output);
+  require(run.output.find(" schedule_scale ") != std::string::npos,
+          "progress telemetry should use schedule_scale\n" + run.output);
+  require(run.output.find(" schedule_step ") != std::string::npos,
+          "progress telemetry should use schedule_step\n" + run.output);
+  require(run.output.find(" effective_schedule_step ") != std::string::npos,
+          "progress telemetry should use effective_schedule_step\n" +
+              run.output);
+  require(run.output.find(" scale ") == std::string::npos,
+          "progress telemetry should not use ambiguous scale field\n" +
+              run.output);
+  require(run.output.find(" step_size ") == std::string::npos,
+          "progress telemetry should not use step_size field\n" + run.output);
+  require(run.output.find(" effective_step_size ") == std::string::npos,
+          "progress telemetry should not use effective_step_size field\n" +
               run.output);
   require(run.output.find(" disagreement_count ") != std::string::npos,
           "progress telemetry should include disagreement count\n" +
@@ -687,9 +702,9 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
                           /*worker_count=*/1,
                           /*partition_count=*/2,
                           /*max_iterations=*/80,
-                          /*num_scales=*/5,
-                          /*initial_step_size=*/10000,
-                          /*capacity_multiplier=*/10000};
+                          /*schedule_levels=*/5,
+                          /*schedule_start=*/10000,
+                          /*objective_scale=*/10000};
   const auto reference = runInProcessReference(fixture_dir, config);
   const auto tcp_port = reservePort();
   const auto discovery_port = reserveUdpPort();
@@ -716,12 +731,12 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
                                 std::to_string(config.partition_count),
                                 "--max-iterations",
                                 std::to_string(config.max_iterations),
-                                "--num-scales",
-                                std::to_string(config.num_scales),
-                                "--initial-step",
-                                std::to_string(config.initial_step_size),
-                                "--capacity-multiplier",
-                                std::to_string(config.capacity_multiplier),
+                                "--schedule-levels",
+                                std::to_string(config.schedule_levels),
+                                "--schedule-start",
+                                std::to_string(config.schedule_start),
+                                "--objective-scale",
+                                std::to_string(config.objective_scale),
                                 "--accept-timeout-ms",
                                 "5000",
                                 "--ready-file",
@@ -814,6 +829,18 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
                 std::string::npos,
             "coordinator status should report accepted worker name\n" +
                 coordinator_status_output);
+    require(coordinator_status_output.find("worker_resources discovered-worker:cpu=") !=
+                std::string::npos,
+            "coordinator status should report accepted worker resources\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find("initial_objective_scale 10000") !=
+                std::string::npos,
+            "coordinator status should report initial objective scale\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find("schedule_scale 0") !=
+                std::string::npos,
+            "coordinator status should use schedule_scale naming\n" +
+                coordinator_status_output);
 
     std::string worker_status_output;
     while (std::chrono::steady_clock::now() < status_deadline) {
@@ -832,6 +859,10 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
     require(worker_status_output.find("phase connected") != std::string::npos,
             "worker status should report connected phase\n" +
                 worker_status_output);
+    require(worker_status_output.find("cpu_count ") != std::string::npos,
+            "worker status should report CPU count\n" + worker_status_output);
+    require(worker_status_output.find("ram_gb ") != std::string::npos,
+            "worker status should report RAM GB\n" + worker_status_output);
 
     auto close = spawnProcess({discovery_bin,
                                "close",

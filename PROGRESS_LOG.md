@@ -1179,3 +1179,22 @@
 - Verified:
   - `cmake --build build -j`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-06-30 17:59 PDT
+
+- Cleaned up product terminology:
+  - new coordinator flags are `--objective-scale`, `--schedule-start`, and
+    `--schedule-levels`;
+  - old `--capacity-multiplier`, `--initial-step`, and `--num-scales` flags
+    remain compatibility aliases;
+  - progress output now uses `schedule_scale`, `schedule_step`, and
+    `effective_schedule_step` instead of overloaded `scale`/`step_size`;
+  - objective-scale saturation output now uses `objective_scale_*` field names.
+- Improved queryable status snapshots:
+  - coordinator status now reports worker resources, partition ownership,
+    regularization diagnostics, per-worker solve/RPC counts, and per-worker
+    solve timing;
+  - worker status now reports CPU/RAM, temp path, loaded partitions, active
+    round/partition ids, solve counts, batch RPC count, and solve time.
+- Updated the local benchmark helper and README to prefer the new terminology
+  while keeping legacy aliases for existing scripts.

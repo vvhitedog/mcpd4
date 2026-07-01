@@ -85,9 +85,9 @@ the coordinator output.
 MCPD4_WORKERS=2 \
 MCPD4_PARTITIONS=4 \
 MCPD4_MAX_ITERATIONS=10000 \
-MCPD4_NUM_SCALES=5 \
-MCPD4_INITIAL_STEP=10000 \
-MCPD4_CAPACITY_MULTIPLIER=10000 \
+MCPD4_SCHEDULE_LEVELS=5 \
+MCPD4_SCHEDULE_START=10000 \
+MCPD4_OBJECTIVE_SCALE=10000 \
 MCPD4_PROGRESS_EVERY=100 \
 scripts/run_local_process_benchmark.sh tests/fixtures/hand_bottleneck.max
 ```
@@ -99,16 +99,18 @@ MCPD4_BUILD_DIR                    default: build
 MCPD4_WORKERS                      default: 2
 MCPD4_PARTITIONS                   default: 2
 MCPD4_MAX_ITERATIONS               default: 10000
-MCPD4_NUM_SCALES                   default: 5
-MCPD4_INITIAL_STEP                 default: 10000
-MCPD4_CAPACITY_MULTIPLIER          default: 10000
+MCPD4_SCHEDULE_LEVELS              default: 5
+MCPD4_SCHEDULE_START               default: 10000
+MCPD4_OBJECTIVE_SCALE              default: 10000
 MCPD4_ACCEPT_TIMEOUT_MS            default: 30000
 MCPD4_READY_TIMEOUT_SEC            default: 300
 MCPD4_PROGRESS_EVERY               default: 0
 MCPD4_SATURATE_CAPACITY_OVERFLOW   default: 0
 ```
 
-Legacy `MCPD3_*` aliases are still accepted by the helper for compatibility.
+Legacy `MCPD4_NUM_SCALES`, `MCPD4_INITIAL_STEP`,
+`MCPD4_CAPACITY_MULTIPLIER`, and `MCPD3_*` aliases are still accepted by the
+helper for compatibility.
 
 ## Manual Localhost Run
 
@@ -122,9 +124,9 @@ first in terminal 1:
   --workers 2 \
   --partitions 4 \
   --max-iterations 10000 \
-  --num-scales 5 \
-  --initial-step 10000 \
-  --capacity-multiplier 10000 \
+  --schedule-levels 5 \
+  --schedule-start 10000 \
+  --objective-scale 10000 \
   --accept-timeout-ms 30000 \
   --progress-every 100
 ```
@@ -158,9 +160,9 @@ firewall. Use `0.0.0.0` to accept connections on all IPv4 interfaces:
   --workers 4 \
   --partitions 10 \
   --max-iterations 10000 \
-  --num-scales 5 \
-  --initial-step 10000 \
-  --capacity-multiplier 10000 \
+  --schedule-levels 5 \
+  --schedule-start 10000 \
+  --objective-scale 10000 \
   --accept-timeout-ms 600000 \
   --progress-every 50
 ```
@@ -197,7 +199,7 @@ For directed DIMACS inputs, add `--directed` to the coordinator command:
   --port 50051 \
   --workers 4 \
   --partitions 10 \
-  --capacity-multiplier 10000
+  --objective-scale 10000
 ```
 
 ## Discovery Mode
@@ -216,9 +218,9 @@ Start the coordinator with a UDP discovery port:
   --workers 2 \
   --partitions 10 \
   --max-iterations 10000 \
-  --num-scales 5 \
-  --initial-step 10000 \
-  --capacity-multiplier 10000 \
+  --schedule-levels 5 \
+  --schedule-start 10000 \
+  --objective-scale 10000 \
   --accept-timeout-ms 600000 \
   --progress-every 50 \
   --discovery-port 50052 \
@@ -283,8 +285,8 @@ specific DNS name or interface address instead of the UDP reply source.
 
 ```text
 usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
-       [--partitions N] [--max-iterations N] [--num-scales N]
-       [--initial-step N] [--capacity-multiplier N]
+       [--partitions N] [--max-iterations N] [--schedule-levels N]
+       [--schedule-start N] [--objective-scale N]
        [--accept-timeout-ms N] [--progress-every N] [--ready-file PATH]
        [--discovery-port PORT] [--discovery-token TOKEN]
        [--advertise-host HOST]
@@ -301,9 +303,9 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
   command can let the solve proceed.
 - `--partitions N`: number of local subproblems to build.
 - `--max-iterations N`: maximum optimizer iterations.
-- `--num-scales N`: number of capacity-scaling levels.
-- `--initial-step N`: initial dual update step size.
-- `--capacity-multiplier N`: multiplies capacities before partitioning and is
+- `--schedule-levels N`: number of base-10 dual-decomposition schedule levels.
+- `--schedule-start N`: first dual-decomposition schedule step.
+- `--objective-scale N`: multiplies capacities before partitioning and is
   also the objective scale used by exact scaled-epsilon regularization.
 - `--accept-timeout-ms N`: per-worker accept timeout.
 - `--progress-every N`: print optimizer health every N total iterations. Use
@@ -321,6 +323,10 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
   clips overflowing scaled capacities and solves the clipped problem, not the
   exact original problem.
 - `--directed`: use the directed streaming DIMACS reader.
+
+Compatibility aliases accepted by the coordinator:
+`--num-scales` for `--schedule-levels`, `--initial-step` for
+`--schedule-start`, and `--capacity-multiplier` for `--objective-scale`.
 
 ## Worker Options
 
@@ -379,11 +385,12 @@ usage: mcpd4_status HOST PORT [--token TOKEN] [--timeout-ms N]
 - `--timeout-ms N`: wait timeout for the status response.
 
 Coordinator status includes the current phase, accepted worker count, worker
-names, partition count, objective scale, latest iteration/step state,
-lower-bound fields, disagreement count, and aggregate solve/RPC counts. Worker
-status includes its phase, coordinator endpoint, loaded partition ids, current
-round/partition ids, solve counts, batch RPC count, worker solve wall time, and
-last error.
+names/resources, partition ownership, partition count, objective scale, latest
+schedule/iteration state, lower-bound fields, regularization diagnostics,
+disagreement count, aggregate solve/RPC counts, and per-worker solve timing.
+Worker status includes its phase, CPU/RAM, temp path, coordinator endpoint,
+loaded partition ids, current round/partition ids, solve counts, batch RPC
+count, worker solve wall time, and last error.
 
 ## Interpreting Output
 
@@ -393,7 +400,7 @@ The coordinator prints key-value lines. A successful exact run usually has:
 status 0
 stop_reason 1
 final_disagreement_count 0
-capacity_scale_saturation_count 0
+objective_scale_saturation_count 0
 ```
 
 `stop_reason 2` is also an exact agreement path when the scaled-epsilon
@@ -432,21 +439,23 @@ Important objective fields:
   local solve.
 - `objective_scale`: final scale after any promotions.
 - `objective_scale_promotions`: number of times the coordinator promoted the
-  scale after a regularization budget overflow.
+  objective scale after a regularization budget overflow.
 - `final_regularization_budget`: total active regularization budget in raw
   units.
-- `capacity_scale_saturation_count`: nonzero means overflow clipping occurred
+- `objective_scale_saturation_count`: nonzero means overflow clipping occurred
   and the run solved a clipped-capacity problem.
 
 With `--progress-every`, the coordinator also prints:
 
-- `progress ...`: global optimizer health and cumulative worker timing.
+- `progress ...`: global optimizer health and cumulative worker timing,
+  including `schedule_scale`, `schedule_step`, and
+  `effective_schedule_step`.
 - `progress_worker ...`: per-worker assigned partition counts, solve counts,
   batch RPC counts, solve wall time, and RPC overhead.
 
 These fields are useful for detecting stalled workers or partition imbalance.
 
-## Capacity Multiplier And Exactness
+## Objective Scale And Exactness
 
 The scaled-epsilon regularizer treats each local objective as:
 
@@ -454,14 +463,14 @@ The scaled-epsilon regularizer treats each local objective as:
 M * F(x) + R(x)
 ```
 
-where `M` is the objective scale from `--capacity-multiplier`. The point is to
+where `M` is the objective scale from `--objective-scale`. The point is to
 make regularization a lexicographic tie-break rather than a change to the
-original optimization problem. Larger multipliers give more regularization
+original optimization problem. Larger objective scales give more regularization
 budget but increase the risk of 32-bit capacity overflow.
 
 Practical starting points:
 
-- Small fixtures: `--capacity-multiplier 10000`.
+- Small fixtures: `--objective-scale 10000`.
 - Large benchmark graphs with bigger capacities: try `100`, then increase if
   the run reports objective-scale promotions or regularization budget pressure.
 - If strict scaling overflows, inspect the input capacities before using
@@ -474,8 +483,8 @@ Practical starting points:
   requested by `--workers`; verify firewall rules and bind address.
 - Remote workers cannot connect: bind the coordinator to `0.0.0.0` or the
   correct interface IP, not `127.0.0.1`.
-- `capacity multiplier exceeds int range`: reduce
-  `--capacity-multiplier` or intentionally use
+- `objective scale exceeds int range`: reduce
+  `--objective-scale` or intentionally use
   `--saturate-capacity-overflow` knowing it clips capacities.
 - One worker does most of the work: increase `--partitions`, check
   `progress_worker` timing, and compare assigned partition counts. Dynamic

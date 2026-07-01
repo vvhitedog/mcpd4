@@ -109,6 +109,7 @@ void TcpPartitionWorker::loadPartition(
   (void)receiveReadyOrThrow(socket_);
   timing_stats_.load_partition_rpc_wall_us += elapsedUs(start);
   ++timing_stats_.load_partition_rpc_count;
+  partition_ids_.push_back(package.partition_id);
 }
 
 mcpd3::PartitionWorkerResourceEstimate
@@ -193,6 +194,16 @@ void TcpPartitionWorker::stop(std::uint32_t reason,
   } catch (...) {
   }
   socket_.reset();
+}
+
+TcpPartitionWorkerStatusSnapshot TcpPartitionWorker::statusSnapshot() const {
+  TcpPartitionWorkerStatusSnapshot snapshot;
+  snapshot.worker_name = hello_.worker_name;
+  snapshot.cpu_count = hello_.cpu_count;
+  snapshot.ram_gb = hello_.ram_gb;
+  snapshot.partition_ids = partition_ids_;
+  snapshot.timing = timing_stats_;
+  return snapshot;
 }
 
 HelloMessage makeDefaultHello(const std::string &worker_name) {

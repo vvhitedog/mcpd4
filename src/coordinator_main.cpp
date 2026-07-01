@@ -37,7 +37,7 @@ struct RuntimeTiming {
   std::uint64_t stop_workers_wall_us = 0;
 };
 
-struct CapacityScaleStats {
+struct ObjectiveScaleStats {
   long arc_saturation_count = 0;
   long terminal_saturation_count = 0;
 };
@@ -56,9 +56,9 @@ struct Config {
   int worker_count = 1;
   int partition_count = 1;
   int max_iterations = 10000;
-  int num_scales = 5;
-  long initial_step_size = 10000;
-  long capacity_multiplier = 1;
+  int schedule_levels = 5;
+  long schedule_start = 10000;
+  long objective_scale = 1;
   long accept_timeout_ms = 24L * 60L * 60L * 1000L;
   int progress_every = 0;
   std::string ready_file;
@@ -98,6 +98,20 @@ std::string joinStatusValues(const std::vector<std::string> &values) {
   return joined;
 }
 
+std::string joinInts(const std::vector<int> &values) {
+  if (values.empty()) {
+    return "-";
+  }
+  std::string joined;
+  for (const auto value : values) {
+    if (!joined.empty()) {
+      joined += ",";
+    }
+    joined += std::to_string(value);
+  }
+  return joined;
+}
+
 struct CoordinatorStatusState {
   mutable std::mutex mutex;
   std::string phase = "starting";
@@ -108,27 +122,37 @@ struct CoordinatorStatusState {
   int worker_count = 0;
   int partition_count = 0;
   long objective_scale = 1;
-  long capacity_multiplier = 1;
+  long initial_objective_scale = 1;
   long total_iteration = 0;
   long schedule_scale = 0;
-  long step_size = 0;
+  long schedule_step = 0;
   long lower_bound = 0;
   long best_lower_bound = 0;
   long certified_lower_bound = 0;
   long best_certified_lower_bound = 0;
+  long regularized_objective = 0;
+  long best_regularized_objective = 0;
   long disagreement_count = 0;
+  long regularization_strength = 0;
+  long regularization_budget = 0;
+  long regularization_contribution = 0;
+  long regularization_anchor_sink_count = 0;
+  long regularization_active_sink_count = 0;
   long assigned_partition_count = 0;
   long active_worker_count = 0;
   long partition_solve_call_count_total = 0;
   long solve_batch_rpc_count_total = 0;
   std::vector<std::string> worker_names;
+  std::vector<std::string> worker_resources;
+  std::vector<std::string> partition_ownership;
+  std::vector<std::string> worker_details;
 
   void initialize(const Config &config) {
     std::lock_guard<std::mutex> lock(mutex);
     min_worker_count = config.worker_count;
     partition_count = config.partition_count;
-    objective_scale = config.capacity_multiplier;
-    capacity_multiplier = config.capacity_multiplier;
+    objective_scale = config.objective_scale;
+    initial_objective_scale = config.objective_scale;
   }
 
   void setPhase(const std::string &value) {
@@ -144,10 +168,50 @@ struct CoordinatorStatusState {
     status_port = status;
   }
 
-  void recordWorker(const std::string &name) {
+  void recordWorker(const mcpd4::TcpPartitionWorker &worker) {
+    const auto snapshot = worker.statusSnapshot();
     std::lock_guard<std::mutex> lock(mutex);
-    worker_names.push_back(name);
+    const std::string name = statusValue(snapshot.worker_name);
+    worker_names.push_back(snapshot.worker_name);
     worker_count = static_cast<int>(worker_names.size());
+    worker_resources.push_back(
+        name + ":cpu=" + std::to_string(snapshot.cpu_count) +
+        ":ram_gb=" + std::to_string(snapshot.ram_gb));
+  }
+
+  void recordWorkerDetails(const std::vector<mcpd4::TcpPartitionWorker *>
+                               &remote_workers) {
+    std::lock_guard<std::mutex> lock(mutex);
+    worker_resources.clear();
+    partition_ownership.clear();
+    worker_details.clear();
+    assigned_partition_count = 0;
+    active_worker_count = 0;
+    for (const auto *worker : remote_workers) {
+      const auto snapshot = worker->statusSnapshot();
+      const std::string name = statusValue(snapshot.worker_name);
+      worker_resources.push_back(
+          name + ":cpu=" + std::to_string(snapshot.cpu_count) +
+          ":ram_gb=" + std::to_string(snapshot.ram_gb));
+      partition_ownership.push_back(name + "=" +
+                                    joinInts(snapshot.partition_ids));
+      assigned_partition_count +=
+          snapshot.timing.load_partition_rpc_count;
+      if (snapshot.timing.load_partition_rpc_count > 0) {
+        ++active_worker_count;
+      }
+      worker_details.push_back(
+          name + ":partitions=" +
+          std::to_string(snapshot.timing.load_partition_rpc_count) +
+          ":solves=" +
+          std::to_string(snapshot.timing.partition_solve_call_count) +
+          ":batches=" +
+          std::to_string(snapshot.timing.solve_batch_rpc_count) +
+          ":solve_rpc_us=" +
+          std::to_string(snapshot.timing.solve_round_rpc_wall_us) +
+          ":worker_solve_us=" +
+          std::to_string(snapshot.timing.solve_round_worker_wall_us));
+    }
   }
 
   void recordProgress(const mcpd3::PartitionWorkerProgressRecord &record,
@@ -170,16 +234,40 @@ struct CoordinatorStatusState {
     phase = "solving";
     total_iteration = record.total_iteration;
     schedule_scale = record.scale;
-    step_size = record.step_size;
+    schedule_step = record.step_size;
     lower_bound = record.lower_bound;
     best_lower_bound = record.best_lower_bound;
     certified_lower_bound = record.certified_lower_bound;
     best_certified_lower_bound = record.best_certified_lower_bound;
+    regularized_objective = record.regularized_objective;
+    best_regularized_objective = record.best_regularized_objective;
     disagreement_count = record.disagreement_count;
+    regularization_strength = record.regularization_strength;
+    regularization_budget = record.regularization_budget;
+    regularization_contribution = record.regularization_contribution;
+    regularization_anchor_sink_count =
+        record.regularization_anchor_sink_count;
+    regularization_active_sink_count = record.regularization_active_sink_count;
     assigned_partition_count = assigned_partitions;
     active_worker_count = active_workers;
     partition_solve_call_count_total = partition_solves;
     solve_batch_rpc_count_total = batch_rpcs;
+    worker_details.clear();
+    for (const auto *worker : remote_workers) {
+      const auto snapshot = worker->statusSnapshot();
+      const std::string name = statusValue(snapshot.worker_name);
+      worker_details.push_back(
+          name + ":partitions=" +
+          std::to_string(snapshot.timing.load_partition_rpc_count) +
+          ":solves=" +
+          std::to_string(snapshot.timing.partition_solve_call_count) +
+          ":batches=" +
+          std::to_string(snapshot.timing.solve_batch_rpc_count) +
+          ":solve_rpc_us=" +
+          std::to_string(snapshot.timing.solve_round_rpc_wall_us) +
+          ":worker_solve_us=" +
+          std::to_string(snapshot.timing.solve_round_worker_wall_us));
+    }
   }
 
   void recordFinal(
@@ -193,6 +281,14 @@ struct CoordinatorStatusState {
     best_lower_bound = result.best_lower_bound_raw;
     certified_lower_bound = result.final_certified_lower_bound_raw;
     best_certified_lower_bound = result.best_certified_lower_bound_raw;
+    regularized_objective = result.final_regularized_objective_raw;
+    best_regularized_objective = result.best_regularized_objective_raw;
+    regularization_budget = result.final_regularization_budget;
+    regularization_contribution = result.final_regularization_contribution;
+    regularization_anchor_sink_count =
+        result.final_regularization_anchor_sink_count;
+    regularization_active_sink_count =
+        result.final_regularization_active_sink_count;
   }
 
   std::string snapshot() const {
@@ -207,21 +303,33 @@ struct CoordinatorStatusState {
         << " min_worker_count " << min_worker_count
         << " partition_count " << partition_count
         << " objective_scale " << objective_scale
-        << " capacity_multiplier " << capacity_multiplier
+        << " initial_objective_scale " << initial_objective_scale
         << " total_iteration " << total_iteration
         << " schedule_scale " << schedule_scale
-        << " step_size " << step_size
+        << " schedule_step " << schedule_step
         << " lower_bound " << lower_bound
         << " best_lower_bound " << best_lower_bound
         << " certified_lower_bound " << certified_lower_bound
         << " best_certified_lower_bound " << best_certified_lower_bound
+        << " regularized_objective " << regularized_objective
+        << " best_regularized_objective " << best_regularized_objective
         << " disagreement_count " << disagreement_count
+        << " regularization_strength " << regularization_strength
+        << " regularization_budget " << regularization_budget
+        << " regularization_contribution " << regularization_contribution
+        << " regularization_anchor_sink_count "
+        << regularization_anchor_sink_count
+        << " regularization_active_sink_count "
+        << regularization_active_sink_count
         << " assigned_partition_count " << assigned_partition_count
         << " active_worker_count " << active_worker_count
         << " partition_solve_call_count_total "
         << partition_solve_call_count_total
         << " solve_batch_rpc_count_total " << solve_batch_rpc_count_total
-        << " worker_names " << joinStatusValues(worker_names);
+        << " worker_names " << joinStatusValues(worker_names)
+        << " worker_resources " << joinStatusValues(worker_resources)
+        << " partition_ownership " << joinStatusValues(partition_ownership)
+        << " worker_details " << joinStatusValues(worker_details);
     return out.str();
   }
 };
@@ -265,8 +373,9 @@ void usage(const char *argv0) {
   std::cerr
       << "usage: " << argv0
       << " DIMACS --port PORT [--bind HOST] [--workers N] [--partitions N]\n"
-      << "       [--max-iterations N] [--num-scales N] [--initial-step N]\n"
-      << "       [--capacity-multiplier N] [--accept-timeout-ms N]\n"
+      << "       [--max-iterations N] [--schedule-levels N]\n"
+      << "       [--schedule-start N] [--objective-scale N]\n"
+      << "       [--accept-timeout-ms N]\n"
       << "       [--progress-every N] [--ready-file PATH]\n"
       << "       [--discovery-port PORT] [--discovery-token TOKEN]\n"
       << "       [--advertise-host HOST]\n"
@@ -300,12 +409,12 @@ Config parseArgs(int argc, char **argv) {
       config.partition_count = parseInt(require_value(arg), arg);
     } else if (arg == "--max-iterations") {
       config.max_iterations = parseInt(require_value(arg), arg);
-    } else if (arg == "--num-scales") {
-      config.num_scales = parseInt(require_value(arg), arg);
-    } else if (arg == "--initial-step") {
-      config.initial_step_size = parseLong(require_value(arg), arg);
-    } else if (arg == "--capacity-multiplier") {
-      config.capacity_multiplier = parseLong(require_value(arg), arg);
+    } else if (arg == "--schedule-levels" || arg == "--num-scales") {
+      config.schedule_levels = parseInt(require_value(arg), arg);
+    } else if (arg == "--schedule-start" || arg == "--initial-step") {
+      config.schedule_start = parseLong(require_value(arg), arg);
+    } else if (arg == "--objective-scale" || arg == "--capacity-multiplier") {
+      config.objective_scale = parseLong(require_value(arg), arg);
     } else if (arg == "--accept-timeout-ms") {
       config.accept_timeout_ms = parseLong(require_value(arg), arg);
     } else if (arg == "--progress-every") {
@@ -353,7 +462,7 @@ int scaleIntCapacity(int value, long factor, bool saturate_overflow,
                      long *saturation_count) {
   if (wouldOverflowIntScale(value, factor)) {
     if (!saturate_overflow) {
-      throw std::overflow_error("capacity multiplier exceeds int range");
+      throw std::overflow_error("objective scale exceeds int range");
     }
     ++(*saturation_count);
     return value < 0 ? std::numeric_limits<int>::min()
@@ -362,14 +471,14 @@ int scaleIntCapacity(int value, long factor, bool saturate_overflow,
   const long scaled = static_cast<long>(value) * factor;
   if (scaled > std::numeric_limits<int>::max() ||
       scaled < std::numeric_limits<int>::min()) {
-    throw std::overflow_error("capacity multiplier exceeds int range");
+    throw std::overflow_error("objective scale exceeds int range");
   }
   return static_cast<int>(scaled);
 }
 
 void scaleGraph(mcpd3::MinCutGraph *graph, long factor,
                 bool saturate_capacity_overflow,
-                CapacityScaleStats *stats) {
+                ObjectiveScaleStats *stats) {
   if (factor == 1) {
     return;
   }
@@ -406,7 +515,7 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptFixedWorkers(
         listener, std::chrono::milliseconds(config.accept_timeout_ms));
     std::cout << "accepted worker " << worker->hello().worker_name << "\n";
     std::cout.flush();
-    status_state->recordWorker(worker->hello().worker_name);
+    status_state->recordWorker(*worker);
     remote_workers->push_back(worker.get());
     workers.push_back(std::move(worker));
   }
@@ -487,7 +596,7 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptDiscoveredWorkers(
           listener, std::chrono::milliseconds(1));
       std::cout << "accepted worker " << worker->hello().worker_name << "\n";
       std::cout.flush();
-      status_state->recordWorker(worker->hello().worker_name);
+      status_state->recordWorker(*worker);
       remote_workers->push_back(worker.get());
       workers.push_back(std::move(worker));
     }
@@ -604,20 +713,20 @@ void printTiming(const RuntimeTiming &timing,
             << counters.scale_objective_rpc_count << "\n";
 }
 
-void printCapacityScaleStats(const Config &config,
-                             const CapacityScaleStats &stats) {
+void printObjectiveScaleStats(const Config &config,
+                              const ObjectiveScaleStats &stats) {
   const long total_saturation_count =
       stats.arc_saturation_count + stats.terminal_saturation_count;
-  std::cout << "capacity_scale_multiplier " << config.capacity_multiplier
+  std::cout << "initial_objective_scale " << config.objective_scale
             << "\n";
-  std::cout << "capacity_scale_overflow_mode "
+  std::cout << "objective_scale_overflow_mode "
             << (config.saturate_capacity_overflow ? "saturate" : "strict")
             << "\n";
-  std::cout << "capacity_scale_saturation_count "
+  std::cout << "objective_scale_saturation_count "
             << total_saturation_count << "\n";
-  std::cout << "capacity_scale_arc_saturation_count "
+  std::cout << "objective_scale_arc_saturation_count "
             << stats.arc_saturation_count << "\n";
-  std::cout << "capacity_scale_terminal_saturation_count "
+  std::cout << "objective_scale_terminal_saturation_count "
             << stats.terminal_saturation_count << "\n";
 }
 
@@ -638,7 +747,7 @@ void printProgress(
 
   std::cout << "progress"
             << " total_iteration " << record.total_iteration
-            << " scale " << record.scale
+            << " schedule_scale " << record.scale
             << " iteration " << record.iteration
             << " lower_bound " << record.lower_bound
             << " best_lower_bound " << record.best_lower_bound
@@ -651,8 +760,8 @@ void printProgress(
             << record.best_regularized_objective
             << " disagreement_count " << record.disagreement_count
             << " disagreement_norm_sq " << record.disagreement_norm_sq
-            << " step_size " << record.step_size
-            << " effective_step_size " << record.effective_step_size
+            << " schedule_step " << record.step_size
+            << " effective_schedule_step " << record.effective_step_size
             << " regularization_strength "
             << record.regularization_strength
             << " regularization_budget " << record.regularization_budget
@@ -718,26 +827,26 @@ int main(int argc, char **argv) {
                      : mcpd3::read_dimacs(config.dimacs_path);
     timing.read_graph_wall_us = elapsedUs(graph_start);
 
-    CapacityScaleStats capacity_scale_stats;
+    ObjectiveScaleStats objective_scale_stats;
     const auto scale_graph_start = std::chrono::steady_clock::now();
     status_state.setPhase("scaling_graph");
-    scaleGraph(&graph, config.capacity_multiplier,
-               config.saturate_capacity_overflow, &capacity_scale_stats);
+    scaleGraph(&graph, config.objective_scale,
+               config.saturate_capacity_overflow, &objective_scale_stats);
     timing.scale_graph_wall_us = elapsedUs(scale_graph_start);
-    if (capacity_scale_stats.arc_saturation_count +
-            capacity_scale_stats.terminal_saturation_count >
+    if (objective_scale_stats.arc_saturation_count +
+            objective_scale_stats.terminal_saturation_count >
         0) {
       std::cerr
           << "warning: saturated "
-          << capacity_scale_stats.arc_saturation_count +
-                 capacity_scale_stats.terminal_saturation_count
+          << objective_scale_stats.arc_saturation_count +
+                 objective_scale_stats.terminal_saturation_count
           << " capacities while scaling; results use clipped int capacities\n";
     }
 
     const auto partition_start = std::chrono::steady_clock::now();
     status_state.setPhase("partitioning");
     auto packages = makePartitionPackages(
-        config.partition_count, std::move(graph), config.capacity_multiplier);
+        config.partition_count, std::move(graph), config.objective_scale);
     timing.partition_wall_us = elapsedUs(partition_start);
 
     auto listener =
@@ -784,9 +893,9 @@ int main(int argc, char **argv) {
 
     mcpd3::PartitionWorkerCoordinatorOptions solve_options;
     solve_options.max_iteration_count = config.max_iterations;
-    solve_options.num_optimization_scales = config.num_scales;
-    solve_options.initial_step_size = config.initial_step_size;
-    solve_options.objective_scale = config.capacity_multiplier;
+    solve_options.num_optimization_scales = config.schedule_levels;
+    solve_options.initial_step_size = config.schedule_start;
+    solve_options.objective_scale = config.objective_scale;
     solve_options.progress_report_interval = config.progress_every;
     solve_options.progress_callback =
         [&](const mcpd3::PartitionWorkerProgressRecord &record) {
@@ -798,10 +907,12 @@ int main(int argc, char **argv) {
     mcpd3::PartitionWorkerCoordinator coordinator(std::move(packages),
                                                   std::move(workers),
                                                   solve_options);
+    status_state.recordWorkerDetails(remote_workers);
     timing.coordinator_setup_wall_us = elapsedUs(coordinator_setup_start);
     const auto solve_start = std::chrono::steady_clock::now();
     status_state.setPhase("solving");
     const auto result = coordinator.solve();
+    status_state.recordWorkerDetails(remote_workers);
     status_state.recordFinal(result);
     timing.solve_wall_us = elapsedUs(solve_start);
 
@@ -841,7 +952,7 @@ int main(int argc, char **argv) {
               << result.final_regularization_anchor_sink_count << "\n";
     std::cout << "final_regularization_active_sink_count "
               << result.final_regularization_active_sink_count << "\n";
-    printCapacityScaleStats(config, capacity_scale_stats);
+    printObjectiveScaleStats(config, objective_scale_stats);
     const auto stop_start = std::chrono::steady_clock::now();
     for (auto *worker : remote_workers) {
       worker->stop(/*reason=*/0, "coordinator finished");

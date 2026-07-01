@@ -26,6 +26,14 @@ struct TcpPartitionWorkerTimingStats {
   long scale_objective_rpc_count = 0;
 };
 
+struct TcpPartitionWorkerStatusSnapshot {
+  std::string worker_name;
+  std::uint32_t cpu_count = 0;
+  std::uint64_t ram_gb = 0;
+  std::vector<int> partition_ids;
+  TcpPartitionWorkerTimingStats timing;
+};
+
 class TcpPartitionWorker final : public mcpd3::PartitionWorker {
 public:
   TcpPartitionWorker(SocketHandle socket, HelloMessage hello);
@@ -43,11 +51,13 @@ public:
   const TcpPartitionWorkerTimingStats &timingStats() const {
     return timing_stats_;
   }
+  TcpPartitionWorkerStatusSnapshot statusSnapshot() const;
 
 private:
   SocketHandle socket_;
   HelloMessage hello_;
   TcpPartitionWorkerTimingStats timing_stats_;
+  std::vector<int> partition_ids_;
 };
 
 HelloMessage makeDefaultHello(const std::string &worker_name);

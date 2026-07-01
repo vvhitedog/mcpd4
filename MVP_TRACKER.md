@@ -259,28 +259,35 @@ The MVP is complete when:
   - Worker status currently reports phase, worker name, coordinator endpoint,
     loaded partition ids, active round/partition ids, solve counts, batch RPC
     count, worker solve time, and last error.
-- [ ] Expand status snapshots with the full operational field set.
+- [x] Expand status snapshots with the currently available operational field
+  set.
+  - Coordinator status now includes accepted worker resources, partition
+    ownership, regularization diagnostics, per-worker solve/RPC counts, and
+    per-worker solve timing.
+  - Worker status now includes CPU/RAM, temp path, loaded partitions, active
+    round/partition ids, solve counts, batch RPC count, and solve time.
+- [ ] Add transport/memory fields to status snapshots after RPC telemetry
+  exists.
   - Coordinator status should report accepted workers, worker names/resources,
     partition ownership, current solve phase, current iteration/scale state,
     objective-scale state, disagreement counts, lower-bound progress,
     regularization diagnostics, per-worker solve counts, per-worker elapsed
-    compute time, per-worker wait time, and recent errors.
+    compute time, per-worker wait time, bytes sent/received, and recent
+    errors.
   - Worker status should report connection/session identity, assigned
     partitions, currently executing request type, active partition ids, local
     solve counts, local solve time, bytes received/sent, memory footprint, and
     recent errors.
   - Status should remain queryable without attaching a debugger or tailing
     opaque logs.
-- [ ] Standardize terminology across CLI flags, logs, docs, and code.
-  - Use `objective_scale` for the proof/budget capacity multiplier `M`.
-  - Keep `--capacity-multiplier` only as a compatibility alias or remove it
-    before the public API stabilizes.
-  - Rename progress `scale` to `schedule_scale` or `dd_step_scale`, because it
-    is the dual-decomposition step schedule, not the objective scale.
-  - Revisit `--initial-step` plus `--num-scales`: `--num-scales 5` currently
-    means a base-10 schedule such as `10000 -> 1000 -> 100 -> 10 -> 1`, so the
-    CLI should express either the explicit schedule or a start/end policy
-    without redundant or misleading knobs.
+- [x] Standardize product terminology across CLI flags, logs, docs, and tests.
+  - Use `--objective-scale` for the proof/budget multiplier `M`.
+  - Keep `--capacity-multiplier` only as a compatibility alias.
+  - Use `--schedule-start` and `--schedule-levels` for the
+    dual-decomposition schedule.
+  - Keep `--initial-step` and `--num-scales` only as compatibility aliases.
+  - Rename progress fields from ambiguous `scale`/`step_size` to
+    `schedule_scale`/`schedule_step`/`effective_schedule_step`.
 - [ ] Add RPC transfer telemetry and use it to prioritize transport
   optimization.
   - Measure bytes sent/received by message type: partition load, solve batch

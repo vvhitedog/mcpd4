@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -75,6 +76,9 @@ struct WorkerStatusState {
   mutable std::mutex mutex;
   std::string phase = "starting";
   std::string name;
+  std::uint32_t cpu_count = 0;
+  std::uint64_t ram_gb = 0;
+  std::string temp_path = "-";
   std::string coordinator_host = "-";
   std::uint16_t coordinator_port = 0;
   std::uint16_t status_port = 0;
@@ -87,9 +91,12 @@ struct WorkerStatusState {
   std::uint64_t worker_solve_wall_us = 0;
   std::string last_error = "-";
 
-  void setIdentity(const std::string &worker_name) {
+  void setIdentity(const mcpd4::HelloMessage &hello) {
     std::lock_guard<std::mutex> lock(mutex);
-    name = worker_name;
+    name = hello.worker_name;
+    cpu_count = hello.cpu_count;
+    ram_gb = hello.ram_gb;
+    temp_path = hello.temp_path;
   }
 
   void setCoordinator(const std::string &host, std::uint16_t port) {
@@ -151,6 +158,9 @@ struct WorkerStatusState {
     std::ostringstream out;
     out << "role worker"
         << " name " << statusValue(name)
+        << " cpu_count " << cpu_count
+        << " ram_gb " << ram_gb
+        << " temp_path " << statusValue(temp_path)
         << " phase " << phase
         << " coordinator_host " << statusValue(coordinator_host)
         << " coordinator_port " << coordinator_port
@@ -226,7 +236,7 @@ int main(int argc, char **argv) {
 
     WorkerStatusState status_state;
     const auto hello = mcpd4::makeDefaultHello(worker_name);
-    status_state.setIdentity(hello.worker_name);
+    status_state.setIdentity(hello);
     std::unique_ptr<mcpd4::StatusServer> status_server;
     if (status_port != 0) {
       status_server = std::make_unique<mcpd4::StatusServer>(
