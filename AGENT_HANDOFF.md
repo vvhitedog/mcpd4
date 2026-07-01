@@ -32,6 +32,7 @@ Implemented product surface:
 - UDP queryable status plus `mcpd4_status`.
 - Progress/final/status telemetry for solve counts, timings, regularization
   diagnostics, worker ownership, resources, and RPC byte counters.
+- Compact solve-result boundary-label encoding in protocol version `3`.
 - README runbook for build/test, localhost runs, discovery-mode LAN runs, and
   status inspection.
 
@@ -47,20 +48,22 @@ Current transport telemetry checkpoint:
   `rpc_tx_bytes_total=1234`, `rpc_rx_bytes_total=1544`,
   `rpc_partition_load_tx_bytes=250`, `rpc_solve_request_tx_bytes=904`,
   `rpc_solve_result_rx_bytes=1344`.
-- First concrete payload target: compact solve-result boundary labels. The
-  coordinator only uses `constraint_id` and `label` from repeated
-  `ConstraintLabel` records; `global_node_id` and `local_index` are already
-  setup metadata.
+- First concrete payload reduction is complete: solve-result boundary labels
+  now transmit only `constraint_id` and `label`; `global_node_id` and
+  `local_index` remain setup metadata in partition packages.
+- Tiny fixture result traffic dropped from `rpc_solve_result_rx_bytes=1344` to
+  `1232`, saving 8 bytes for each of 14 partition-solve result labels.
 
 Suggested next prompt:
 
 ```text
 We are in /home/matt/software/mcpd3-distributed on branch working.
 Read AGENT_HANDOFF.md current-state, MVP_TRACKER.md, PROGRESS_LOG.md, and
-README.md. Continue RPC transport optimization. Use the existing RPC byte
-telemetry to implement and test a compact solve-result label encoding that
-stops sending per-round global_node_id/local_index when both peers are mcpd4
-protocol-compatible. Preserve correctness tests and update docs/logs.
+README.md. Continue RPC transport optimization. Compact solve-result labels
+are already implemented in protocol version 3, so use the existing byte
+telemetry to evaluate serialization/deserialization timing, compression of
+large one-time partition packages, and any remaining repeated solve payload.
+Preserve correctness tests and update docs/logs.
 ```
 
 ## Repository Roles

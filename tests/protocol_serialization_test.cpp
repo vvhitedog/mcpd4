@@ -59,6 +59,16 @@ void requireLabelEqual(const mcpd3::ConstraintLabel &lhs,
   require(lhs.label == rhs.label, "label value mismatch");
 }
 
+void requireCompactLabelEqual(const mcpd3::ConstraintLabel &lhs,
+                              const mcpd3::ConstraintLabel &rhs) {
+  require(lhs.constraint_id == rhs.constraint_id, "label constraint mismatch");
+  require(lhs.global_node_id == -1,
+          "compact result label should omit global node metadata");
+  require(lhs.local_index == -1,
+          "compact result label should omit local index metadata");
+  require(lhs.label == rhs.label, "label value mismatch");
+}
+
 void requirePackageEqual(const mcpd3::PartitionPackage &lhs,
                          const mcpd3::PartitionPackage &rhs) {
   require(lhs.partition_id == rhs.partition_id, "package partition mismatch");
@@ -269,8 +279,10 @@ void roundTripsSolveRoundResult() {
                               /*local_index=*/2,
                               /*label=*/1});
 
-  const auto decoded = mcpd4::decodeSolveRoundResult(
-      mcpd4::encodeSolveRoundResult(message));
+  const auto encoded = mcpd4::encodeSolveRoundResult(message);
+  require(encoded.size() == 92,
+          "solve result should use compact 8-byte constrained labels");
+  const auto decoded = mcpd4::decodeSolveRoundResult(encoded);
   require(decoded.round_id == message.round_id, "result round mismatch");
   require(decoded.partition_id == message.partition_id,
           "result partition mismatch");
@@ -291,8 +303,8 @@ void roundTripsSolveRoundResult() {
               message.constrained_labels.size(),
           "result label count mismatch");
   for (size_t i = 0; i < message.constrained_labels.size(); ++i) {
-    requireLabelEqual(decoded.constrained_labels[i],
-                      message.constrained_labels[i]);
+    requireCompactLabelEqual(decoded.constrained_labels[i],
+                             message.constrained_labels[i]);
   }
 
   const auto decoded_default_timing =
@@ -340,8 +352,10 @@ void roundTripsSolveRoundBatchResult() {
                               /*label=*/1});
 
   const std::vector<mcpd3::PartitionSolveResult> messages{first, second};
-  const auto decoded = mcpd4::decodeSolveRoundBatchResult(
-      mcpd4::encodeSolveRoundBatchResult(messages));
+  const auto encoded = mcpd4::encodeSolveRoundBatchResult(messages);
+  require(encoded.size() == 152,
+          "batch result should use compact 8-byte constrained labels");
+  const auto decoded = mcpd4::decodeSolveRoundBatchResult(encoded);
   require(decoded.size() == messages.size(), "batch result count mismatch");
   for (size_t i = 0; i < messages.size(); ++i) {
     require(decoded[i].round_id == messages[i].round_id,
@@ -366,8 +380,8 @@ void roundTripsSolveRoundBatchResult() {
                 messages[i].constrained_labels.size(),
             "batch result label count mismatch");
     for (size_t j = 0; j < messages[i].constrained_labels.size(); ++j) {
-      requireLabelEqual(decoded[i].constrained_labels[j],
-                        messages[i].constrained_labels[j]);
+      requireCompactLabelEqual(decoded[i].constrained_labels[j],
+                               messages[i].constrained_labels[j]);
     }
   }
 

@@ -13,7 +13,7 @@
 
 namespace mcpd4 {
 
-constexpr std::uint32_t kProtocolVersion = 2;
+constexpr std::uint32_t kProtocolVersion = 3;
 
 struct RpcByteStats {
   std::uint64_t tx_bytes_total = 0;

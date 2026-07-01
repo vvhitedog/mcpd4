@@ -1239,3 +1239,31 @@
   - `cmake --build build -j`;
   - `ctest --test-dir build --output-on-failure`;
   - local benchmark command listed above.
+
+## 2026-06-30 21:48 PDT
+
+- Implemented the first transport payload reduction:
+  - `SOLVE_ROUND_RESULT` and `SOLVE_ROUND_BATCH_RESULT` now encode each
+    repeated constrained label as `constraint_id` plus `label` only;
+  - `global_node_id` and `local_index` remain in the one-time partition
+    packages and are left unset on decoded result labels;
+  - bumped the mcpd4 worker protocol version to `3` so old/new binaries fail
+    the handshake instead of silently disagreeing on result-frame layout.
+- Added protocol serialization coverage:
+  - single solve-result frames with two labels are now 92 bytes;
+  - batch solve-result frames with two one-label results are now 152 bytes;
+  - decoded compact labels preserve `constraint_id` and `label` and omit
+    setup-only endpoint metadata.
+- Re-ran the same local fixture benchmark:
+  - before compact labels: `rpc_solve_result_rx_bytes=1344`,
+    `rpc_rx_bytes_total=1544`;
+  - after compact labels: `rpc_solve_result_rx_bytes=1232`,
+    `rpc_rx_bytes_total=1432`;
+  - saved 112 bytes on the tiny run, matching 8 bytes saved for each of 14
+    partition-solve result labels.
+- Verified:
+  - `cmake --build build -j`;
+  - `./build/protocol_serialization_test`;
+  - `./build/process_integration_test ./build/mcpd4_coordinator ./build/mcpd4_worker ./build/mcpd4_discovery ./build/mcpd4_status tests/fixtures`;
+  - `ctest --test-dir build --output-on-failure`;
+  - local benchmark command listed in the prior entry.

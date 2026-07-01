@@ -249,16 +249,12 @@ mcpd3::ConstraintEndpointBinding readConstraintEndpoint(Reader *reader) {
 
 void writeConstraintLabel(Writer *writer, const mcpd3::ConstraintLabel &label) {
   writer->writeI32(label.constraint_id);
-  writer->writeI32(label.global_node_id);
-  writer->writeI32(label.local_index);
   writer->writeI32(label.label);
 }
 
 mcpd3::ConstraintLabel readConstraintLabel(Reader *reader) {
   mcpd3::ConstraintLabel label;
   label.constraint_id = reader->readI32();
-  label.global_node_id = reader->readI32();
-  label.local_index = reader->readI32();
   label.label = reader->readI32();
   return label;
 }

@@ -468,6 +468,10 @@ fields:
 - `rpc_ready_rx_bytes`, `rpc_stop_tx_bytes`, and `rpc_error_rx_bytes`: control
   traffic.
 
+Protocol version 3 compacts solve-result boundary labels: result frames send
+only `constraint_id` and `label`; `global_node_id` and `local_index` are
+one-time partition-package metadata.
+
 These fields are useful for detecting stalled workers, partition imbalance,
 and whether transport overhead is dominated by setup packages or repeated
 solve traffic.

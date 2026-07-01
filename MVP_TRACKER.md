@@ -1,6 +1,6 @@
 # mcpd4 MVP Tracker
 
-Last updated: 2026-06-30 21:43 PDT
+Last updated: 2026-06-30 21:48 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -302,11 +302,14 @@ The MVP is complete when:
   - Measure serialization/deserialization time separately from socket I/O and
     worker maxflow compute time.
   - Report payload counts and byte totals per worker and per round batch.
-- [ ] Reduce repeated solve-result payload size.
+- [x] Reduce repeated solve-result payload size.
   - Coordinator currently only uses `constraint_id` and `label` from each
     repeated constrained label; `global_node_id` and `local_index` are already
     known from partition setup.
-  - Evaluate a compact solve-result label encoding before adding compression.
+  - Implemented compact solve-result label encoding and bumped the mcpd4
+    protocol version to `3`.
+  - Tiny fixture result traffic dropped from `rpc_solve_result_rx_bytes=1344`
+    to `1232`, saving 8 bytes for each partition-solve result label.
 - [ ] Evaluate compression and other transport optimizations with telemetry.
   - Use this telemetry to evaluate less wasteful encodings, result deltas,
     compression, smaller label/result payloads, batching boundaries, and
