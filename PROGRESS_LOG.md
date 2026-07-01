@@ -1,5 +1,40 @@
 # Progress Log
 
+## 2026-07-01 01:55 PDT
+
+- Added temporal delta encoding for live TCP solve traffic:
+  - introduced `mcpd4/delta_codec.h` and `src/delta_codec.cpp`;
+  - protocol version is now `5`;
+  - solve requests omit unchanged alpha updates and encode changed alpha
+    values as temporal varint deltas relative to the previous sent value for
+    that partition/constraint;
+  - solve results omit unchanged boundary labels while the coordinator-side
+    decoder reconstructs the full label list required by mcpd3;
+  - temporal baselines reset on partition load and objective-scale promotion;
+  - the existing CSV and progress telemetry counters are unchanged and remain
+    the comparison surface for before/after runs.
+- Added serialization coverage for:
+  - first alpha sync, unchanged-alpha omission, changed-alpha reconstruction,
+    partition reset, and per-partition batch state;
+  - first label sync, unchanged-label reconstruction, changed-label
+    reconstruction, same-size label-id full resync, stale-delta rejection, and
+    large repeated batch shrinkage.
+- Added loopback runtime coverage proving repeated solve requests/results
+  shrink in the actual `TcpPartitionWorker` byte counters while decoded solve
+  results still contain every boundary label.
+- Preserved the existing LAN baseline telemetry under
+  `benchmark_results/adhead-lan-w2-p10-os1000-snappy-20260701-011533.*` for
+  comparison against future delta-enabled runs.
+- Verified:
+  - `cmake --build build -j`;
+  - `./build/protocol_serialization_test`;
+  - `./build/tcp_loopback_test`;
+  - `./build/process_integration_test ./build/mcpd4_coordinator ./build/mcpd4_worker ./build/mcpd4_discovery ./build/mcpd4_status tests/fixtures`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`;
+  - `git diff --check`.
+
 ## 2026-07-01 01:08 PDT
 
 - Added optional raw CSV telemetry for coordinator runs:

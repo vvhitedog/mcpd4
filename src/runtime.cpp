@@ -243,6 +243,7 @@ void TcpPartitionWorker::loadPartition(
                   transfer);
   (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes,
                             compression_);
+  temporal_state_.resetPartition(package.partition_id);
   timing_stats_.load_partition_rpc_wall_us += elapsedUs(start);
   ++timing_stats_.load_partition_rpc_count;
   partition_ids_.push_back(package.partition_id);
@@ -267,7 +268,8 @@ TcpPartitionWorker::resourceEstimate() const {
 mcpd3::PartitionSolveResult TcpPartitionWorker::solveRound(
     const mcpd3::PartitionSolveRequest &request) {
   const auto start = std::chrono::steady_clock::now();
-  const auto request_frame = encodeSolveRoundRequest(request);
+  const auto request_frame =
+      encodeDeltaSolveRoundRequest(request, &temporal_state_);
   FrameTransferStats transfer;
   sendFrameBytes(socket_, request_frame, compression_, &transfer);
   recordFrameSent(&timing_stats_.rpc_bytes,
@@ -283,7 +285,8 @@ mcpd3::PartitionSolveResult TcpPartitionWorker::solveRound(
   if (frame.type != MessageType::SOLVE_ROUND_RESULT) {
     throw std::runtime_error("expected SOLVE_ROUND_RESULT from worker");
   }
-  const auto timed = decodeTimedSolveRoundResult(frame_bytes);
+  const auto timed =
+      decodeDeltaTimedSolveRoundResult(frame_bytes, &temporal_state_);
   timing_stats_.solve_round_rpc_wall_us += elapsedUs(start);
   timing_stats_.solve_round_worker_wall_us += timed.worker_solve_wall_us;
   ++timing_stats_.partition_solve_call_count;
@@ -296,7 +299,8 @@ std::vector<mcpd3::PartitionSolveResult> TcpPartitionWorker::solveRoundBatch(
     return {};
   }
   const auto start = std::chrono::steady_clock::now();
-  const auto request_frame = encodeSolveRoundBatchRequest(requests);
+  const auto request_frame =
+      encodeDeltaSolveRoundBatchRequest(requests, &temporal_state_);
   FrameTransferStats transfer;
   sendFrameBytes(socket_, request_frame, compression_, &transfer);
   recordFrameSent(&timing_stats_.rpc_bytes,
@@ -312,7 +316,8 @@ std::vector<mcpd3::PartitionSolveResult> TcpPartitionWorker::solveRoundBatch(
   if (frame.type != MessageType::SOLVE_ROUND_BATCH_RESULT) {
     throw std::runtime_error("expected SOLVE_ROUND_BATCH_RESULT from worker");
   }
-  const auto timed = decodeTimedSolveRoundBatchResult(frame_bytes);
+  const auto timed =
+      decodeDeltaTimedSolveRoundBatchResult(frame_bytes, &temporal_state_);
   timing_stats_.solve_round_rpc_wall_us += elapsedUs(start);
   timing_stats_.solve_round_worker_wall_us += timed.worker_solve_wall_us;
   timing_stats_.partition_solve_call_count +=
@@ -332,6 +337,7 @@ void TcpPartitionWorker::scaleObjective(long factor) {
                   transfer);
   (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes,
                             compression_);
+  temporal_state_.reset();
   timing_stats_.scale_objective_rpc_wall_us += elapsedUs(start);
   ++timing_stats_.scale_objective_rpc_count;
 }
@@ -412,6 +418,7 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
   }
 
   mcpd3::InProcessPartitionWorker worker;
+  TemporalSolveCodecState temporal_state;
   while (true) {
     FrameTransferStats receive_transfer;
     const auto frame_bytes =
@@ -430,6 +437,7 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
           }
           const auto package = decodePartitionPackage(frame_bytes);
           worker.loadPartition(package);
+          temporal_state.resetPartition(package.partition_id);
           if (status_hooks.on_partition_loaded) {
             status_hooks.on_partition_loaded(package.partition_id);
           }
@@ -445,7 +453,8 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
         break;
       case MessageType::SOLVE_ROUND_REQUEST:
         {
-          const auto request = decodeSolveRoundRequest(frame_bytes);
+          const auto request =
+              decodeDeltaSolveRoundRequest(frame_bytes, &temporal_state);
           if (status_hooks.on_solve_start) {
             status_hooks.on_solve_start(request.round_id,
                                         {request.partition_id});
@@ -457,7 +466,8 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
             status_hooks.on_solve_done(elapsed, 1, false);
           }
           const auto result_frame =
-              encodeSolveRoundResultWithTiming(result, elapsed);
+              encodeDeltaSolveRoundResultWithTiming(result, elapsed,
+                                                    &temporal_state);
           FrameTransferStats transfer;
           sendFrameBytes(socket, result_frame, compression, &transfer);
           if (status_hooks.on_frame_sent) {
@@ -468,7 +478,8 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
         break;
       case MessageType::SOLVE_ROUND_BATCH_REQUEST:
         {
-          const auto requests = decodeSolveRoundBatchRequest(frame_bytes);
+          const auto requests =
+              decodeDeltaSolveRoundBatchRequest(frame_bytes, &temporal_state);
           if (status_hooks.on_solve_start) {
             std::vector<int> partition_ids;
             partition_ids.reserve(requests.size());
@@ -487,7 +498,8 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
                 elapsed, static_cast<long>(results.size()), true);
           }
           const auto result_frame =
-              encodeSolveRoundBatchResultWithTiming(results, elapsed);
+              encodeDeltaSolveRoundBatchResultWithTiming(results, elapsed,
+                                                         &temporal_state);
           FrameTransferStats transfer;
           sendFrameBytes(socket, result_frame, compression, &transfer);
           if (status_hooks.on_frame_sent) {
@@ -503,6 +515,7 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
             status_hooks.on_scale_objective(factor);
           }
           worker.scaleObjective(factor);
+          temporal_state.reset();
           if (status_hooks.on_phase) {
             status_hooks.on_phase("connected");
           }

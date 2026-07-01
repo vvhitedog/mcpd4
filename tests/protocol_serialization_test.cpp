@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <mcpd4/delta_codec.h>
 #include <mcpd4/protocol.h>
 
 namespace {
@@ -419,6 +420,253 @@ void roundTripsSolveRoundBatchResult() {
           "timed batch worker solve timing mismatch");
 }
 
+void deltaSolveRoundRequestTracksTemporalAlphaState() {
+  mcpd4::TemporalSolveCodecState encoder;
+  mcpd4::TemporalSolveCodecState decoder;
+
+  mcpd3::PartitionSolveRequest first;
+  first.round_id = 1;
+  first.partition_id = 4;
+  first.scale = 1000;
+  first.regularization_strength = 10;
+  first.alpha_updates.push_back(mcpd3::AlphaUpdate{
+      /*constraint_id=*/10, /*alpha=*/100, /*last_alpha=*/0,
+      /*alpha_momentum=*/0});
+  first.alpha_updates.push_back(mcpd3::AlphaUpdate{
+      /*constraint_id=*/11, /*alpha=*/-5, /*last_alpha=*/0,
+      /*alpha_momentum=*/0});
+
+  const auto first_encoded =
+      mcpd4::encodeDeltaSolveRoundRequest(first, &encoder);
+  const auto first_decoded =
+      mcpd4::decodeDeltaSolveRoundRequest(first_encoded, &decoder);
+  require(first_decoded.alpha_updates.size() == 2,
+          "first delta request should fully sync alpha values");
+  requireCompactAlphaUpdateEqual(first_decoded.alpha_updates[0],
+                                 first.alpha_updates[0]);
+  requireCompactAlphaUpdateEqual(first_decoded.alpha_updates[1],
+                                 first.alpha_updates[1]);
+
+  auto unchanged = first;
+  unchanged.round_id = 2;
+  const auto unchanged_encoded =
+      mcpd4::encodeDeltaSolveRoundRequest(unchanged, &encoder);
+  const auto unchanged_decoded =
+      mcpd4::decodeDeltaSolveRoundRequest(unchanged_encoded, &decoder);
+  require(unchanged_decoded.alpha_updates.empty(),
+          "unchanged alpha values should be omitted from delta request");
+  require(unchanged_encoded.size() < first_encoded.size(),
+          "unchanged delta request should be smaller than first sync");
+
+  auto changed = first;
+  changed.round_id = 3;
+  changed.alpha_updates[0].alpha = 103;
+  changed.alpha_updates[1].alpha = -9;
+  const auto changed_encoded =
+      mcpd4::encodeDeltaSolveRoundRequest(changed, &encoder);
+  const auto changed_decoded =
+      mcpd4::decodeDeltaSolveRoundRequest(changed_encoded, &decoder);
+  require(changed_decoded.alpha_updates.size() == 2,
+          "changed alpha values should be transmitted");
+  requireCompactAlphaUpdateEqual(changed_decoded.alpha_updates[0],
+                                 changed.alpha_updates[0]);
+  requireCompactAlphaUpdateEqual(changed_decoded.alpha_updates[1],
+                                 changed.alpha_updates[1]);
+  require(changed_encoded.size() <
+              mcpd4::encodeSolveRoundRequest(changed).size(),
+          "small temporal alpha deltas should beat stateless alpha encoding");
+
+  encoder.resetPartition(first.partition_id);
+  decoder.resetPartition(first.partition_id);
+  auto after_reset = changed;
+  after_reset.round_id = 4;
+  const auto reset_decoded = mcpd4::decodeDeltaSolveRoundRequest(
+      mcpd4::encodeDeltaSolveRoundRequest(after_reset, &encoder), &decoder);
+  require(reset_decoded.alpha_updates.size() == 2,
+          "reset partition state should force a fresh alpha sync");
+  requireCompactAlphaUpdateEqual(reset_decoded.alpha_updates[0],
+                                 after_reset.alpha_updates[0]);
+  requireCompactAlphaUpdateEqual(reset_decoded.alpha_updates[1],
+                                 after_reset.alpha_updates[1]);
+}
+
+void deltaSolveRoundBatchRequestKeepsPartitionStateSeparate() {
+  mcpd4::TemporalSolveCodecState encoder;
+  mcpd4::TemporalSolveCodecState decoder;
+
+  mcpd3::PartitionSolveRequest first;
+  first.round_id = 1;
+  first.partition_id = 0;
+  first.scale = 100;
+  first.alpha_updates.push_back(mcpd3::AlphaUpdate{
+      /*constraint_id=*/7, /*alpha=*/10, /*last_alpha=*/0,
+      /*alpha_momentum=*/0});
+
+  auto second = first;
+  second.partition_id = 1;
+  second.alpha_updates[0].alpha = -10;
+
+  const std::vector<mcpd3::PartitionSolveRequest> batch{first, second};
+  const auto decoded_first = mcpd4::decodeDeltaSolveRoundBatchRequest(
+      mcpd4::encodeDeltaSolveRoundBatchRequest(batch, &encoder), &decoder);
+  require(decoded_first.size() == 2,
+          "delta batch request should preserve request count");
+  require(decoded_first[0].alpha_updates[0].alpha == 10,
+          "first partition alpha should decode from its own state");
+  require(decoded_first[1].alpha_updates[0].alpha == -10,
+          "second partition alpha should decode from its own state");
+
+  auto changed_second = second;
+  changed_second.round_id = 2;
+  changed_second.alpha_updates[0].alpha = -7;
+  const std::vector<mcpd3::PartitionSolveRequest> changed_batch{
+      first, changed_second};
+  const auto changed_encoded =
+      mcpd4::encodeDeltaSolveRoundBatchRequest(changed_batch, &encoder);
+  const auto changed_decoded =
+      mcpd4::decodeDeltaSolveRoundBatchRequest(changed_encoded, &decoder);
+  require(changed_decoded[0].alpha_updates.empty(),
+          "unchanged partition in batch should not resend alpha");
+  require(changed_decoded[1].alpha_updates.size() == 1,
+          "changed partition in batch should send only its alpha delta");
+  require(changed_decoded[1].alpha_updates[0].alpha == -7,
+          "changed partition alpha should reconstruct from its own baseline");
+}
+
+void deltaSolveRoundResultReconstructsFullLabels() {
+  mcpd4::TemporalSolveCodecState encoder;
+  mcpd4::TemporalSolveCodecState decoder;
+
+  mcpd3::PartitionSolveResult first;
+  first.round_id = 10;
+  first.partition_id = 3;
+  first.lower_bound = 99;
+  first.regularization_budget = 7;
+  first.regularization_contribution = 5;
+  first.regularization_anchor_sink_count = 2;
+  first.regularization_active_sink_count = 1;
+  first.constrained_labels.push_back(
+      mcpd3::ConstraintLabel{/*constraint_id=*/20,
+                              /*global_node_id=*/100,
+                              /*local_index=*/0,
+                              /*label=*/0});
+  first.constrained_labels.push_back(
+      mcpd3::ConstraintLabel{/*constraint_id=*/21,
+                              /*global_node_id=*/101,
+                              /*local_index=*/1,
+                              /*label=*/1});
+
+  const auto first_encoded =
+      mcpd4::encodeDeltaSolveRoundResultWithTiming(
+          first, /*worker_solve_wall_us=*/42, &encoder);
+  const auto first_decoded =
+      mcpd4::decodeDeltaTimedSolveRoundResult(first_encoded, &decoder);
+  require(first_decoded.worker_solve_wall_us == 42,
+          "delta result should preserve worker timing");
+  require(first_decoded.result.constrained_labels.size() == 2,
+          "first delta result should fully sync labels");
+  requireCompactLabelEqual(first_decoded.result.constrained_labels[0],
+                           first.constrained_labels[0]);
+  requireCompactLabelEqual(first_decoded.result.constrained_labels[1],
+                           first.constrained_labels[1]);
+
+  auto unchanged = first;
+  unchanged.round_id = 11;
+  unchanged.lower_bound = 100;
+  const auto unchanged_encoded =
+      mcpd4::encodeDeltaSolveRoundResultWithTiming(
+          unchanged, /*worker_solve_wall_us=*/43, &encoder);
+  const auto unchanged_decoded =
+      mcpd4::decodeDeltaTimedSolveRoundResult(unchanged_encoded, &decoder);
+  require(unchanged_decoded.result.constrained_labels.size() == 2,
+          "unchanged label delta should reconstruct full label list");
+  requireCompactLabelEqual(unchanged_decoded.result.constrained_labels[0],
+                           unchanged.constrained_labels[0]);
+  requireCompactLabelEqual(unchanged_decoded.result.constrained_labels[1],
+                           unchanged.constrained_labels[1]);
+  require(unchanged_encoded.size() < first_encoded.size(),
+          "unchanged delta result should be smaller than first sync");
+
+  auto changed = first;
+  changed.round_id = 12;
+  changed.constrained_labels[0].label = 1;
+  const auto changed_decoded = mcpd4::decodeDeltaTimedSolveRoundResult(
+      mcpd4::encodeDeltaSolveRoundResultWithTiming(
+          changed, /*worker_solve_wall_us=*/44, &encoder),
+      &decoder);
+  require(changed_decoded.result.constrained_labels.size() == 2,
+          "changed label delta should reconstruct full label list");
+  require(changed_decoded.result.constrained_labels[0].label == 1,
+          "changed label value should be applied to reconstructed result");
+  require(changed_decoded.result.constrained_labels[1].label == 1,
+          "unchanged label value should remain in reconstructed result");
+
+  auto replaced_id = changed;
+  replaced_id.round_id = 13;
+  replaced_id.constrained_labels[0].constraint_id = 22;
+  replaced_id.constrained_labels[0].label = 0;
+  const auto replaced_decoded = mcpd4::decodeDeltaTimedSolveRoundResult(
+      mcpd4::encodeDeltaSolveRoundResultWithTiming(
+          replaced_id, /*worker_solve_wall_us=*/45, &encoder),
+      &decoder);
+  require(replaced_decoded.result.constrained_labels.size() == 2,
+          "same-size label id replacement should full sync exact label set");
+  require(replaced_decoded.result.constrained_labels[0].constraint_id == 22,
+          "label id replacement should not keep stale first constraint id");
+  require(replaced_decoded.result.constrained_labels[1].constraint_id == 21,
+          "label id replacement should preserve remaining constraint id");
+
+  mcpd4::TemporalSolveCodecState stale_decoder;
+  requireThrows(
+      [&] {
+        (void)mcpd4::decodeDeltaTimedSolveRoundResult(unchanged_encoded,
+                                                      &stale_decoder);
+      },
+      "label deltas should require an earlier full label sync");
+}
+
+void deltaSolveRoundBatchResultShrinksRepeatedLabels() {
+  mcpd4::TemporalSolveCodecState encoder;
+  mcpd4::TemporalSolveCodecState decoder;
+
+  mcpd3::PartitionSolveResult result;
+  result.round_id = 20;
+  result.partition_id = 6;
+  result.lower_bound = 50;
+  for (int i = 0; i < 128; ++i) {
+    result.constrained_labels.push_back(
+        mcpd3::ConstraintLabel{/*constraint_id=*/1000 + i,
+                                /*global_node_id=*/2000 + i,
+                                /*local_index=*/i,
+                                /*label=*/i % 2});
+  }
+
+  const std::vector<mcpd3::PartitionSolveResult> first_batch{result};
+  const auto first_encoded =
+      mcpd4::encodeDeltaSolveRoundBatchResultWithTiming(
+          first_batch, /*worker_solve_wall_us=*/10, &encoder);
+  const auto first_decoded =
+      mcpd4::decodeDeltaTimedSolveRoundBatchResult(first_encoded, &decoder);
+  require(first_decoded.results.size() == 1,
+          "delta batch result should preserve result count");
+  require(first_decoded.results[0].constrained_labels.size() == 128,
+          "first batch result should sync all labels");
+
+  result.round_id = 21;
+  result.lower_bound = 51;
+  const std::vector<mcpd3::PartitionSolveResult> repeated_batch{result};
+  const auto repeated_encoded =
+      mcpd4::encodeDeltaSolveRoundBatchResultWithTiming(
+          repeated_batch, /*worker_solve_wall_us=*/11, &encoder);
+  const auto repeated_decoded =
+      mcpd4::decodeDeltaTimedSolveRoundBatchResult(repeated_encoded,
+                                                   &decoder);
+  require(repeated_decoded.results[0].constrained_labels.size() == 128,
+          "repeated batch delta should reconstruct all labels");
+  require(repeated_encoded.size() * 2 < first_encoded.size(),
+          "repeated label batch should be less than half the first sync size");
+}
+
 void roundTripsScaleObjective() {
   mcpd4::ScaleObjectiveMessage message;
   message.factor = 10;
@@ -516,6 +764,10 @@ int main() {
     roundTripsSolveRoundBatchRequest();
     roundTripsSolveRoundResult();
     roundTripsSolveRoundBatchResult();
+    deltaSolveRoundRequestTracksTemporalAlphaState();
+    deltaSolveRoundBatchRequestKeepsPartitionStateSeparate();
+    deltaSolveRoundResultReconstructsFullLabels();
+    deltaSolveRoundBatchResultShrinksRepeatedLabels();
     roundTripsScaleObjective();
     roundTripsAlphaUpdate();
     roundTripsStop();

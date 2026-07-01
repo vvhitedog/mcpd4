@@ -71,7 +71,7 @@ Current transport telemetry checkpoint:
   `PATH.iterations.csv`, `PATH.worker_iterations.csv`, and
   `PATH.worker_rpc_metrics.csv` can be used for post-run histograms without
   enabling noisy stdout progress.
-- Current tiny local fixture run:
+- Current tiny local fixture run before temporal deltas:
   `rpc_tx_bytes_total=1090`, `rpc_rx_bytes_total=1432`,
   `rpc_partition_load_tx_bytes=250`, `rpc_solve_request_tx_bytes=760`,
   `rpc_solve_result_rx_bytes=1232`.
@@ -83,6 +83,15 @@ Current transport telemetry checkpoint:
     metadata in partition packages;
   - workers derive `last_alpha` from their local previous alpha, and
     `alpha_momentum` remains coordinator-owned.
+- Temporal delta encoding is now implemented on live TCP solve frames:
+  - protocol version is `5`;
+  - repeated solve requests omit unchanged alpha updates and encode changed
+    alphas as varint deltas against each partition/constraint baseline;
+  - repeated solve results omit unchanged labels and decode back into full
+    label lists before mcpd3 sees them;
+  - baselines reset on partition load and objective-scale promotion;
+  - existing progress/status/CSV telemetry is unchanged and remains the A/B
+    comparison surface.
 - Tiny fixture result traffic dropped from `rpc_solve_result_rx_bytes=1344` to
   `1232`, saving 8 bytes for each of 14 partition-solve result labels.
 - Tiny fixture request traffic dropped from `rpc_solve_request_tx_bytes=904`
@@ -101,12 +110,14 @@ We are in /home/matt/software/mcpd3-distributed on branch working.
 Read AGENT_HANDOFF.md current-state, MVP_TRACKER.md, PROGRESS_LOG.md, and
 README.md. Continue RPC transport optimization. Compact solve-result labels,
 compact alpha updates, and optional Snappy transport compression are already
-implemented. Use --telemetry-csv-prefix on large LAN runs to analyze
-per-iteration worker solve time, RPC overhead, logical-vs-wire byte deltas,
-compression timing, and payload shape. Evaluate serialization/deserialization
-timing, bit-packed boundary labels, result deltas, compression thresholds, and
-any remaining repeated solve payload. Preserve correctness tests and update
-docs/logs.
+implemented. Temporal delta encoding for live TCP solve requests/results is
+also implemented in protocol version 5. Use --telemetry-csv-prefix on large
+LAN runs to compare the existing adhead baseline against delta-enabled runs
+and analyze per-iteration worker solve time, RPC overhead, logical-vs-wire byte
+deltas, compression timing, and payload shape. Evaluate
+serialization/deserialization timing, bit-packed labels, compression
+thresholds, and any remaining repeated solve payload. Preserve correctness
+tests and update docs/logs.
 ```
 
 ## Repository Roles

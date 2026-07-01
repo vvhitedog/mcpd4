@@ -350,10 +350,20 @@ The MVP is complete when:
     make total wire bytes slightly worse; larger LAN cases should compare
     `rpc_*_wire_bytes`, compression/decompression time, RPC overhead, and wall
     time.
+- [x] Add temporal delta encoding for repeated solve traffic.
+  - Protocol version `5` keeps the logical solver API unchanged while live TCP
+    solve frames maintain per-partition temporal baselines.
+  - Repeated solve requests omit unchanged alpha updates and encode changed
+    alphas as varint temporal deltas.
+  - Repeated solve results omit unchanged boundary labels and decode back to
+    full label lists before mcpd3 sees them.
+  - Runtime loopback tests assert actual byte-counter shrinkage for repeated
+    solve requests/results and full reconstructed labels.
 - [ ] Continue transport optimization with telemetry.
-  - Evaluate less wasteful encodings, result deltas, bit-packed labels,
-    compression thresholds, batching boundaries, and unnecessary resend/copy
-    paths on real larger runs.
+  - Compare the existing LAN baseline telemetry against a delta-enabled LAN
+    run, then evaluate bit-packed labels, compression thresholds, batching
+    boundaries, serialization/deserialization timing, and unnecessary
+    resend/copy paths on real larger runs.
 - [ ] Improve worker participation and waiting policy.
   - Document that the coordinator host can also volunteer compute by starting a
     local `mcpd4_worker` and including it in `--workers`.

@@ -24,6 +24,7 @@ if (MCPD4_ENABLE_SNAPPY)
 endif ()
 
 add_library(mcpd4_protocol
+  src/delta_codec.cpp
   src/protocol.cpp)
 target_include_directories(mcpd4_protocol PUBLIC
   include

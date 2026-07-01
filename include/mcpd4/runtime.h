@@ -8,12 +8,13 @@
 #include <vector>
 
 #include <decomp/partition_worker.h>
+#include <mcpd4/delta_codec.h>
 #include <mcpd4/protocol.h>
 #include <mcpd4/tcp.h>
 
 namespace mcpd4 {
 
-constexpr std::uint32_t kProtocolVersion = 4;
+constexpr std::uint32_t kProtocolVersion = 5;
 constexpr std::uint64_t kFeatureSnappyCompression = 1ULL << 0;
 
 struct RpcByteStats {
@@ -93,6 +94,7 @@ private:
   TransportCompression compression_ = TransportCompression::NONE;
   TcpPartitionWorkerTimingStats timing_stats_;
   std::vector<int> partition_ids_;
+  TemporalSolveCodecState temporal_state_;
 };
 
 HelloMessage makeDefaultHello(const std::string &worker_name);

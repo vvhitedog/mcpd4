@@ -586,10 +586,17 @@ Useful fields:
 - `rpc_ready_rx_bytes`, `rpc_stop_tx_bytes`, and `rpc_error_rx_bytes`: control
   traffic.
 
-Protocol version 4 compacts the hot-path boundary exchange:
+Protocol version 5 compacts the hot-path boundary exchange and then applies
+stateful temporal deltas on live TCP solve frames:
 
 - solve-result boundary labels send only `constraint_id` and `label`;
 - alpha updates send only `constraint_id` and current `alpha`.
+- after the first sync for a partition, solve requests omit unchanged alpha
+  updates and encode changed alphas as temporal varint deltas;
+- after the first result for a partition, solve results omit unchanged
+  boundary labels and the coordinator reconstructs the full label set before
+  handing the result to the mcpd3 coordinator;
+- temporal baselines reset on partition load and objective-scale promotion.
 
 `global_node_id`, `local_index`, and initial alpha state are one-time
 partition-package metadata. `last_alpha` is maintained by each worker from its

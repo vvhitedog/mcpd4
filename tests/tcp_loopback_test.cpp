@@ -136,6 +136,29 @@ std::vector<mcpd3::PartitionPackage> makeTieBreakRegularizationPackages() {
   return {source, target};
 }
 
+mcpd3::PartitionPackage makeManyBoundaryLabelsPackage(int partition_id,
+                                                      int count) {
+  mcpd3::PartitionPackage package;
+  package.partition_id = partition_id;
+  package.local_node_count = count;
+  package.terminal_capacities.reserve(count);
+  package.local_to_global.reserve(count);
+  package.constraint_endpoints.reserve(count);
+  for (int i = 0; i < count; ++i) {
+    package.terminal_capacities.push_back((i % 2 == 0) ? -3 : 3);
+    package.local_to_global.push_back(10000 + i);
+    package.constraint_endpoints.push_back(
+        mcpd3::ConstraintEndpointBinding{/*constraint_id=*/20000 + i,
+                                          /*global_node_id=*/10000 + i,
+                                          /*local_index=*/i,
+                                          /*is_source=*/true,
+                                          /*alpha=*/0,
+                                          /*last_alpha=*/0,
+                                          /*alpha_momentum=*/0});
+  }
+  return package;
+}
+
 std::unique_ptr<mcpd4::TcpPartitionWorker> startRemoteWorker(
     mcpd4::SocketHandle *listener, WorkerClientThread **client,
     const std::string &worker_name,
@@ -385,6 +408,70 @@ void remoteWorkerSolvesExplicitBatch() {
   }
 }
 
+void remoteWorkerDeltaEncodingReducesRepeatedSolveBytes() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(&listener, &client, "delta-worker");
+  try {
+    constexpr int kBoundaryLabelCount = 128;
+    const auto package =
+        makeManyBoundaryLabelsPackage(/*partition_id=*/5, kBoundaryLabelCount);
+    worker->loadPartition(package);
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = package.partition_id;
+    request.scale = 1000;
+    request.regularization_strength = 0;
+    request.alpha_updates.reserve(package.constraint_endpoints.size());
+    for (const auto &endpoint : package.constraint_endpoints) {
+      request.alpha_updates.push_back(mcpd3::AlphaUpdate{
+          /*constraint_id=*/endpoint.constraint_id,
+          /*alpha=*/1,
+          /*last_alpha=*/0,
+          /*alpha_momentum=*/0});
+    }
+
+    const auto before = worker->timingStats().rpc_bytes;
+    const auto first = worker->solveRound(request);
+    const auto after_first = worker->timingStats().rpc_bytes;
+    request.round_id = 2;
+    const auto second = worker->solveRound(request);
+    const auto after_second = worker->timingStats().rpc_bytes;
+
+    require(first.constrained_labels.size() == kBoundaryLabelCount,
+            "first delta loopback solve should return all labels");
+    require(second.constrained_labels.size() == kBoundaryLabelCount,
+            "second delta loopback solve should reconstruct all labels");
+    for (int i = 0; i < kBoundaryLabelCount; ++i) {
+      require(first.constrained_labels[i].constraint_id ==
+                  second.constrained_labels[i].constraint_id,
+              "delta loopback should preserve label order");
+      require(first.constrained_labels[i].label ==
+                  second.constrained_labels[i].label,
+              "delta loopback should preserve label values");
+    }
+
+    const auto first_request_bytes =
+        after_first.solve_request_tx_bytes - before.solve_request_tx_bytes;
+    const auto second_request_bytes = after_second.solve_request_tx_bytes -
+                                      after_first.solve_request_tx_bytes;
+    const auto first_result_bytes =
+        after_first.solve_result_rx_bytes - before.solve_result_rx_bytes;
+    const auto second_result_bytes = after_second.solve_result_rx_bytes -
+                                     after_first.solve_result_rx_bytes;
+    require(second_request_bytes * 2 < first_request_bytes,
+            "repeated solve request should omit unchanged alpha payload");
+    require(second_result_bytes * 2 < first_result_bytes,
+            "repeated solve result should omit unchanged label payload");
+
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
 void remoteWorkerUsesSnappyCompression() {
   if (!mcpd4::snappyCompressionAvailable()) {
     return;
@@ -530,6 +617,7 @@ int main() {
     remoteWorkerReportsErrorsAsExceptions();
     remoteWorkerScalesLoadedObjective();
     remoteWorkerSolvesExplicitBatch();
+    remoteWorkerDeltaEncodingReducesRepeatedSolveBytes();
     remoteWorkerUsesSnappyCompression();
     remoteWorkerCoordinatorSolvesRegularizedAgreement();
     remoteWorkerCoordinatorPromotesObjectiveScale();
