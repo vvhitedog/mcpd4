@@ -4,7 +4,7 @@ This document is the starting point for a new Codex/agent session in this
 repository. It deliberately condenses the previous experimental context so the
 new agent does not need the full chat history.
 
-## Current State: 2026-06-30 22:46 PDT
+## Current State: 2026-06-30 23:57 PDT
 
 This file began as the original distributed-MVP plan. The historical sections
 below are useful background, but the implementation is far past the original
@@ -33,6 +33,10 @@ Implemented product surface:
 - UDP queryable status plus `mcpd4_status`.
 - Progress/final/status telemetry for solve counts, timings, regularization
   diagnostics, worker ownership, resources, and RPC byte counters.
+- Coordinator status includes live algorithm segment timing in `segments`:
+  started segments report elapsed time; completed segments report final
+  elapsed time and stats; running segments report ETA/remaining time when a
+  meaningful progress denominator exists.
 - Compact solve-result boundary-label and alpha-update encoding in protocol
   version `4`.
 - Optional Snappy RPC compression via `--rpc-compression snappy` on both
@@ -53,6 +57,12 @@ Current transport telemetry checkpoint:
 - Worker status exposes transmitted/received totals plus partition-load,
   solve-request, solve-result, ready, stop, and error byte categories, with
   matching wire/timing compression counters.
+- Coordinator status starts before graph reading when `--status-port` is set
+  and includes `segments` records for `read_graph`, `scale_graph`,
+  `partitioning`, `transport_setup`, `accept_workers`,
+  `coordinator_setup`, `solve`, and `stop_workers`.
+- Solve segment progress is updated whenever status is enabled, even when
+  stdout progress streaming is disabled.
 - Current tiny local fixture run:
   `rpc_tx_bytes_total=1090`, `rpc_rx_bytes_total=1432`,
   `rpc_partition_load_tx_bytes=250`, `rpc_solve_request_tx_bytes=760`,

@@ -1,5 +1,45 @@
 # Progress Log
 
+## 2026-06-30 23:57 PDT
+
+- Added live coordinator algorithm segment tracking to the UDP status
+  endpoint.
+- Coordinator status now includes a `segments` field containing started
+  logical algorithm segments:
+  - `read_graph`;
+  - `scale_graph`;
+  - `partitioning`;
+  - `transport_setup`;
+  - `accept_workers`;
+  - `coordinator_setup`;
+  - `solve`;
+  - `stop_workers`.
+- Each segment reports:
+  - `state=running|done`;
+  - `elapsed_us`;
+  - `eta_remaining_us` for running segments;
+  - progress counters when a meaningful denominator exists;
+  - segment-specific stats such as node/arc counts, saturation counts,
+    worker accept progress, iteration progress, final solve status, and stop
+    reason.
+- Status server startup now happens before graph reading when
+  `--status-port` is provided, so long graph reads and partitioning can be
+  queried too.
+- Solve status updates are now decoupled from `--progress-every`: when status
+  is enabled, the coordinator records every progress callback for live status
+  ETA, while stdout progress still honors `--progress-every`.
+- Process integration coverage now queries a live discovery-mode coordinator
+  and verifies:
+  - completed `read_graph`, `scale_graph`, `partitioning`, and
+    `transport_setup` segments;
+  - running `accept_workers` with ETA/remaining field and discovery progress;
+  - not-yet-started `solve` segment is skipped.
+- Verified:
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`.
+
 ## 2026-06-30 22:46 PDT
 
 - Added optional Snappy RPC compression as a product transport feature:

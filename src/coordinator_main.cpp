@@ -114,6 +114,8 @@ std::string joinInts(const std::vector<int> &values) {
   return joined;
 }
 
+std::string boolString(bool value) { return value ? "1" : "0"; }
+
 void addRpcByteStats(mcpd4::RpcByteStats *total,
                      const mcpd4::RpcByteStats &stats) {
   total->tx_bytes_total += stats.tx_bytes_total;
@@ -145,6 +147,18 @@ void addRpcByteStats(mcpd4::RpcByteStats *total,
 }
 
 struct CoordinatorStatusState {
+  struct SegmentState {
+    std::string name;
+    bool done = false;
+    std::chrono::steady_clock::time_point started_at;
+    std::uint64_t elapsed_us = 0;
+    bool has_progress = false;
+    long progress_current = 0;
+    long progress_total = 0;
+    bool external_wait = false;
+    std::string stats;
+  };
+
   mutable std::mutex mutex;
   std::string phase = "starting";
   std::uint16_t tcp_port = 0;
@@ -180,6 +194,8 @@ struct CoordinatorStatusState {
   std::vector<std::string> worker_resources;
   std::vector<std::string> partition_ownership;
   std::vector<std::string> worker_details;
+  std::vector<SegmentState> segments;
+  long solve_iteration_budget = 0;
 
   void initialize(const Config &config) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -189,6 +205,9 @@ struct CoordinatorStatusState {
     initial_objective_scale = config.objective_scale;
     rpc_compression =
         mcpd4::transportCompressionName(config.rpc_compression);
+    solve_iteration_budget =
+        static_cast<long>(config.max_iterations) *
+        static_cast<long>(config.schedule_levels);
   }
 
   void setPhase(const std::string &value) {
@@ -202,6 +221,49 @@ struct CoordinatorStatusState {
     tcp_port = tcp;
     discovery_port = discovery;
     status_port = status;
+  }
+
+  void beginSegment(const std::string &name, const std::string &phase_value,
+                    const std::string &stats = "",
+                    long progress_current = 0, long progress_total = 0,
+                    bool external_wait = false) {
+    std::lock_guard<std::mutex> lock(mutex);
+    phase = phase_value;
+    auto &segment = segmentForNameLocked(name);
+    segment.done = false;
+    segment.started_at = std::chrono::steady_clock::now();
+    segment.elapsed_us = 0;
+    segment.has_progress = progress_total > 0;
+    segment.progress_current = progress_current;
+    segment.progress_total = progress_total;
+    segment.external_wait = external_wait;
+    segment.stats = statusValue(stats);
+  }
+
+  void updateSegmentProgress(const std::string &name, long progress_current,
+                             long progress_total,
+                             const std::string &stats = "",
+                             bool external_wait = false) {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto &segment = segmentForNameLocked(name);
+    segment.has_progress = progress_total > 0;
+    segment.progress_current = progress_current;
+    segment.progress_total = progress_total;
+    segment.external_wait = external_wait;
+    if (!stats.empty()) {
+      segment.stats = statusValue(stats);
+    }
+  }
+
+  void finishSegment(const std::string &name, const std::string &stats = "") {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto &segment = segmentForNameLocked(name);
+    segment.done = true;
+    segment.elapsed_us = elapsedUs(segment.started_at);
+    segment.external_wait = false;
+    if (!stats.empty()) {
+      segment.stats = statusValue(stats);
+    }
   }
 
   void recordWorker(const mcpd4::TcpPartitionWorker &worker) {
@@ -301,6 +363,7 @@ struct CoordinatorStatusState {
     partition_solve_call_count_total = partition_solves;
     solve_batch_rpc_count_total = batch_rpcs;
     rpc_bytes = rpc_totals;
+    updateSolveSegmentLocked(record);
     worker_details.clear();
     for (const auto *worker : remote_workers) {
       const auto snapshot = worker->statusSnapshot();
@@ -346,6 +409,16 @@ struct CoordinatorStatusState {
         result.final_regularization_anchor_sink_count;
     regularization_active_sink_count =
         result.final_regularization_active_sink_count;
+    finishSegmentLocked(
+        "solve",
+        "status=" + std::to_string(static_cast<int>(result.status)) +
+            ":stop_reason=" +
+            std::to_string(static_cast<int>(result.stop_reason)) +
+            ":total_iterations=" +
+            std::to_string(result.total_iterations) +
+            ":final_disagreement_count=" +
+            std::to_string(result.final_disagreement_count) +
+            ":objective_scale=" + std::to_string(result.scale));
   }
 
   std::string snapshot() const {
@@ -411,11 +484,126 @@ struct CoordinatorStatusState {
         << " rpc_ready_rx_bytes " << rpc_bytes.ready_rx_bytes
         << " rpc_stop_tx_bytes " << rpc_bytes.stop_tx_bytes
         << " rpc_error_rx_bytes " << rpc_bytes.error_rx_bytes
+        << " segments " << segmentSummaryLocked()
         << " worker_names " << joinStatusValues(worker_names)
         << " worker_resources " << joinStatusValues(worker_resources)
         << " partition_ownership " << joinStatusValues(partition_ownership)
         << " worker_details " << joinStatusValues(worker_details);
     return out.str();
+  }
+
+private:
+  SegmentState &segmentForNameLocked(const std::string &name) {
+    for (auto &segment : segments) {
+      if (segment.name == name) {
+        return segment;
+      }
+    }
+    SegmentState segment;
+    segment.name = name;
+    segment.started_at = std::chrono::steady_clock::now();
+    segments.push_back(std::move(segment));
+    return segments.back();
+  }
+
+  void finishSegmentLocked(const std::string &name,
+                           const std::string &stats = "") {
+    auto &segment = segmentForNameLocked(name);
+    segment.done = true;
+    segment.elapsed_us = elapsedUs(segment.started_at);
+    segment.external_wait = false;
+    if (!stats.empty()) {
+      segment.stats = statusValue(stats);
+    }
+  }
+
+  void updateSolveSegmentLocked(
+      const mcpd3::PartitionWorkerProgressRecord &record) {
+    auto &segment = segmentForNameLocked("solve");
+    segment.has_progress = solve_iteration_budget > 0;
+    segment.progress_current = record.total_iteration;
+    segment.progress_total = solve_iteration_budget;
+    segment.stats =
+        statusValue("total_iteration=" +
+                    std::to_string(record.total_iteration) +
+                    ":max_total_iterations=" +
+                    std::to_string(solve_iteration_budget) +
+                    ":scale_iteration=" +
+                    std::to_string(record.iteration + 1) +
+                    ":scale_max_iteration=" +
+                    std::to_string(record.max_iteration) +
+                    ":schedule_scale=" +
+                    std::to_string(record.scale) +
+                    ":schedule_step=" +
+                    std::to_string(record.step_size) +
+                    ":disagreement_count=" +
+                    std::to_string(record.disagreement_count));
+  }
+
+  std::string etaRemainingUsLocked(const SegmentState &segment,
+                                   std::uint64_t elapsed_us) const {
+    if (segment.done) {
+      return "0";
+    }
+    if (segment.external_wait) {
+      return "unknown";
+    }
+    if (!segment.has_progress || segment.progress_total <= 0 ||
+        segment.progress_current <= 0) {
+      return "unknown";
+    }
+    if (segment.progress_current >= segment.progress_total) {
+      return "0";
+    }
+    const long remaining_units =
+        segment.progress_total - segment.progress_current;
+    const long double elapsed = static_cast<long double>(elapsed_us);
+    const long double estimate =
+        elapsed * static_cast<long double>(remaining_units) /
+        static_cast<long double>(segment.progress_current);
+    if (estimate >=
+        static_cast<long double>(std::numeric_limits<std::uint64_t>::max())) {
+      return "unknown";
+    }
+    return std::to_string(static_cast<std::uint64_t>(estimate));
+  }
+
+  std::string segmentSummaryLocked() const {
+    if (segments.empty()) {
+      return "-";
+    }
+    const auto now = std::chrono::steady_clock::now();
+    std::string summary;
+    for (const auto &segment : segments) {
+      if (!summary.empty()) {
+        summary += ",";
+      }
+      const auto segment_elapsed_us =
+          segment.done
+              ? segment.elapsed_us
+              : static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        now - segment.started_at)
+                        .count());
+      summary += segment.name;
+      summary += ":state=";
+      summary += segment.done ? "done" : "running";
+      summary += ":elapsed_us=" + std::to_string(segment_elapsed_us);
+      if (!segment.done) {
+        summary += ":eta_remaining_us=" +
+                   etaRemainingUsLocked(segment, segment_elapsed_us);
+      }
+      if (segment.has_progress) {
+        summary += ":progress_current=" +
+                   std::to_string(segment.progress_current);
+        summary += ":progress_total=" +
+                   std::to_string(segment.progress_total);
+      }
+      if (!segment.stats.empty()) {
+        summary += ":" + segment.stats;
+      }
+    }
+    return summary;
   }
 };
 
@@ -604,7 +792,10 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptFixedWorkers(
     std::vector<mcpd4::TcpPartitionWorker *> *remote_workers,
     CoordinatorStatusState *status_state) {
   std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
-  status_state->setPhase("accepting_workers");
+  status_state->beginSegment(
+      "accept_workers", "accepting_workers",
+      "mode=fixed:accepted=0:target=" + std::to_string(config.worker_count),
+      0, config.worker_count);
   for (int i = 0; i < config.worker_count; ++i) {
     auto worker = mcpd4::acceptTcpPartitionWorker(
         listener, std::chrono::milliseconds(config.accept_timeout_ms),
@@ -614,6 +805,11 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptFixedWorkers(
     status_state->recordWorker(*worker);
     remote_workers->push_back(worker.get());
     workers.push_back(std::move(worker));
+    status_state->updateSegmentProgress(
+        "accept_workers", static_cast<long>(workers.size()),
+        config.worker_count,
+        "mode=fixed:accepted=" + std::to_string(workers.size()) +
+            ":target=" + std::to_string(config.worker_count));
   }
   return workers;
 }
@@ -625,7 +821,11 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptDiscoveredWorkers(
     CoordinatorStatusState *status_state) {
   std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
   bool close_requested = false;
-  status_state->setPhase("discovery_waiting");
+  status_state->beginSegment(
+      "accept_workers", "discovery_waiting",
+      "mode=discovery:accepted=0:target=" +
+          std::to_string(config.worker_count) + ":close_requested=0",
+      0, config.worker_count, true);
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::milliseconds(config.accept_timeout_ms);
 
@@ -679,6 +879,13 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptDiscoveredWorkers(
                                                 discovery_info());
       } else if (request.type == mcpd4::DiscoveryRequestType::CLOSE) {
         close_requested = true;
+        status_state->updateSegmentProgress(
+            "accept_workers", static_cast<long>(workers.size()),
+            config.worker_count,
+            "mode=discovery:accepted=" + std::to_string(workers.size()) +
+                ":target=" + std::to_string(config.worker_count) +
+                ":close_requested=1",
+            false);
         mcpd4::DiscoveryCloseResult result;
         result.accepted = true;
         result.worker_count = static_cast<int>(workers.size());
@@ -696,6 +903,13 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptDiscoveredWorkers(
       status_state->recordWorker(*worker);
       remote_workers->push_back(worker.get());
       workers.push_back(std::move(worker));
+      status_state->updateSegmentProgress(
+          "accept_workers", static_cast<long>(workers.size()),
+          config.worker_count,
+          "mode=discovery:accepted=" + std::to_string(workers.size()) +
+              ":target=" + std::to_string(config.worker_count) +
+              ":close_requested=" + boolString(close_requested),
+          !close_requested);
     }
   }
 
@@ -1011,20 +1225,46 @@ int main(int argc, char **argv) {
     const Config config = parseArgs(argc, argv);
     CoordinatorStatusState status_state;
     status_state.initialize(config);
+    std::unique_ptr<mcpd4::StatusServer> status_server;
+    if (config.status_port != 0) {
+      status_server = std::make_unique<mcpd4::StatusServer>(
+          config.bind_host, config.status_port, config.status_token,
+          [&status_state] { return status_state.snapshot(); });
+      status_state.setPorts(/*tcp=*/0, /*discovery=*/0,
+                            status_server->port());
+      std::cout << "status_listening port " << status_server->port() << "\n";
+      std::cout.flush();
+    }
 
     auto graph_start = std::chrono::steady_clock::now();
-    status_state.setPhase("reading_graph");
+    status_state.beginSegment(
+        "read_graph", "reading_graph",
+        "directed=" + boolString(config.directed));
     auto graph = config.directed
                      ? mcpd3::read_dimacs_directed_streaming(config.dimacs_path)
                      : mcpd3::read_dimacs(config.dimacs_path);
     timing.read_graph_wall_us = elapsedUs(graph_start);
+    status_state.finishSegment(
+        "read_graph",
+        "directed=" + boolString(config.directed) +
+            ":nodes=" + std::to_string(graph.nnode) +
+            ":arcs=" + std::to_string(graph.narc));
 
     ObjectiveScaleStats objective_scale_stats;
     const auto scale_graph_start = std::chrono::steady_clock::now();
-    status_state.setPhase("scaling_graph");
+    status_state.beginSegment(
+        "scale_graph", "scaling_graph",
+        "objective_scale=" + std::to_string(config.objective_scale));
     scaleGraph(&graph, config.objective_scale,
                config.saturate_capacity_overflow, &objective_scale_stats);
     timing.scale_graph_wall_us = elapsedUs(scale_graph_start);
+    status_state.finishSegment(
+        "scale_graph",
+        "objective_scale=" + std::to_string(config.objective_scale) +
+            ":arc_saturations=" +
+            std::to_string(objective_scale_stats.arc_saturation_count) +
+            ":terminal_saturations=" +
+            std::to_string(objective_scale_stats.terminal_saturation_count));
     if (objective_scale_stats.arc_saturation_count +
             objective_scale_stats.terminal_saturation_count >
         0) {
@@ -1036,11 +1276,31 @@ int main(int argc, char **argv) {
     }
 
     const auto partition_start = std::chrono::steady_clock::now();
-    status_state.setPhase("partitioning");
+    status_state.beginSegment(
+        "partitioning", "partitioning",
+        "requested_partitions=" + std::to_string(config.partition_count));
     auto packages = makePartitionPackages(
         config.partition_count, std::move(graph), config.objective_scale);
     timing.partition_wall_us = elapsedUs(partition_start);
+    long package_boundary_count = 0;
+    long package_node_count = 0;
+    long package_arc_count = 0;
+    for (const auto &package : packages) {
+      package_boundary_count +=
+          static_cast<long>(package.constraint_endpoints.size());
+      package_node_count += package.local_node_count;
+      package_arc_count += static_cast<long>(package.arcs.size());
+    }
+    status_state.finishSegment(
+        "partitioning",
+        "requested_partitions=" + std::to_string(config.partition_count) +
+            ":packages=" + std::to_string(packages.size()) +
+            ":package_nodes=" + std::to_string(package_node_count) +
+            ":package_arcs=" + std::to_string(package_arc_count) +
+            ":boundary_endpoints=" +
+            std::to_string(package_boundary_count));
 
+    status_state.beginSegment("transport_setup", "transport_setup");
     auto listener =
         mcpd4::listenTcp(config.bind_host, config.port);
     std::cout << "listening " << config.bind_host << ":"
@@ -1055,19 +1315,20 @@ int main(int argc, char **argv) {
                 << " min_worker_count " << config.worker_count << "\n";
       std::cout.flush();
     }
-    std::unique_ptr<mcpd4::StatusServer> status_server;
-    if (config.status_port != 0) {
-      status_server = std::make_unique<mcpd4::StatusServer>(
-          config.bind_host, config.status_port, config.status_token,
-          [&status_state] { return status_state.snapshot(); });
-      std::cout << "status_listening port " << status_server->port() << "\n";
-      std::cout.flush();
-    }
     status_state.setPorts(mcpd4::localPort(listener),
                           discovery_socket.valid()
                               ? mcpd4::localPort(discovery_socket)
                               : 0,
                           status_server ? status_server->port() : 0);
+    status_state.finishSegment(
+        "transport_setup",
+        "tcp_port=" + std::to_string(mcpd4::localPort(listener)) +
+            ":discovery_port=" +
+            std::to_string(discovery_socket.valid()
+                               ? mcpd4::localPort(discovery_socket)
+                               : 0) +
+            ":status_port=" +
+            std::to_string(status_server ? status_server->port() : 0));
     writeReadyFile(config.ready_file, mcpd4::localPort(listener));
 
     std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
@@ -1082,27 +1343,50 @@ int main(int argc, char **argv) {
                                         &remote_workers, &status_state);
     }
     timing.accept_workers_wall_us = elapsedUs(accept_start);
+    status_state.finishSegment(
+        "accept_workers",
+        "accepted=" + std::to_string(remote_workers.size()) +
+            ":target=" + std::to_string(config.worker_count) +
+            ":mode=" + (config.discovery_port == 0 ? std::string("fixed")
+                                                    : std::string("discovery")));
 
     mcpd3::PartitionWorkerCoordinatorOptions solve_options;
     solve_options.max_iteration_count = config.max_iterations;
     solve_options.num_optimization_scales = config.schedule_levels;
     solve_options.initial_step_size = config.schedule_start;
     solve_options.objective_scale = config.objective_scale;
-    solve_options.progress_report_interval = config.progress_every;
+    solve_options.progress_report_interval =
+        config.status_port != 0 ? 1 : config.progress_every;
     solve_options.progress_callback =
         [&](const mcpd3::PartitionWorkerProgressRecord &record) {
           status_state.recordProgress(record, remote_workers);
-          printProgress(record, remote_workers);
+          if (config.progress_every > 0 &&
+              record.total_iteration % config.progress_every == 0) {
+            printProgress(record, remote_workers);
+          }
         };
     const auto coordinator_setup_start = std::chrono::steady_clock::now();
-    status_state.setPhase("coordinator_setup");
+    status_state.beginSegment(
+        "coordinator_setup", "coordinator_setup",
+        "packages=" + std::to_string(packages.size()) +
+            ":workers=" + std::to_string(remote_workers.size()));
     mcpd3::PartitionWorkerCoordinator coordinator(std::move(packages),
                                                   std::move(workers),
                                                   solve_options);
     status_state.recordWorkerDetails(remote_workers);
     timing.coordinator_setup_wall_us = elapsedUs(coordinator_setup_start);
+    status_state.finishSegment(
+        "coordinator_setup",
+        "assigned_partitions=" + std::to_string(config.partition_count) +
+            ":active_workers=" + std::to_string(remote_workers.size()));
     const auto solve_start = std::chrono::steady_clock::now();
-    status_state.setPhase("solving");
+    const long solve_iteration_budget =
+        static_cast<long>(config.max_iterations) *
+        static_cast<long>(config.schedule_levels);
+    status_state.beginSegment(
+        "solve", "solving",
+        "max_total_iterations=" + std::to_string(solve_iteration_budget),
+        0, solve_iteration_budget);
     const auto result = coordinator.solve();
     status_state.recordWorkerDetails(remote_workers);
     status_state.recordFinal(result);
@@ -1145,11 +1429,24 @@ int main(int argc, char **argv) {
     std::cout << "final_regularization_active_sink_count "
               << result.final_regularization_active_sink_count << "\n";
     printObjectiveScaleStats(config, objective_scale_stats);
+    status_state.beginSegment(
+        "stop_workers", "stopping_workers",
+        "workers=" + std::to_string(remote_workers.size()), 0,
+        static_cast<long>(remote_workers.size()));
     const auto stop_start = std::chrono::steady_clock::now();
+    long stopped_workers = 0;
     for (auto *worker : remote_workers) {
       worker->stop(/*reason=*/0, "coordinator finished");
+      ++stopped_workers;
+      status_state.updateSegmentProgress(
+          "stop_workers", stopped_workers,
+          static_cast<long>(remote_workers.size()),
+          "workers=" + std::to_string(remote_workers.size()));
     }
     timing.stop_workers_wall_us = elapsedUs(stop_start);
+    status_state.finishSegment(
+        "stop_workers",
+        "workers=" + std::to_string(remote_workers.size()));
     timing.total_wall_us = elapsedUs(total_start);
     printTiming(timing, remote_workers);
   } catch (const std::exception &e) {

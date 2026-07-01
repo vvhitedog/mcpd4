@@ -1,6 +1,6 @@
 # mcpd4 MVP Tracker
 
-Last updated: 2026-06-30 22:46 PDT
+Last updated: 2026-06-30 23:57 PDT
 
 This document tracks the path from the current network-free checkpoint to a
 usable localhost distributed MVP. Chronological implementation notes live in
@@ -289,6 +289,18 @@ The MVP is complete when:
     solve time, bytes received/sent, and last error.
   - Status remains queryable without attaching a debugger or tailing opaque
     logs.
+- [x] Add coordinator algorithm segment timing and live ETA status.
+  - Coordinator status now reports a `segments` field for started logical
+    phases: graph read, graph scaling, partitioning, transport setup, worker
+    acceptance/discovery, coordinator setup, solve, and worker stop.
+  - Completed segments include elapsed time and phase-specific stats.
+  - Running segments include elapsed time and estimated remaining time when a
+    useful denominator exists; external waits such as discovery close report
+    unknown ETA.
+  - Status startup happens before graph reading so long reads and partitioning
+    are queryable.
+  - Solve ETA updates are available whenever status is enabled, even if
+    stdout progress streaming is disabled.
 - [ ] Add memory footprint fields to status snapshots.
 - [x] Standardize product terminology across CLI flags, logs, docs, and tests.
   - Use `--objective-scale` for the proof/budget multiplier `M`.

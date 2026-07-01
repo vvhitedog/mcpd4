@@ -949,6 +949,44 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
                 std::string::npos,
             "coordinator status should report received RPC bytes\n" +
                 coordinator_status_output);
+    require(coordinator_status_output.find(" segments ") !=
+                std::string::npos,
+            "coordinator status should include segment timing summary\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find(
+                "read_graph:state=done:elapsed_us=") != std::string::npos,
+            "coordinator status should report completed graph read segment\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find(
+                "scale_graph:state=done:elapsed_us=") != std::string::npos,
+            "coordinator status should report completed graph scale segment\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find(
+                "partitioning:state=done:elapsed_us=") != std::string::npos,
+            "coordinator status should report completed partition segment\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find(
+                "transport_setup:state=done:elapsed_us=") != std::string::npos,
+            "coordinator status should report completed transport setup "
+            "segment\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find(
+                "accept_workers:state=running:elapsed_us=") !=
+                std::string::npos,
+            "coordinator status should report running worker accept segment\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find("eta_remaining_us=") !=
+                std::string::npos,
+            "running segment status should include ETA/remaining field\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find("mode=discovery:accepted=1:target=1") !=
+                std::string::npos,
+            "accept segment should report discovery worker progress\n" +
+                coordinator_status_output);
+    require(coordinator_status_output.find("solve:state=") ==
+                std::string::npos,
+            "coordinator status should skip not-yet-started solve segment\n" +
+                coordinator_status_output);
 
     std::string worker_status_output;
     while (std::chrono::steady_clock::now() < status_deadline) {

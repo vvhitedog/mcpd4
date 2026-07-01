@@ -475,11 +475,26 @@ Coordinator status includes the current phase, accepted worker count, worker
 names/resources, partition ownership, partition count, objective scale, latest
 schedule/iteration state, lower-bound fields, regularization diagnostics,
 disagreement count, aggregate solve/RPC counts, RPC byte/wire counters,
-compression timing, and per-worker solve timing.
+compression timing, per-worker solve timing, and a `segments` timing summary.
 Worker status includes its phase, CPU/RAM, temp path, coordinator endpoint,
 loaded partition ids, current round/partition ids, solve counts, batch RPC
 count, worker solve wall time, RPC byte/wire counters, compression timing, and
 last error.
+
+The coordinator `segments` field is a comma-separated summary of algorithm
+segments that have started. Not-yet-started segments are omitted. Each record
+uses this shape:
+
+```text
+name:state=running|done:elapsed_us=N[:eta_remaining_us=N|unknown][:progress_current=N:progress_total=N][:stats...]
+```
+
+Useful segment names are `read_graph`, `scale_graph`, `partitioning`,
+`transport_setup`, `accept_workers`, `coordinator_setup`, `solve`, and
+`stop_workers`. Completed segments report total elapsed time and segment
+stats. Running segments report elapsed time and, when a useful progress
+denominator exists, estimated remaining time. Discovery waits that depend on
+an operator close command report `eta_remaining_us=unknown`.
 
 ## Interpreting Output
 
