@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -43,8 +44,11 @@ struct Config {
   long schedule_start = 10000;
   long objective_scale = 1;
   int progress_every = 0;
+  std::string streaming_dir;
+  std::uint64_t streaming_cache_bytes = 0;
   bool directed = false;
   bool saturate_capacity_overflow = false;
+  bool streaming_workers = false;
 };
 
 std::uint64_t elapsedUs(std::chrono::steady_clock::time_point start) {
@@ -84,6 +88,15 @@ int parseInt(const std::string &value, const std::string &name) {
   return static_cast<int>(parsed);
 }
 
+std::uint64_t parsePositiveU64(const std::string &value,
+                               const std::string &name) {
+  const auto parsed = std::stoull(value);
+  if (parsed == 0) {
+    throw std::runtime_error(name + " must be positive");
+  }
+  return parsed;
+}
+
 Config parseArgs(int argc, char **argv) {
   Config config;
   if (argc < 2) {
@@ -93,6 +106,8 @@ Config parseArgs(int argc, char **argv) {
         "[--schedule-levels N] [--schedule-start N] "
         "[--objective-scale N] [--progress-every N] "
         "[--stop-after read|scale|partition|setup] "
+        "[--streaming-workers] [--streaming-dir DIR] "
+        "[--streaming-cache-bytes N] "
         "[--saturate-capacity-overflow]");
   }
   config.dimacs_path = argv[1];
@@ -121,6 +136,14 @@ Config parseArgs(int argc, char **argv) {
       config.objective_scale = parseLong(requireValue(arg), arg);
     } else if (arg == "--progress-every") {
       config.progress_every = parseInt(requireValue(arg), arg);
+    } else if (arg == "--streaming-workers" ||
+               arg == "--streaming-partitions") {
+      config.streaming_workers = true;
+    } else if (arg == "--streaming-dir") {
+      config.streaming_dir = requireValue(arg);
+    } else if (arg == "--streaming-cache-bytes") {
+      config.streaming_cache_bytes =
+          parsePositiveU64(requireValue(arg), arg);
     } else if (arg == "--directed") {
       config.directed = true;
     } else if (arg == "--saturate-capacity-overflow" ||
@@ -217,6 +240,12 @@ void printConfig(const Config &config) {
   std::cout << "max_iterations " << config.max_iterations << "\n";
   std::cout << "objective_scale " << config.objective_scale << "\n";
   std::cout << "progress_every " << config.progress_every << "\n";
+  std::cout << "streaming_workers " << config.streaming_workers << "\n";
+  std::cout << "streaming_dir "
+            << (config.streaming_dir.empty() ? "auto" : config.streaming_dir)
+            << "\n";
+  std::cout << "streaming_cache_bytes " << config.streaming_cache_bytes
+            << "\n";
   std::cout << "directed " << config.directed << "\n";
   std::cout << "saturate_capacity_overflow "
             << config.saturate_capacity_overflow << "\n";
@@ -393,11 +422,25 @@ void printPackageStats(const std::vector<mcpd3::PartitionPackage> &packages) {
 }
 
 std::vector<std::unique_ptr<mcpd3::PartitionWorker>>
-makeInProcessWorkers(int worker_count) {
+makeInProcessWorkers(const Config &config) {
   std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
-  workers.reserve(worker_count);
-  for (int i = 0; i < worker_count; ++i) {
-    workers.push_back(std::make_unique<mcpd3::InProcessPartitionWorker>());
+  workers.reserve(config.worker_count);
+  for (int i = 0; i < config.worker_count; ++i) {
+    if (config.streaming_workers) {
+      mcpd3::StreamingPartitionWorker::Options options;
+      options.resident_byte_limit = config.streaming_cache_bytes;
+      if (!config.streaming_dir.empty()) {
+        options.storage_directory =
+            (std::filesystem::path(config.streaming_dir) /
+             ("worker_" + std::to_string(i)))
+                .string();
+        options.remove_storage_on_destroy = false;
+      }
+      workers.push_back(
+          std::make_unique<mcpd3::StreamingPartitionWorker>(std::move(options)));
+    } else {
+      workers.push_back(std::make_unique<mcpd3::InProcessPartitionWorker>());
+    }
   }
   return workers;
 }
@@ -555,7 +598,7 @@ int main(int argc, char **argv) {
       solve_options.progress_callback = printProgress;
     }
 
-    auto workers = makeInProcessWorkers(config.worker_count);
+    auto workers = makeInProcessWorkers(config);
     const auto setup_start = std::chrono::steady_clock::now();
     mcpd3::PartitionWorkerCoordinator coordinator(std::move(packages),
                                                   std::move(workers),

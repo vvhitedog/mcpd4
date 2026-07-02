@@ -1,5 +1,17 @@
 # Failed Approaches And Taboos
 
+## 2026-07-02 00:53 PDT
+
+- Do not evict and cold-reload a regularized partition while preserving only
+  capacities and alpha metadata. The scaled-epsilon regularizer anchors from
+  the previous local cut labels; losing that label vector made a forced
+  streaming reload disagree with the resident in-process worker on
+  regularization budget diagnostics.
+- Do not count disk-backed streaming workers as a warm-solver performance
+  optimization yet. The current implementation preserves correctness-critical
+  alpha and label state across eviction, but it intentionally rebuilds BK
+  solver/residual state on reload.
+
 ## 2026-06-29 00:24:08 PDT
 
 - Do not add TCP, MPI, or serialization before the in-process partition-worker

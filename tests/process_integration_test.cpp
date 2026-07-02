@@ -909,6 +909,24 @@ void snappyCompressionProcessMatchesReference(
               compressed.output);
 }
 
+void streamingWorkerProcessMatchesReference(
+    const std::string &coordinator_bin, const std::string &worker_bin,
+    const std::string &fixture_dir) {
+  const CaseConfig config{/*name=*/"streaming",
+                          /*fixture=*/"random_small.max",
+                          /*worker_count=*/2,
+                          /*partition_count=*/3,
+                          /*max_iterations=*/80,
+                          /*schedule_levels=*/5,
+                          /*schedule_start=*/10000,
+                          /*objective_scale=*/10000};
+  const auto reference = runInProcessReference(fixture_dir, config);
+  const auto streaming = runDistributedProcess(
+      coordinator_bin, worker_bin, fixture_dir, config, {},
+      {"--streaming-partitions", "--streaming-cache-bytes", "1"});
+  requireEqual(streaming.summary, reference, "streaming");
+}
+
 void discoveryModeAcceptsDiscoveredWorkersAndClose(
     const std::string &coordinator_bin, const std::string &worker_bin,
     const std::string &discovery_bin, const std::string &status_bin,
@@ -1214,6 +1232,8 @@ int main(int argc, char **argv) {
     telemetryCsvIsWritten(coordinator_bin, worker_bin, fixture_dir);
     snappyCompressionProcessMatchesReference(coordinator_bin, worker_bin,
                                              fixture_dir);
+    streamingWorkerProcessMatchesReference(coordinator_bin, worker_bin,
+                                           fixture_dir);
     discoveryModeAcceptsDiscoveredWorkersAndClose(
         coordinator_bin, worker_bin, discovery_bin, status_bin, fixture_dir);
   } catch (const std::exception &e) {

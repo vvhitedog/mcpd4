@@ -1,5 +1,42 @@
 # Progress Log
 
+## 2026-07-02 00:53 PDT
+
+- Implemented explicit disk-backed streaming partition workers:
+  - `mcpd3::StreamingPartitionWorker` stores partition arc/capacity payloads
+    on disk and materializes `InProcessPartitionWorker` solvers on demand;
+  - supports an approximate resident-byte cache limit with LRU eviction;
+  - keeps alpha metadata in memory and persists the previous local min-cut
+    labels across eviction so scaled-epsilon regularization anchors match the
+    resident worker path;
+  - supports objective-scale promotion by scaling both resident solvers and
+    evicted disk payloads.
+- Added mcpd3 regression coverage:
+  - streaming worker matches an in-process worker across forced eviction,
+    alpha updates, and regularized solves;
+  - evicted disk payloads scale correctly before a later reload.
+- Exposed streaming storage in mcpd4:
+  - worker CLI flags: `--streaming-partitions`, `--streaming-dir DIR`, and
+    `--streaming-cache-bytes N`;
+  - in-process benchmark flags: `--streaming-workers`/`--streaming-partitions`,
+    `--streaming-dir DIR`, and `--streaming-cache-bytes N`;
+  - worker UDP status reports storage mode, streaming directory, and cache
+    bytes.
+- Added process integration coverage that runs real `mcpd4_worker` processes
+  with `--streaming-partitions --streaming-cache-bytes 1` and compares the
+  result against the in-memory worker reference.
+- Added README documentation for out-of-core worker storage with concrete
+  process-worker and in-process benchmark examples.
+- Verified:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`;
+  - streaming CLI smoke:
+    `MCPD3_PARTITIONER=basic build/mcpd4_inprocess_benchmark tests/fixtures/random_small.max --directed --workers 1 --partitions 2 --objective-scale 10 --schedule-start 10 --schedule-levels 2 --max-iterations 50 --streaming-workers --streaming-cache-bytes 1 --progress-every 25`.
+
 ## 2026-07-01 16:37 PDT
 
 - Added `mcpd4_inprocess_benchmark`, a local benchmark executable that uses

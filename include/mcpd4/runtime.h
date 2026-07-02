@@ -117,11 +117,18 @@ struct WorkerRuntimeStatusHooks {
   std::function<void(const std::string &message)> on_error;
 };
 
+struct WorkerRuntimeOptions {
+  bool streaming_partitions = false;
+  std::string streaming_directory;
+  std::uint64_t streaming_resident_bytes = 0;
+};
+
 void runWorkerClient(const std::string &host, std::uint16_t port,
                      const HelloMessage &hello,
                      const WorkerRuntimeStatusHooks &status_hooks = {},
                      TransportCompression compression =
-                         TransportCompression::NONE);
+                         TransportCompression::NONE,
+                     WorkerRuntimeOptions runtime_options = {});
 
 std::unique_ptr<TcpPartitionWorker> acceptTcpPartitionWorker(
     SocketHandle *listener, std::chrono::milliseconds timeout,

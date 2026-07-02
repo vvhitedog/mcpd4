@@ -393,7 +393,8 @@ HelloMessage makeDefaultHello(const std::string &worker_name) {
 void runWorkerClient(const std::string &host, std::uint16_t port,
                      const HelloMessage &hello,
                      const WorkerRuntimeStatusHooks &status_hooks,
-                     TransportCompression compression) {
+                     TransportCompression compression,
+                     WorkerRuntimeOptions runtime_options) {
   validateHello(hello);
   if (compression == TransportCompression::SNAPPY) {
     if (!snappyCompressionAvailable()) {
@@ -419,7 +420,16 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
     status_hooks.on_phase("connected");
   }
 
-  mcpd3::InProcessPartitionWorker worker;
+  std::unique_ptr<mcpd3::PartitionWorker> worker;
+  if (runtime_options.streaming_partitions) {
+    mcpd3::StreamingPartitionWorker::Options options;
+    options.storage_directory = runtime_options.streaming_directory;
+    options.resident_byte_limit = runtime_options.streaming_resident_bytes;
+    worker = std::make_unique<mcpd3::StreamingPartitionWorker>(
+        std::move(options));
+  } else {
+    worker = std::make_unique<mcpd3::InProcessPartitionWorker>();
+  }
   TemporalSolveCodecState temporal_state;
   while (true) {
     FrameTransferStats receive_transfer;
@@ -437,11 +447,12 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
           if (status_hooks.on_phase) {
             status_hooks.on_phase("loading_partition");
           }
-          const auto package = decodePartitionPackage(frame_bytes);
-          worker.loadPartition(package);
-          temporal_state.resetPartition(package.partition_id);
+          auto package = decodePartitionPackage(frame_bytes);
+          const int partition_id = package.partition_id;
+          worker->loadPartition(std::move(package));
+          temporal_state.resetPartition(partition_id);
           if (status_hooks.on_partition_loaded) {
-            status_hooks.on_partition_loaded(package.partition_id);
+            status_hooks.on_partition_loaded(partition_id);
           }
           if (status_hooks.on_phase) {
             status_hooks.on_phase("connected");
@@ -462,7 +473,7 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
                                         {request.partition_id});
           }
           const auto start = std::chrono::steady_clock::now();
-          const auto result = worker.solveRound(request);
+          const auto result = worker->solveRound(request);
           const auto elapsed = elapsedUs(start);
           if (status_hooks.on_solve_done) {
             status_hooks.on_solve_done(elapsed, 1, false);
@@ -493,7 +504,7 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
             status_hooks.on_solve_start(round_id, partition_ids);
           }
           const auto start = std::chrono::steady_clock::now();
-          const auto results = worker.solveRoundBatch(requests);
+          const auto results = worker->solveRoundBatch(requests);
           const auto elapsed = elapsedUs(start);
           if (status_hooks.on_solve_done) {
             status_hooks.on_solve_done(
@@ -517,8 +528,8 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
             status_hooks.on_scale_objective(
                 message.factor, message.saturate_capacity_overflow);
           }
-          worker.scaleObjective(message.factor,
-                                message.saturate_capacity_overflow);
+          worker->scaleObjective(message.factor,
+                                 message.saturate_capacity_overflow);
           temporal_state.reset();
           if (status_hooks.on_phase) {
             status_hooks.on_phase("connected");

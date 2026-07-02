@@ -115,6 +115,49 @@ partition-package export by default. Use it to measure the best native local
 solver separately from distributed RPC, worker assignment, and wire-format
 choices.
 
+## Out-Of-Core Worker Storage
+
+Workers normally keep every assigned partition solver resident in memory. For
+large graphs, enable disk-backed streaming storage on workers so nonresident
+partition payloads are kept on local disk and only a bounded set of BK solver
+instances is materialized at once.
+
+Use this on each process-level worker:
+
+```bash
+./build/mcpd4_worker 10.0.0.10 50051 \
+  --name worker-a \
+  --streaming-partitions \
+  --streaming-dir /fast-disk/mcpd4-worker-a \
+  --streaming-cache-bytes 4000000000
+```
+
+Use the same mode in the local in-process benchmark:
+
+```bash
+MCPD3_PARTITIONER=basic \
+./build/mcpd4_inprocess_benchmark /data/adhead.n26c100.max \
+  --directed \
+  --workers 1 \
+  --partitions 48 \
+  --objective-scale 2000 \
+  --schedule-start 10000 \
+  --schedule-levels 5 \
+  --max-iterations 10000 \
+  --streaming-workers \
+  --streaming-dir /fast-disk/mcpd4-stream \
+  --streaming-cache-bytes 4000000000
+```
+
+`--streaming-cache-bytes 0` means no explicit resident-byte limit. A positive
+limit is approximate and based on BK array plus solver-vector estimates; one
+oversized partition is still allowed to load when the cache is otherwise empty.
+The streaming worker preserves alpha state and the previous local cut labels
+across eviction, which is required by the current scaled-epsilon
+regularization. It does not preserve warm BK residual graph state, so the
+first product goal is correctness and reduced memory pressure rather than
+maximum local runtime.
+
 ## Quick Localhost Run
 
 Use the helper script for the simplest end-to-end distributed smoke test. It
@@ -461,6 +504,8 @@ usage: mcpd4_worker HOST PORT [--name NAME]
        [--discovery-timeout-ms N] [--name NAME]
        [--status-port PORT] [--status-token TOKEN]
        [--rpc-compression none|snappy]
+       [--streaming-partitions] [--streaming-dir DIR]
+       [--streaming-cache-bytes N]
 ```
 
 - `HOST`: coordinator host or IP.
@@ -477,6 +522,12 @@ usage: mcpd4_worker HOST PORT [--name NAME]
   `mcpd4`.
 - `--rpc-compression none|snappy`: transport compression mode. Must match the
   coordinator's setting.
+- `--streaming-partitions`: keep partition payloads on disk and materialize
+  assigned solvers on demand.
+- `--streaming-dir DIR`: directory for disk-backed partition payloads. If
+  omitted, the worker uses a temporary directory it owns.
+- `--streaming-cache-bytes N`: approximate maximum resident solver bytes for
+  materialized partitions. `0` disables eviction.
 - `--name NAME`: optional worker name used in logs and progress output.
 
 Workers receive all partition data from the coordinator after connecting. They
@@ -517,9 +568,9 @@ schedule/iteration state, lower-bound fields, regularization diagnostics,
 disagreement count, aggregate solve/RPC counts, RPC byte/wire counters,
 compression timing, per-worker solve timing, and a `segments` timing summary.
 Worker status includes its phase, CPU/RAM, temp path, coordinator endpoint,
-loaded partition ids, current round/partition ids, solve counts, batch RPC
-count, worker solve wall time, RPC byte/wire counters, compression timing, and
-last error.
+worker storage mode, streaming directory/cache settings, loaded partition ids,
+current round/partition ids, solve counts, batch RPC count, worker solve wall
+time, RPC byte/wire counters, compression timing, and last error.
 
 The coordinator `segments` field is a comma-separated summary of algorithm
 segments that have started. Not-yet-started segments are omitted. Each record

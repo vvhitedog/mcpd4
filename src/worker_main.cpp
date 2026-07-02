@@ -35,12 +35,23 @@ void usage(const char *argv0) {
       << "       [--discovery-token TOKEN] [--discovery-timeout-ms N]"
          " [--name NAME]\n"
       << "       [--status-port PORT] [--status-token TOKEN]\n"
-      << "       [--rpc-compression none|snappy]\n";
+      << "       [--rpc-compression none|snappy]\n"
+      << "       [--streaming-partitions] [--streaming-dir DIR]\n"
+      << "       [--streaming-cache-bytes N]\n";
 }
 
 long parsePositiveLong(const std::string &value, const std::string &name) {
   const long parsed = std::stol(value);
   if (parsed <= 0) {
+    throw std::runtime_error(name + " must be positive");
+  }
+  return parsed;
+}
+
+std::uint64_t parsePositiveU64(const std::string &value,
+                               const std::string &name) {
+  const auto parsed = std::stoull(value);
+  if (parsed == 0) {
     throw std::runtime_error(name + " must be positive");
   }
   return parsed;
@@ -83,6 +94,9 @@ struct WorkerStatusState {
   std::string coordinator_host = "-";
   std::uint16_t coordinator_port = 0;
   std::string rpc_compression = "none";
+  std::string worker_storage_mode = "memory";
+  std::string streaming_dir = "-";
+  std::uint64_t streaming_cache_bytes = 0;
   std::uint16_t status_port = 0;
   long loaded_partition_count = 0;
   std::vector<int> partition_ids;
@@ -116,6 +130,14 @@ struct WorkerStatusState {
   void setCompression(mcpd4::TransportCompression compression) {
     std::lock_guard<std::mutex> lock(mutex);
     rpc_compression = mcpd4::transportCompressionName(compression);
+  }
+
+  void setStorageMode(bool streaming, const std::string &directory,
+                      std::uint64_t cache_bytes) {
+    std::lock_guard<std::mutex> lock(mutex);
+    worker_storage_mode = streaming ? "streaming" : "memory";
+    streaming_dir = directory.empty() ? "-" : directory;
+    streaming_cache_bytes = cache_bytes;
   }
 
   void setPhase(const std::string &value) {
@@ -249,6 +271,9 @@ struct WorkerStatusState {
         << " coordinator_host " << statusValue(coordinator_host)
         << " coordinator_port " << coordinator_port
         << " rpc_compression " << rpc_compression
+        << " worker_storage_mode " << worker_storage_mode
+        << " streaming_dir " << statusValue(streaming_dir)
+        << " streaming_cache_bytes " << streaming_cache_bytes
         << " status_port " << status_port
         << " loaded_partition_count " << loaded_partition_count
         << " partition_ids " << joinInts(partition_ids)
@@ -311,6 +336,9 @@ int main(int argc, char **argv) {
     std::string status_token = mcpd4::kDefaultStatusToken;
     mcpd4::TransportCompression rpc_compression =
         mcpd4::TransportCompression::NONE;
+    bool streaming_partitions = false;
+    std::string streaming_dir;
+    std::uint64_t streaming_cache_bytes = 0;
 
     int arg_index = 1;
     if (std::string(argv[arg_index]) == "--discover") {
@@ -345,6 +373,13 @@ int main(int argc, char **argv) {
       } else if (arg == "--rpc-compression" && i + 1 < argc) {
         rpc_compression =
             mcpd4::parseTransportCompression(argv[++i]);
+      } else if (arg == "--streaming-partitions") {
+        streaming_partitions = true;
+      } else if (arg == "--streaming-dir" && i + 1 < argc) {
+        streaming_dir = argv[++i];
+      } else if (arg == "--streaming-cache-bytes" && i + 1 < argc) {
+        streaming_cache_bytes =
+            parsePositiveU64(argv[++i], "--streaming-cache-bytes");
       } else {
         usage(argv[0]);
         return EXIT_FAILURE;
@@ -364,6 +399,8 @@ int main(int argc, char **argv) {
     }
     status_state.setIdentity(hello);
     status_state.setCompression(rpc_compression);
+    status_state.setStorageMode(streaming_partitions, streaming_dir,
+                                streaming_cache_bytes);
     std::unique_ptr<mcpd4::StatusServer> status_server;
     if (status_port != 0) {
       status_server = std::make_unique<mcpd4::StatusServer>(
@@ -425,7 +462,12 @@ int main(int argc, char **argv) {
       status_state.recordError(message);
     };
 
-    mcpd4::runWorkerClient(host, port, hello, hooks, rpc_compression);
+    mcpd4::WorkerRuntimeOptions runtime_options;
+    runtime_options.streaming_partitions = streaming_partitions;
+    runtime_options.streaming_directory = streaming_dir;
+    runtime_options.streaming_resident_bytes = streaming_cache_bytes;
+    mcpd4::runWorkerClient(host, port, hello, hooks, rpc_compression,
+                           runtime_options);
   } catch (const std::exception &e) {
     std::cerr << "mcpd4_worker failed: " << e.what() << "\n";
     return EXIT_FAILURE;
