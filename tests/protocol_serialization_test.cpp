@@ -670,9 +670,13 @@ void deltaSolveRoundBatchResultShrinksRepeatedLabels() {
 void roundTripsScaleObjective() {
   mcpd4::ScaleObjectiveMessage message;
   message.factor = 10;
+  message.saturate_capacity_overflow = true;
   const auto decoded = mcpd4::decodeScaleObjective(
       mcpd4::encodeScaleObjective(message));
   require(decoded.factor == message.factor, "scale objective factor mismatch");
+  require(decoded.saturate_capacity_overflow ==
+              message.saturate_capacity_overflow,
+          "scale objective saturation flag mismatch");
 }
 
 void roundTripsAlphaUpdate() {

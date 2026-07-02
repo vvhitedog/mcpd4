@@ -14,7 +14,7 @@
 
 namespace mcpd4 {
 
-constexpr std::uint32_t kProtocolVersion = 5;
+constexpr std::uint32_t kProtocolVersion = 6;
 constexpr std::uint64_t kFeatureSnappyCompression = 1ULL << 0;
 
 struct RpcByteStats {
@@ -79,7 +79,8 @@ public:
       const mcpd3::PartitionSolveRequest &request) override;
   std::vector<mcpd3::PartitionSolveResult> solveRoundBatch(
       const std::vector<mcpd3::PartitionSolveRequest> &requests) override;
-  void scaleObjective(long factor) override;
+  void scaleObjective(long factor,
+                      bool saturate_capacity_overflow = false) override;
 
   void stop(std::uint32_t reason = 0, const std::string &message = "");
   const HelloMessage &hello() const { return hello_; }
@@ -111,7 +112,8 @@ struct WorkerRuntimeStatusHooks {
   std::function<void(std::uint64_t elapsed_us, long partition_solve_count,
                      bool batch)>
       on_solve_done;
-  std::function<void(long factor)> on_scale_objective;
+  std::function<void(long factor, bool saturate_capacity_overflow)>
+      on_scale_objective;
   std::function<void(const std::string &message)> on_error;
 };
 

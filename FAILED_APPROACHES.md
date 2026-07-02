@@ -411,3 +411,16 @@
 - Do not rely on fully buffered benchmark stdout for long runs. The native
   benchmark now sets unbuffered stdout, but the aborted run happened before
   that change, leaving an empty `.out` file.
+
+## 2026-07-01 23:39 PDT
+
+- Do not treat the `adhead.n6c10 p16 objective_scale=1000` failure as proof
+  that p16 has an inherent algorithmic convergence bug. The observed failure
+  was: regularization budget exceeded `1000`, the coordinator attempted to
+  promote by `10x`, and 32-bit capacity promotion overflowed.
+- Exact p16 does converge when the objective scale is chosen high enough but
+  still within int32 input capacity limits: `p16 objective_scale=2000` reached
+  agreement with objective `48373`.
+- `--truncate-capacity-overflow` now lets p16/os1000 promotion proceed to
+  scale `10000`, but that run may clip promoted capacities. Use it only as
+  explicit compatibility mode, not as the exact local baseline.

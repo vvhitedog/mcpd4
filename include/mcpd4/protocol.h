@@ -44,6 +44,7 @@ struct ReadyMessage {
 
 struct ScaleObjectiveMessage {
   std::int64_t factor = 1;
+  bool saturate_capacity_overflow = false;
 };
 
 struct AlphaUpdateMessage {

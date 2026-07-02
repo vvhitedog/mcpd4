@@ -326,10 +326,12 @@ std::vector<mcpd3::PartitionSolveResult> TcpPartitionWorker::solveRoundBatch(
   return timed.results;
 }
 
-void TcpPartitionWorker::scaleObjective(long factor) {
+void TcpPartitionWorker::scaleObjective(long factor,
+                                        bool saturate_capacity_overflow) {
   const auto start = std::chrono::steady_clock::now();
   ScaleObjectiveMessage message;
   message.factor = factor;
+  message.saturate_capacity_overflow = saturate_capacity_overflow;
   const auto frame = encodeScaleObjective(message);
   FrameTransferStats transfer;
   sendFrameBytes(socket_, frame, compression_, &transfer);
@@ -510,11 +512,13 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
         break;
       case MessageType::SCALE_OBJECTIVE:
         {
-          const auto factor = decodeScaleObjective(frame_bytes).factor;
+          const auto message = decodeScaleObjective(frame_bytes);
           if (status_hooks.on_scale_objective) {
-            status_hooks.on_scale_objective(factor);
+            status_hooks.on_scale_objective(
+                message.factor, message.saturate_capacity_overflow);
           }
-          worker.scaleObjective(factor);
+          worker.scaleObjective(message.factor,
+                                message.saturate_capacity_overflow);
           temporal_state.reset();
           if (status_hooks.on_phase) {
             status_hooks.on_phase("connected");

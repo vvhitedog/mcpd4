@@ -535,6 +535,7 @@ std::vector<std::uint8_t> encodeScaleObjective(
     const ScaleObjectiveMessage &message) {
   Writer writer;
   writer.writeI64(message.factor);
+  writer.writeBool(message.saturate_capacity_overflow);
   return encodeFrame(MessageType::SCALE_OBJECTIVE, writer.bytes());
 }
 
@@ -544,6 +545,7 @@ ScaleObjectiveMessage decodeScaleObjective(
   Reader reader(decoded.payload);
   ScaleObjectiveMessage message;
   message.factor = reader.readI64();
+  message.saturate_capacity_overflow = reader.readBool();
   requireDone(reader);
   return message;
 }

@@ -415,7 +415,10 @@ int main(int argc, char **argv) {
                                           bool batch) {
       status_state.recordSolveDone(elapsed_us, partition_solve_count, batch);
     };
-    hooks.on_scale_objective = [&status_state](long factor) {
+    hooks.on_scale_objective = [&status_state](
+                                   long factor,
+                                   bool saturate_capacity_overflow) {
+      (void)saturate_capacity_overflow;
       status_state.recordScaleObjective(factor);
     };
     hooks.on_error = [&status_state](const std::string &message) {

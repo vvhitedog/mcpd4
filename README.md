@@ -444,7 +444,8 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
   `--rpc-compression snappy`.
 - `--saturate-capacity-overflow`: opt-in overflow compatibility mode. This
   clips overflowing scaled capacities and solves the clipped problem, not the
-  exact original problem.
+  exact original problem. The setting also applies to later objective-scale
+  promotions; `--truncate-capacity-overflow` is accepted as an alias.
 - `--directed`: use the directed streaming DIMACS reader.
 
 Compatibility aliases accepted by the coordinator:

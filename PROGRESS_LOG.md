@@ -1522,3 +1522,47 @@
   - `ctest --test-dir build --output-on-failure`;
   - `cmake --build build/no-snappy -j`;
   - `ctest --test-dir build/no-snappy --output-on-failure`.
+
+## 2026-07-01 23:39 PDT
+
+- Hardened opt-in capacity truncation/saturation so it applies to later
+  objective-scale promotions, not only the initial graph scaling step:
+  - `DualDecompositionOptions` and `PartitionWorkerCoordinatorOptions` now
+    carry `saturate_capacity_overflow`;
+  - native `DualDecomposition::scaleProblem()` and
+    `PrimalDualMinCutSolver::scaleProblem()` clamp promoted int capacities
+    when the option is enabled;
+  - `PartitionWorker::scaleObjective()` now receives the saturation flag, and
+    `InProcessPartitionWorker` passes it through to loaded solvers;
+  - mcpd4 `SCALE_OBJECTIVE` frames now encode the saturation flag and the
+    worker protocol version is bumped to `6`;
+  - `mcpd4_coordinator`, `mcpd4_inprocess_benchmark`, and the native mcpd3
+    benchmark pass `--saturate-capacity-overflow` /
+    `--truncate-capacity-overflow` through to promotion scaling.
+- Added regression coverage:
+  - scripted coordinator promotion forwards the saturation flag to workers;
+  - strict in-process worker promotion rejects int overflow while saturated
+    promotion accepts it;
+  - protocol serialization round-trips the scale-objective saturation flag;
+  - TCP remote worker promotion overflows in strict mode pre-fix, and now
+    succeeds when the transmitted saturation flag is true.
+- adhead n6c10 partition-count notes from the local productized path:
+  - `p=10, objective_scale=1000`: exact success, objective `48373`, wall
+    `161.39s`, total iterations `108`;
+  - `p=8, objective_scale=2000`: exact success, objective `48373`, wall
+    `139.74s`, total iterations `110`;
+  - `p=16, objective_scale=2000`: exact success, objective `48373`, wall
+    `206.27s`, total iterations `130`;
+  - `p=16, objective_scale=1000, --truncate-capacity-overflow`: promoted to
+    objective scale `10000`, agreement, objective `48373`, wall `285.24s`.
+    This verifies truncation is respected through promotion, but it is a
+    clipped-capacity compatibility run, not the best exact local baseline.
+- Verified:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `./build/protocol_serialization_test`;
+  - `./build/tcp_loopback_test`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`.

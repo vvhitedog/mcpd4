@@ -1869,6 +1869,8 @@ int main(int argc, char **argv) {
     solve_options.num_optimization_scales = config.schedule_levels;
     solve_options.initial_step_size = config.schedule_start;
     solve_options.objective_scale = config.objective_scale;
+    solve_options.saturate_capacity_overflow =
+        config.saturate_capacity_overflow;
     solve_options.progress_report_interval =
         (config.status_port != 0 || telemetry.enabled()) ? 1
                                                          : config.progress_every;

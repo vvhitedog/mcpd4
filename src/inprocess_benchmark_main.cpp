@@ -99,7 +99,8 @@ Config parseArgs(int argc, char **argv) {
       config.progress_every = parseInt(requireValue(arg), arg);
     } else if (arg == "--directed") {
       config.directed = true;
-    } else if (arg == "--saturate-capacity-overflow") {
+    } else if (arg == "--saturate-capacity-overflow" ||
+               arg == "--truncate-capacity-overflow") {
       config.saturate_capacity_overflow = true;
     } else {
       throw std::runtime_error("unknown argument: " + arg);
@@ -163,6 +164,7 @@ makePartitionPackages(int partition_count, mcpd3::MinCutGraph graph,
   package_options.verbose = false;
   package_options.thread_count = 1;
   package_options.objective_scale = objective_scale;
+  package_options.saturate_capacity_overflow = false;
   mcpd3::DualDecomposition package_source(
       partition_count, graph.nnode, graph.narc, std::move(graph.arcs),
       std::move(graph.arc_capacities), std::move(graph.terminal_capacities),
@@ -278,6 +280,8 @@ int main(int argc, char **argv) {
     solve_options.num_optimization_scales = config.schedule_levels;
     solve_options.initial_step_size = config.schedule_start;
     solve_options.objective_scale = config.objective_scale;
+    solve_options.saturate_capacity_overflow =
+        config.saturate_capacity_overflow;
     solve_options.progress_report_interval =
         config.progress_every > 0 ? config.progress_every : 0;
     if (config.progress_every > 0) {

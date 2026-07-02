@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -365,6 +366,33 @@ void remoteWorkerScalesLoadedObjective() {
   }
 }
 
+void remoteWorkerSaturatesScaleObjectiveOverflow() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(&listener, &client, "scale-saturate-worker");
+  try {
+    mcpd3::PartitionPackage package;
+    package.partition_id = 0;
+    package.local_node_count = 1;
+    package.terminal_capacities = {
+        std::numeric_limits<int>::max() / 2 + 1};
+    package.local_to_global = {5};
+    worker->loadPartition(package);
+
+    worker->scaleObjective(2, /*saturate_capacity_overflow=*/true);
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = 0;
+    (void)worker->solveRound(request);
+    require(worker->timingStats().scale_objective_rpc_count == 1,
+            "saturated remote scale should count objective scaling");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
 void remoteWorkerSolvesExplicitBatch() {
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
@@ -616,6 +644,7 @@ int main() {
     remoteWorkerExposesHandshakeResources();
     remoteWorkerReportsErrorsAsExceptions();
     remoteWorkerScalesLoadedObjective();
+    remoteWorkerSaturatesScaleObjectiveOverflow();
     remoteWorkerSolvesExplicitBatch();
     remoteWorkerDeltaEncodingReducesRepeatedSolveBytes();
     remoteWorkerUsesSnappyCompression();
