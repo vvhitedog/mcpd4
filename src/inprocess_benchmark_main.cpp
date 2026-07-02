@@ -5,9 +5,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -233,6 +235,53 @@ void printGraphStats(const mcpd3::MinCutGraph &graph) {
             << graph.terminal_capacities.size() << "\n";
 }
 
+std::uint64_t sumValues(const std::vector<std::uint64_t> &values) {
+  std::uint64_t total = 0;
+  for (const auto value : values) {
+    total += value;
+  }
+  return total;
+}
+
+std::uint64_t percentileValue(std::vector<std::uint64_t> values,
+                              double percentile) {
+  if (values.empty()) {
+    return 0;
+  }
+  std::sort(values.begin(), values.end());
+  const auto index = static_cast<size_t>(
+      std::max<double>(0.0, std::ceil(percentile * values.size()) - 1.0));
+  return values[std::min(index, values.size() - 1)];
+}
+
+std::uint64_t topKSum(std::vector<std::uint64_t> values, size_t count) {
+  if (values.empty() || count == 0) {
+    return 0;
+  }
+  std::sort(values.begin(), values.end(), std::greater<std::uint64_t>());
+  count = std::min(count, values.size());
+  std::uint64_t total = 0;
+  for (size_t i = 0; i < count; ++i) {
+    total += values[i];
+  }
+  return total;
+}
+
+void printByteSummary(const std::string &prefix,
+                      const std::vector<std::uint64_t> &values) {
+  const auto total = sumValues(values);
+  const auto max_iter = std::max_element(values.begin(), values.end());
+  const auto max_value = max_iter == values.end() ? 0 : *max_iter;
+  const auto mean = values.empty()
+                        ? 0.0
+                        : static_cast<double>(total) /
+                              static_cast<double>(values.size());
+  std::cout << prefix << "_total " << total << "\n";
+  std::cout << prefix << "_max " << max_value << "\n";
+  std::cout << prefix << "_mean " << mean << "\n";
+  std::cout << prefix << "_p95 " << percentileValue(values, 0.95) << "\n";
+}
+
 void printPackageStats(const std::vector<mcpd3::PartitionPackage> &packages) {
   std::uint64_t local_node_count = 0;
   std::uint64_t arc_endpoint_count = 0;
@@ -240,6 +289,18 @@ void printPackageStats(const std::vector<mcpd3::PartitionPackage> &packages) {
   std::uint64_t terminal_capacity_count = 0;
   std::uint64_t local_to_global_count = 0;
   std::uint64_t constraint_endpoint_count = 0;
+  std::vector<std::uint64_t> bk_node_bytes;
+  std::vector<std::uint64_t> bk_arc_bytes;
+  std::vector<std::uint64_t> bk_total_bytes;
+  std::vector<std::uint64_t> solver_vector_bytes;
+  std::vector<std::uint64_t> loaded_solver_estimated_bytes;
+  std::vector<std::uint64_t> partition_package_payload_bytes;
+  bk_node_bytes.reserve(packages.size());
+  bk_arc_bytes.reserve(packages.size());
+  bk_total_bytes.reserve(packages.size());
+  solver_vector_bytes.reserve(packages.size());
+  loaded_solver_estimated_bytes.reserve(packages.size());
+  partition_package_payload_bytes.reserve(packages.size());
   for (const auto &package : packages) {
     local_node_count += static_cast<std::uint64_t>(package.local_node_count);
     arc_endpoint_count += package.arcs.size();
@@ -247,6 +308,41 @@ void printPackageStats(const std::vector<mcpd3::PartitionPackage> &packages) {
     terminal_capacity_count += package.terminal_capacities.size();
     local_to_global_count += package.local_to_global.size();
     constraint_endpoint_count += package.constraint_endpoints.size();
+    const auto local_arc_count =
+        static_cast<int>(package.arcs.size() / 2);
+    const auto estimate =
+        mcpd3::PrimalDualMinCutSolver::estimateMemoryBytes(
+            package.local_node_count, local_arc_count);
+    const auto endpoint_bytes =
+        static_cast<std::uint64_t>(package.constraint_endpoints.size()) *
+        static_cast<std::uint64_t>(
+            sizeof(mcpd3::ConstraintEndpointBinding));
+    const auto package_int_bytes =
+        static_cast<std::uint64_t>(
+            package.arcs.size() + package.arc_capacities.size() +
+            package.terminal_capacities.size() +
+            package.local_to_global.size()) *
+        static_cast<std::uint64_t>(sizeof(int));
+    const auto package_payload_bytes = package_int_bytes + endpoint_bytes;
+    bk_node_bytes.push_back(estimate.bk_node_bytes);
+    bk_arc_bytes.push_back(estimate.bk_arc_bytes);
+    bk_total_bytes.push_back(estimate.bk_total_bytes);
+    solver_vector_bytes.push_back(estimate.solver_vector_bytes);
+    loaded_solver_estimated_bytes.push_back(estimate.total_bytes +
+                                            endpoint_bytes);
+    partition_package_payload_bytes.push_back(package_payload_bytes);
+    std::cout << "partition_footprint partition_id " << package.partition_id
+              << " local_node_count " << package.local_node_count
+              << " local_arc_count " << local_arc_count
+              << " constraint_endpoint_count "
+              << package.constraint_endpoints.size()
+              << " bk_node_bytes " << estimate.bk_node_bytes
+              << " bk_arc_bytes " << estimate.bk_arc_bytes
+              << " bk_total_bytes " << estimate.bk_total_bytes
+              << " solver_vector_bytes " << estimate.solver_vector_bytes
+              << " loaded_solver_estimated_bytes "
+              << estimate.total_bytes + endpoint_bytes
+              << " package_payload_bytes " << package_payload_bytes << "\n";
   }
   const auto int_bytes =
       (arc_endpoint_count + arc_capacity_count + terminal_capacity_count +
@@ -271,6 +367,29 @@ void printPackageStats(const std::vector<mcpd3::PartitionPackage> &packages) {
   std::cout << "package_payload_int_bytes " << int_bytes << "\n";
   std::cout << "package_payload_constraint_endpoint_bytes " << endpoint_bytes
             << "\n";
+  printByteSummary("package_bk_node_bytes", bk_node_bytes);
+  printByteSummary("package_bk_arc_bytes", bk_arc_bytes);
+  printByteSummary("package_bk_total_bytes", bk_total_bytes);
+  printByteSummary("package_solver_vector_bytes", solver_vector_bytes);
+  printByteSummary("package_loaded_solver_estimated_bytes",
+                   loaded_solver_estimated_bytes);
+  printByteSummary("package_stream_payload_bytes",
+                   partition_package_payload_bytes);
+  const std::vector<size_t> windows{1, 2, 4, 8, 16};
+  for (const auto window : windows) {
+    if (window > packages.size()) {
+      continue;
+    }
+    std::cout << "stream_window_" << window
+              << "_bk_total_bytes_worst "
+              << topKSum(bk_total_bytes, window) << "\n";
+    std::cout << "stream_window_" << window
+              << "_loaded_solver_estimated_bytes_worst "
+              << topKSum(loaded_solver_estimated_bytes, window) << "\n";
+    std::cout << "stream_window_" << window
+              << "_package_payload_bytes_worst "
+              << topKSum(partition_package_payload_bytes, window) << "\n";
+  }
 }
 
 std::vector<std::unique_ptr<mcpd3::PartitionWorker>>

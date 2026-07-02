@@ -1627,3 +1627,52 @@
   - `ctest --test-dir build --output-on-failure`;
   - `cmake --build build/no-snappy -j`;
   - `ctest --test-dir build/no-snappy --output-on-failure`.
+
+## 2026-07-02 00:33 PDT
+
+- Added explicit BK and loaded-solver footprint estimates:
+  - BK `Graph` now exposes estimated node-array, arc-array, and total storage
+    bytes using the actual private `node`/`arc` struct sizes and constructor
+    minimum capacities;
+  - `PrimalDualMinCutSolver::estimateMemoryBytes()` reports BK node bytes, BK
+    arc bytes, BK total bytes, solver vector bytes, and combined lower-bound
+    loaded-solver bytes;
+  - `mcpd4_inprocess_benchmark` now prints one `partition_footprint` line per
+    package plus aggregate max/p95/mean totals and worst-case top-K active
+    streaming windows.
+- Important interpretation correction:
+  - previous p40/p48 comments were about the current all-loaded local setup;
+  - for a streamed out-of-core worker, higher partition counts reduce the max
+    live BK graph size and the top-K active BK working set, at the cost of more
+    boundary/package overhead.
+- Large adhead BK footprint sweep:
+  - output directory:
+    `benchmark_results/large_adhead_bk_footprint_20260702_002920`;
+  - command shape:
+    `MCPD3_PARTITIONER=basic build/mcpd4_inprocess_benchmark data/maxflow/adhead.n26c100/adhead.n26c100.max --directed --workers 1 --partitions P --objective-scale 2000 --schedule-start 10000 --schedule-levels 5 --max-iterations 10000 --stop-after partition`.
+- Streaming-relevant results:
+  - p24: max BK partition `979,369,984` bytes, p95 BK `900,726,784`, worst
+    4-active BK `3,681,550,336`, worst 8-active BK `7,284,457,472`, endpoints
+    `3,145,728`;
+  - p32: max BK partition `754,974,720` bytes, p95 BK `676,331,520`, worst
+    4-active BK `2,783,969,280`, worst 8-active BK `5,489,295,360`, endpoints
+    `4,194,304`;
+  - p40: max BK partition `620,461,008` bytes, p95 BK `541,816,912`, worst
+    4-active BK `2,245,911,744`, worst 8-active BK `4,413,174,016`, endpoints
+    `5,275,972`;
+  - p48: max BK partition `530,579,456` bytes, p95 BK `451,936,256`, worst
+    4-active BK `1,886,388,224`, worst 8-active BK `3,694,133,248`, endpoints
+    `6,291,456`.
+- Loaded-solver lower-bound max estimates, including BK arrays, solver vectors,
+  and endpoint metadata but not STL/list/unordered-map allocator overhead:
+  - p24: `1,288,699,904` bytes;
+  - p32: `994,574,336` bytes;
+  - p40: `818,280,036` bytes;
+  - p48: `700,448,768` bytes.
+- Verified:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`.
