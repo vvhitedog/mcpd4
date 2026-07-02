@@ -1566,3 +1566,64 @@
   - `ctest --test-dir build --output-on-failure`;
   - `cmake --build build/no-snappy -j`;
   - `ctest --test-dir build/no-snappy --output-on-failure`.
+
+## 2026-07-02 00:17 PDT
+
+- Added large-graph phase instrumentation to `mcpd4_inprocess_benchmark`:
+  - unbuffered key/value output;
+  - memory snapshots after read, scale, partition, setup, and solve;
+  - `--stop-after read|scale|partition|setup` for safe out-of-core probes;
+  - graph/package payload summaries, including boundary constraint endpoint
+    counts.
+- Reduced package/setup duplication for distributed export:
+  - `DualDecompositionOptions::construct_solvers` allows package-only export;
+  - mcpd4 package generation now disables native solver construction and moves
+    package payloads instead of copying subgraph vectors;
+  - `PartitionWorker::loadPartition(PartitionPackage&&)` lets in-process
+    workers move package vectors into solver state;
+  - `InProcessPartitionWorker` no longer retains arcs/capacity/local mapping
+    payloads after loading a solver; it keeps only partition id and boundary
+    endpoint metadata.
+- Added mcpd3 regression coverage:
+  - package-only export matches solver-backed package export on a tiny
+    decomposition;
+  - package-only `DualDecomposition::solve()` rejects misuse because no native
+    solvers exist.
+- Large adhead probe target:
+  - DIMACS: `data/maxflow/adhead.n26c100/adhead.n26c100.max`;
+  - solution file reports optimum `734905`;
+  - directed reader reports `12,582,912` nodes and `327,155,712` graph arcs.
+- Large adhead phase probes, objective scale `2000`, directed, basic
+  partitioner:
+  - read-only: wall `30.07s`, settled RSS `5.16 GB`, `/usr/bin/time` max RSS
+    `7.72 GB`;
+  - scale-only: scale pass `1.04s`, no material RSS increase;
+  - p32 partition-only after package-only export: wall `45.88s`, partition
+    phase `14.54s`, package endpoint count `4,194,304`, package int payload
+    `5,351,931,904` bytes, package endpoint payload `167,772,160` bytes, max
+    RSS `12.29 GB`;
+  - p32 setup-only with BK `file_mmap`: completed, wall `158.21s`, setup
+    phase `112.27s`, final setup RSS `13.99 GB`, max RSS `14.16 GB`;
+  - p24 partition-only: wall `44.82s`, endpoint count `3,145,728`, max RSS
+    `11.78 GB`;
+  - p24 setup-only with BK `file_mmap`: manually terminated at disk limit
+    after `136.04s`; max RSS `14.21 GB`;
+  - p40 partition-only: wall `45.61s`, endpoint count `5,275,972`, max RSS
+    `12.75 GB`;
+  - p48 partition-only: wall `46.39s`, endpoint count `6,291,456`, max RSS
+    `13.21 GB`.
+- Current interpretation:
+  - package-only export fixes the earlier p32 partition memory blow-up;
+  - p24 reduces boundary/package overhead but stresses BK mmap disk during
+    setup more than p32 on this laptop;
+  - p40/p48 add boundary overhead without improving partition construction;
+  - p32 is the best first large-adhead full-solve candidate so far, but all
+    local setup is near RAM/disk limits and should preferably be split across
+    machines.
+- Verified:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`.

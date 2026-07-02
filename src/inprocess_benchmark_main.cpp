@@ -1,7 +1,9 @@
 #include <decomp/dualdecomp.h>
 #include <decomp/partition_coordinator.h>
 #include <graph/dimacs.h>
+#include <io/memory.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -24,8 +26,14 @@ struct Timing {
   std::uint64_t solve_wall_us = 0;
 };
 
+struct MemorySnapshot {
+  double vm_kb = 0;
+  double rss_kb = 0;
+};
+
 struct Config {
   std::string dimacs_path;
+  std::string stop_after;
   int worker_count = 1;
   int partition_count = 10;
   int max_iterations = 10000;
@@ -42,6 +50,17 @@ std::uint64_t elapsedUs(std::chrono::steady_clock::time_point start) {
       std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start)
           .count());
+}
+
+MemorySnapshot memorySnapshot() {
+  MemorySnapshot snapshot;
+  mcpd3::process_mem_usage(snapshot.vm_kb, snapshot.rss_kb);
+  return snapshot;
+}
+
+void printMemory(const std::string &prefix, const MemorySnapshot &snapshot) {
+  std::cout << prefix << "_vm_kb " << snapshot.vm_kb << "\n";
+  std::cout << prefix << "_rss_kb " << snapshot.rss_kb << "\n";
 }
 
 long parseLong(const std::string &value, const std::string &name) {
@@ -71,6 +90,7 @@ Config parseArgs(int argc, char **argv) {
         "[--workers N] [--partitions N] [--max-iterations N] "
         "[--schedule-levels N] [--schedule-start N] "
         "[--objective-scale N] [--progress-every N] "
+        "[--stop-after read|scale|partition|setup] "
         "[--saturate-capacity-overflow]");
   }
   config.dimacs_path = argv[1];
@@ -84,6 +104,8 @@ Config parseArgs(int argc, char **argv) {
     };
     if (arg == "--workers") {
       config.worker_count = parseInt(requireValue(arg), arg);
+    } else if (arg == "--stop-after") {
+      config.stop_after = requireValue(arg);
     } else if (arg == "--partitions") {
       config.partition_count = parseInt(requireValue(arg), arg);
     } else if (arg == "--max-iterations") {
@@ -124,7 +146,17 @@ Config parseArgs(int argc, char **argv) {
   if (config.objective_scale <= 0) {
     throw std::runtime_error("--objective-scale must be positive");
   }
+  if (!config.stop_after.empty() && config.stop_after != "read" &&
+      config.stop_after != "scale" && config.stop_after != "partition" &&
+      config.stop_after != "setup") {
+    throw std::runtime_error(
+        "--stop-after must be one of read, scale, partition, setup");
+  }
   return config;
+}
+
+bool shouldStopAfter(const Config &config, const std::string &phase) {
+  return config.stop_after == phase;
 }
 
 int scaleIntCapacity(int value, long factor, bool saturate) {
@@ -165,11 +197,80 @@ makePartitionPackages(int partition_count, mcpd3::MinCutGraph graph,
   package_options.thread_count = 1;
   package_options.objective_scale = objective_scale;
   package_options.saturate_capacity_overflow = false;
+  package_options.construct_solvers = false;
   mcpd3::DualDecomposition package_source(
       partition_count, graph.nnode, graph.narc, std::move(graph.arcs),
       std::move(graph.arc_capacities), std::move(graph.terminal_capacities),
       package_options);
   return package_source.getPartitionPackages();
+}
+
+void printConfig(const Config &config) {
+  std::cout << "benchmark inprocess_partition_worker\n";
+  std::cout << "dimacs_path " << config.dimacs_path << "\n";
+  std::cout << "worker_count " << config.worker_count << "\n";
+  std::cout << "partition_count " << config.partition_count << "\n";
+  std::cout << "schedule_start " << config.schedule_start << "\n";
+  std::cout << "schedule_levels " << config.schedule_levels << "\n";
+  std::cout << "max_iterations " << config.max_iterations << "\n";
+  std::cout << "objective_scale " << config.objective_scale << "\n";
+  std::cout << "progress_every " << config.progress_every << "\n";
+  std::cout << "directed " << config.directed << "\n";
+  std::cout << "saturate_capacity_overflow "
+            << config.saturate_capacity_overflow << "\n";
+  std::cout << "stop_after "
+            << (config.stop_after.empty() ? "none" : config.stop_after)
+            << "\n";
+}
+
+void printGraphStats(const mcpd3::MinCutGraph &graph) {
+  std::cout << "graph_node_count " << graph.nnode << "\n";
+  std::cout << "graph_arc_count " << graph.narc << "\n";
+  std::cout << "graph_arc_endpoint_count " << graph.arcs.size() << "\n";
+  std::cout << "graph_arc_capacity_count " << graph.arc_capacities.size()
+            << "\n";
+  std::cout << "graph_terminal_capacity_count "
+            << graph.terminal_capacities.size() << "\n";
+}
+
+void printPackageStats(const std::vector<mcpd3::PartitionPackage> &packages) {
+  std::uint64_t local_node_count = 0;
+  std::uint64_t arc_endpoint_count = 0;
+  std::uint64_t arc_capacity_count = 0;
+  std::uint64_t terminal_capacity_count = 0;
+  std::uint64_t local_to_global_count = 0;
+  std::uint64_t constraint_endpoint_count = 0;
+  for (const auto &package : packages) {
+    local_node_count += static_cast<std::uint64_t>(package.local_node_count);
+    arc_endpoint_count += package.arcs.size();
+    arc_capacity_count += package.arc_capacities.size();
+    terminal_capacity_count += package.terminal_capacities.size();
+    local_to_global_count += package.local_to_global.size();
+    constraint_endpoint_count += package.constraint_endpoints.size();
+  }
+  const auto int_bytes =
+      (arc_endpoint_count + arc_capacity_count + terminal_capacity_count +
+       local_to_global_count) *
+      static_cast<std::uint64_t>(sizeof(int));
+  const auto endpoint_bytes = constraint_endpoint_count *
+                              static_cast<std::uint64_t>(
+                                  sizeof(mcpd3::ConstraintEndpointBinding));
+
+  std::cout << "package_count " << packages.size() << "\n";
+  std::cout << "package_total_local_node_count " << local_node_count << "\n";
+  std::cout << "package_total_arc_endpoint_count " << arc_endpoint_count
+            << "\n";
+  std::cout << "package_total_arc_capacity_count " << arc_capacity_count
+            << "\n";
+  std::cout << "package_total_terminal_capacity_count "
+            << terminal_capacity_count << "\n";
+  std::cout << "package_total_local_to_global_count " << local_to_global_count
+            << "\n";
+  std::cout << "package_total_constraint_endpoint_count "
+            << constraint_endpoint_count << "\n";
+  std::cout << "package_payload_int_bytes " << int_bytes << "\n";
+  std::cout << "package_payload_constraint_endpoint_bytes " << endpoint_bytes
+            << "\n";
 }
 
 std::vector<std::unique_ptr<mcpd3::PartitionWorker>>
@@ -209,7 +310,7 @@ void printProgress(const mcpd3::PartitionWorkerProgressRecord &record) {
 
 void printFinal(const Timing &timing,
                 const mcpd3::PartitionWorkerCoordinatorSolveResult &result,
-                const Config &config) {
+                const Config &config, double peak_rss_kb) {
   std::cout << "status " << static_cast<int>(result.status) << "\n";
   std::cout << "stop_reason " << static_cast<int>(result.stop_reason) << "\n";
   std::cout << "final_objective " << result.final_objective << "\n";
@@ -247,15 +348,36 @@ void printFinal(const Timing &timing,
   std::cout << "timing_coordinator_setup_wall_us "
             << timing.coordinator_setup_wall_us << "\n";
   std::cout << "timing_solve_wall_us " << timing.solve_wall_us << "\n";
+  std::cout << "memory_peak_observed_rss_kb " << peak_rss_kb << "\n";
+}
+
+void printStopped(const Timing &timing, const Config &config,
+                  const std::string &phase, double peak_rss_kb) {
+  std::cout << "status stopped_after_" << phase << "\n";
+  std::cout << "worker_count " << config.worker_count << "\n";
+  std::cout << "partition_count " << config.partition_count << "\n";
+  std::cout << "timing_total_wall_us " << timing.total_wall_us << "\n";
+  std::cout << "timing_read_graph_wall_us " << timing.read_graph_wall_us
+            << "\n";
+  std::cout << "timing_scale_graph_wall_us " << timing.scale_graph_wall_us
+            << "\n";
+  std::cout << "timing_partition_wall_us " << timing.partition_wall_us << "\n";
+  std::cout << "timing_coordinator_setup_wall_us "
+            << timing.coordinator_setup_wall_us << "\n";
+  std::cout << "memory_peak_observed_rss_kb " << peak_rss_kb << "\n";
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
   try {
+    std::cout << std::unitbuf;
     const auto config = parseArgs(argc, argv);
+    printConfig(config);
     Timing timing;
     const auto total_start = std::chrono::steady_clock::now();
+    auto peak_rss_kb = memorySnapshot().rss_kb;
+    printMemory("memory_initial", memorySnapshot());
 
     mcpd3::MinCutGraph graph;
     const auto read_start = std::chrono::steady_clock::now();
@@ -263,17 +385,43 @@ int main(int argc, char **argv) {
                                   config.dimacs_path)
                             : mcpd3::read_dimacs(config.dimacs_path);
     timing.read_graph_wall_us = elapsedUs(read_start);
+    const auto after_read_memory = memorySnapshot();
+    peak_rss_kb = std::max(peak_rss_kb, after_read_memory.rss_kb);
+    printGraphStats(graph);
+    printMemory("memory_after_read_graph", after_read_memory);
+    if (shouldStopAfter(config, "read")) {
+      timing.total_wall_us = elapsedUs(total_start);
+      printStopped(timing, config, "read", peak_rss_kb);
+      return EXIT_SUCCESS;
+    }
 
     const auto scale_start = std::chrono::steady_clock::now();
     scaleGraph(&graph, config.objective_scale,
                config.saturate_capacity_overflow);
     timing.scale_graph_wall_us = elapsedUs(scale_start);
+    const auto after_scale_memory = memorySnapshot();
+    peak_rss_kb = std::max(peak_rss_kb, after_scale_memory.rss_kb);
+    printMemory("memory_after_scale_graph", after_scale_memory);
+    if (shouldStopAfter(config, "scale")) {
+      timing.total_wall_us = elapsedUs(total_start);
+      printStopped(timing, config, "scale", peak_rss_kb);
+      return EXIT_SUCCESS;
+    }
 
     const auto partition_start = std::chrono::steady_clock::now();
     auto packages =
         makePartitionPackages(config.partition_count, std::move(graph),
                               config.objective_scale);
     timing.partition_wall_us = elapsedUs(partition_start);
+    const auto after_partition_memory = memorySnapshot();
+    peak_rss_kb = std::max(peak_rss_kb, after_partition_memory.rss_kb);
+    printPackageStats(packages);
+    printMemory("memory_after_partition", after_partition_memory);
+    if (shouldStopAfter(config, "partition")) {
+      timing.total_wall_us = elapsedUs(total_start);
+      printStopped(timing, config, "partition", peak_rss_kb);
+      return EXIT_SUCCESS;
+    }
 
     mcpd3::PartitionWorkerCoordinatorOptions solve_options;
     solve_options.max_iteration_count = config.max_iterations;
@@ -294,12 +442,23 @@ int main(int argc, char **argv) {
                                                   std::move(workers),
                                                   solve_options);
     timing.coordinator_setup_wall_us = elapsedUs(setup_start);
+    const auto after_setup_memory = memorySnapshot();
+    peak_rss_kb = std::max(peak_rss_kb, after_setup_memory.rss_kb);
+    printMemory("memory_after_coordinator_setup", after_setup_memory);
+    if (shouldStopAfter(config, "setup")) {
+      timing.total_wall_us = elapsedUs(total_start);
+      printStopped(timing, config, "setup", peak_rss_kb);
+      return EXIT_SUCCESS;
+    }
 
     const auto solve_start = std::chrono::steady_clock::now();
     const auto result = coordinator.solve();
     timing.solve_wall_us = elapsedUs(solve_start);
     timing.total_wall_us = elapsedUs(total_start);
-    printFinal(timing, result, config);
+    const auto after_solve_memory = memorySnapshot();
+    peak_rss_kb = std::max(peak_rss_kb, after_solve_memory.rss_kb);
+    printMemory("memory_after_solve", after_solve_memory);
+    printFinal(timing, result, config, peak_rss_kb);
   } catch (const std::exception &e) {
     std::cerr << "mcpd4_inprocess_benchmark failed: " << e.what() << "\n";
     return EXIT_FAILURE;

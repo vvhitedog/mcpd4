@@ -1441,6 +1441,7 @@ std::vector<mcpd3::PartitionPackage> makePartitionPackages(
   package_options.verbose = false;
   package_options.thread_count = 1;
   package_options.objective_scale = objective_scale;
+  package_options.construct_solvers = false;
   mcpd3::DualDecomposition package_source(
       partition_count, graph.nnode, graph.narc, std::move(graph.arcs),
       std::move(graph.arc_capacities), std::move(graph.terminal_capacities),

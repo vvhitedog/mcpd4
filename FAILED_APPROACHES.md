@@ -424,3 +424,21 @@
 - `--truncate-capacity-overflow` now lets p16/os1000 promotion proceed to
   scale `10000`, but that run may clip promoted capacities. Use it only as
   explicit compatibility mode, not as the exact local baseline.
+
+## 2026-07-02 00:17 PDT
+
+- Do not run large-adhead distributed package generation through solver-backed
+  `DualDecomposition` export. Before `construct_solvers=false`, p32
+  partition-only on `adhead.n26c100` climbed to about `14.1 GB` RSS with swap
+  full and only about `7.5 GB` disk free before it was stopped. The issue was
+  double construction: local native solvers were being built only to export
+  packages, then worker solvers would be built again.
+- Do not assume fewer partitions are automatically safer for the large local
+  setup path. p24 has lower boundary/package overhead than p32, but with BK
+  `file_mmap` it drove free disk down to about `3.7 GB` before setup completed,
+  so it was manually terminated. On this laptop, p32 completed setup while p24
+  did not.
+- Do not treat p40/p48 as better just because local subproblems are smaller.
+  Partition-only probes increased boundary endpoint counts from p32's
+  `4,194,304` to `5,275,972` and `6,291,456`, respectively, with no partition
+  wall-time improvement.
