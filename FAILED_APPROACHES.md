@@ -396,3 +396,18 @@
   once agreement certifies primal recovery and makes the reporting semantics
   harder to reason about. Keep `final_objective` for the solved value, and keep
   certified lower-bound plus regularized-objective fields as diagnostics.
+
+## 2026-07-01 22:44 PDT
+
+- Do not treat the first native mcpd3 adhead run as a completed benchmark.
+  Command:
+  `MCPD3_PARTITIONER=basic build/mcpd3-native/mcpd3_native_monolith_benchmark data/maxflow/adhead.n6c10/adhead.n6c10.max --directed --partitions 10 --objective-scale 1000 --schedule-start 10000 --schedule-levels 5 --max-iterations 10000`.
+  It was terminated by SIGTERM after `552.78s` with no final result.
+- Do not compare that aborted native run against mcpd4 distributed timings.
+  It showed about `8.1 GB` RSS and roughly one-core CPU use before termination,
+  so the next investigation should compare direct `DualDecomposition::solve()`
+  stopping/scheduling against the worker-coordinator path before drawing
+  performance conclusions.
+- Do not rely on fully buffered benchmark stdout for long runs. The native
+  benchmark now sets unbuffered stdout, but the aborted run happened before
+  that change, leaving an empty `.out` file.

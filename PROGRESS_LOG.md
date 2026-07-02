@@ -1480,3 +1480,45 @@
   - `./build/distributed_partition_worker_smoke_test`;
   - `ctest --test-dir build --output-on-failure`;
   - local benchmark command listed in the 21:43 entry.
+
+## 2026-07-01 22:44 PDT
+
+- Added a clean native mcpd3 monolith benchmark in the solver submodule:
+  - target: `mcpd3_native_monolith_benchmark`;
+  - source: `third_party/mcpd3/benchmark/native_monolith.cpp`;
+  - it constructs `mcpd3::DualDecomposition` directly and does not use
+    mcpd4 RPC, worker coordination, or partition packages by default.
+- Added `DualDecompositionOptions::emit_partition_packages`, defaulting to
+  `true` so distributed/package-export behavior remains unchanged. The native
+  benchmark sets it to `false` to avoid copying every local subproblem into
+  `PartitionPackage` data.
+- Added regression coverage:
+  - `disabledPartitionPackageExportPreservesNativeSolve()` verifies package
+    access throws when export is disabled;
+  - the same tiny decomposition with package export on/off produces matching
+    lower-bound and disagreement results after a local optimization round.
+- Cleaned native benchmark stdout:
+  - benchmark output is unbuffered key/value text;
+  - old solver first-iteration timing output now requires
+    `MCPD3_SOLVER_TIMING`;
+  - dual-decomposition partition constraint-count prints are now gated by
+    `DualDecompositionOptions::verbose`.
+- Smoke result:
+  - command:
+    `MCPD3_PARTITIONER=basic build/mcpd3-native/mcpd3_native_monolith_benchmark tests/fixtures/random_small.max --directed --partitions 2 --objective-scale 10 --schedule-start 10 --schedule-levels 2 --max-iterations 20 --threads 1 --regularization none`;
+  - status `agreement`, final objective raw `90`, total iterations `7`.
+- Attempted a native adhead baseline:
+  - command:
+    `MCPD3_PARTITIONER=basic build/mcpd3-native/mcpd3_native_monolith_benchmark data/maxflow/adhead.n6c10/adhead.n6c10.max --directed --partitions 10 --objective-scale 1000 --schedule-start 10000 --schedule-levels 5 --max-iterations 10000`;
+  - terminated manually after `552.78s` without a final result;
+  - process reached roughly `8.1 GB` RSS and effectively used about one core,
+    suggesting direct native solve/scheduling needs investigation before this
+    is a fair best-local comparator on adhead.
+- Verified:
+  - `cmake -S third_party/mcpd3 -B build/mcpd3-native`;
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`.

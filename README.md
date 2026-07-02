@@ -21,6 +21,9 @@ planning details live in [AGENT_HANDOFF.md](AGENT_HANDOFF.md), progress is in
 - `build/mcpd4_inprocess_benchmark`: optional benchmark binary that runs the
   product `PartitionWorkerCoordinator` fully in-process for local monolithic
   comparisons.
+- `third_party/mcpd3/build/mcpd3_native_monolith_benchmark`: standalone
+  mcpd3 build target for the clean native `DualDecomposition` path. Build this
+  from the mcpd3 submodule when comparing best local mcpd3 against mcpd4.
 
 ## Requirements
 
@@ -82,6 +85,35 @@ ctest --test-dir build --output-on-failure
 The current suite includes protocol serialization, TCP loopback, worker error
 handling, objective-scale promotion, optional Snappy transport coverage, and
 localhost process integration tests.
+
+## Native mcpd3 Comparator
+
+mcpd4 also includes `mcpd4_inprocess_benchmark`, but that intentionally uses
+the product worker-coordinator abstraction. For a native mcpd3 monolith
+baseline, configure the solver submodule independently:
+
+```bash
+cmake -S third_party/mcpd3 -B build/mcpd3-native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/mcpd3-native -j
+```
+
+Example directed run:
+
+```bash
+MCPD3_PARTITIONER=basic \
+build/mcpd3-native/mcpd3_native_monolith_benchmark /data/adhead.n6c10.max \
+  --directed \
+  --partitions 10 \
+  --objective-scale 1000 \
+  --schedule-start 10000 \
+  --schedule-levels 5 \
+  --max-iterations 10000
+```
+
+This path constructs `mcpd3::DualDecomposition` directly and disables
+partition-package export by default. Use it to measure the best native local
+solver separately from distributed RPC, worker assignment, and wire-format
+choices.
 
 ## Quick Localhost Run
 
