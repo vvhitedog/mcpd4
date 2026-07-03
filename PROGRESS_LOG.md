@@ -1,5 +1,19 @@
 # Progress Log
 
+## 2026-07-03 01:30 PDT
+
+- Added first-class mcpd4 worker controls for mcpd3 BK graph storage:
+  - `--bk-storage malloc|file_mmap|anon_mmap`;
+  - `--bk-mmap-dir DIR`;
+  - `--bk-mmap-advise ADVISE`.
+- Worker CLI now preserves existing `MCPD3_BK_*` environment configuration
+  when these flags are omitted, while explicit flags set the environment before
+  any local solver/BK graph is constructed.
+- Worker UDP status now reports `bk_storage`, `bk_mmap_dir`, and
+  `bk_mmap_advise`, making distributed runs inspectable for mmap correctness.
+- Process integration coverage now starts a worker with `file_mmap` BK storage
+  and asserts status reports the mmap configuration.
+
 ## 2026-07-03 01:04 PDT
 
 - Raised mcpd4's default TCP logical frame cap from 256 MiB to 1 GiB and

@@ -1,5 +1,13 @@
 # Failed Approaches And Taboos
 
+## 2026-07-03 01:30 PDT
+
+- Do not benchmark large adhead resident distributed workers on the 15 GB
+  laptop with default malloc-backed BK storage. p24 and p32 killed the local
+  worker during package load; p48 also failed during package send/load. Use
+  BK `file_mmap` with a fast directory that has enough free space, use more
+  worker memory, or keep the laptop as coordinator-only.
+
 ## 2026-07-03 01:04 PDT
 
 - Large adhead p16 resident distributed run failed under the old TCP frame cap:

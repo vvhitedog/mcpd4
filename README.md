@@ -513,6 +513,8 @@ usage: mcpd4_worker HOST PORT [--name NAME]
        [--rpc-compression none|snappy]
        [--streaming-partitions] [--streaming-dir DIR]
        [--streaming-cache-bytes N]
+       [--bk-storage malloc|file_mmap|anon_mmap]
+       [--bk-mmap-dir DIR] [--bk-mmap-advise ADVISE]
 ```
 
 - `HOST`: coordinator host or IP.
@@ -536,6 +538,23 @@ usage: mcpd4_worker HOST PORT [--name NAME]
 - `--streaming-cache-bytes N`: approximate maximum resident solver bytes for
   materialized partitions. `0` disables eviction.
 - `--name NAME`: optional worker name used in logs and progress output.
+- `--bk-storage MODE`: choose BK graph node/arc-array backing for resident
+  local max-flow solvers. `malloc` is the default, `file_mmap` stores BK arrays
+  in unlinked files under `--bk-mmap-dir`, and `anon_mmap` uses anonymous
+  mappings. Existing `MCPD3_BK_STORAGE` is still respected when this flag is
+  omitted.
+- `--bk-mmap-dir DIR`: directory for `file_mmap` BK storage. Passing this
+  without `--bk-storage` implies `file_mmap`.
+- `--bk-mmap-advise ADVISE`: optional BK mmap advice passed through to mcpd3.
+  Supported values include `none`, `willneed`, `populate`, `dontdump`,
+  `lock_onfault`, and `lock` where supported by the OS.
+
+For large resident distributed runs, prefer `--bk-storage file_mmap` on each
+worker with a fast local disk that has enough free space for that worker's
+assigned BK node/arc arrays. This is separate from `--streaming-partitions`:
+BK mmap keeps assigned solvers resident but backs their largest internal arrays
+with files, while streaming workers evict whole partition solvers and reload
+them on demand.
 
 Workers receive all partition data from the coordinator after connecting. They
 do not need the DIMACS file.
@@ -575,8 +594,9 @@ schedule/iteration state, lower-bound fields, regularization diagnostics,
 disagreement count, aggregate solve/RPC counts, RPC byte/wire counters,
 compression timing, per-worker solve timing, and a `segments` timing summary.
 Worker status includes its phase, CPU/RAM, temp path, coordinator endpoint,
-worker storage mode, streaming directory/cache settings, loaded partition ids,
-current round/partition ids, solve counts, batch RPC count, worker solve wall
+worker storage mode, streaming directory/cache settings, BK storage/mmap
+settings, loaded partition ids, current round/partition ids, solve counts,
+batch RPC count, worker solve wall
 time, RPC byte/wire counters, compression timing, and last error.
 
 The coordinator `segments` field is a comma-separated summary of algorithm

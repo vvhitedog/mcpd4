@@ -37,7 +37,9 @@ void usage(const char *argv0) {
       << "       [--status-port PORT] [--status-token TOKEN]\n"
       << "       [--rpc-compression none|snappy]\n"
       << "       [--streaming-partitions] [--streaming-dir DIR]\n"
-      << "       [--streaming-cache-bytes N]\n";
+      << "       [--streaming-cache-bytes N]\n"
+      << "       [--bk-storage malloc|file_mmap|anon_mmap]\n"
+      << "       [--bk-mmap-dir DIR] [--bk-mmap-advise ADVISE]\n";
 }
 
 long parsePositiveLong(const std::string &value, const std::string &name) {
@@ -84,6 +86,30 @@ std::string joinInts(const std::vector<int> &values) {
   return joined;
 }
 
+std::string envValue(const char *name) {
+  const char *value = std::getenv(name);
+  return value != nullptr ? std::string(value) : std::string();
+}
+
+bool isValidBkStorageMode(const std::string &value) {
+  return value == "malloc" || value == "file_mmap" ||
+         value == "anon_mmap" || value == "anonymous_mmap";
+}
+
+void setEnvValue(const char *name, const std::string &value) {
+  if (!value.empty()) {
+    setenv(name, value.c_str(), /*overwrite=*/1);
+  }
+}
+
+std::string effectiveBkStorageMode() {
+  const std::string storage = envValue("MCPD3_BK_STORAGE");
+  if (!storage.empty()) {
+    return storage;
+  }
+  return envValue("MCPD3_BK_MMAP_DIR").empty() ? "malloc" : "file_mmap";
+}
+
 struct WorkerStatusState {
   mutable std::mutex mutex;
   std::string phase = "starting";
@@ -97,6 +123,9 @@ struct WorkerStatusState {
   std::string worker_storage_mode = "memory";
   std::string streaming_dir = "-";
   std::uint64_t streaming_cache_bytes = 0;
+  std::string bk_storage = "malloc";
+  std::string bk_mmap_dir = "-";
+  std::string bk_mmap_advise = "-";
   std::uint16_t status_port = 0;
   long loaded_partition_count = 0;
   std::vector<int> partition_ids;
@@ -138,6 +167,14 @@ struct WorkerStatusState {
     worker_storage_mode = streaming ? "streaming" : "memory";
     streaming_dir = directory.empty() ? "-" : directory;
     streaming_cache_bytes = cache_bytes;
+  }
+
+  void setBkStorage(const std::string &storage, const std::string &mmap_dir,
+                    const std::string &mmap_advise) {
+    std::lock_guard<std::mutex> lock(mutex);
+    bk_storage = storage.empty() ? "malloc" : storage;
+    bk_mmap_dir = mmap_dir.empty() ? "-" : mmap_dir;
+    bk_mmap_advise = mmap_advise.empty() ? "-" : mmap_advise;
   }
 
   void setPhase(const std::string &value) {
@@ -274,6 +311,9 @@ struct WorkerStatusState {
         << " worker_storage_mode " << worker_storage_mode
         << " streaming_dir " << statusValue(streaming_dir)
         << " streaming_cache_bytes " << streaming_cache_bytes
+        << " bk_storage " << statusValue(bk_storage)
+        << " bk_mmap_dir " << statusValue(bk_mmap_dir)
+        << " bk_mmap_advise " << statusValue(bk_mmap_advise)
         << " status_port " << status_port
         << " loaded_partition_count " << loaded_partition_count
         << " partition_ids " << joinInts(partition_ids)
@@ -339,6 +379,9 @@ int main(int argc, char **argv) {
     bool streaming_partitions = false;
     std::string streaming_dir;
     std::uint64_t streaming_cache_bytes = 0;
+    std::string bk_storage;
+    std::string bk_mmap_dir;
+    std::string bk_mmap_advise;
 
     int arg_index = 1;
     if (std::string(argv[arg_index]) == "--discover") {
@@ -380,11 +423,32 @@ int main(int argc, char **argv) {
       } else if (arg == "--streaming-cache-bytes" && i + 1 < argc) {
         streaming_cache_bytes =
             parsePositiveU64(argv[++i], "--streaming-cache-bytes");
+      } else if (arg == "--bk-storage" && i + 1 < argc) {
+        bk_storage = argv[++i];
+      } else if (arg == "--bk-mmap-dir" && i + 1 < argc) {
+        bk_mmap_dir = argv[++i];
+      } else if (arg == "--bk-mmap-advise" && i + 1 < argc) {
+        bk_mmap_advise = argv[++i];
       } else {
         usage(argv[0]);
         return EXIT_FAILURE;
       }
     }
+    if (!bk_storage.empty() && !isValidBkStorageMode(bk_storage)) {
+      throw std::runtime_error("unknown --bk-storage mode: " + bk_storage);
+    }
+    if (bk_storage.empty() && !bk_mmap_dir.empty()) {
+      bk_storage = "file_mmap";
+    }
+    if (bk_storage == "file_mmap" && bk_mmap_dir.empty() &&
+        envValue("MCPD3_BK_MMAP_DIR").empty()) {
+      throw std::runtime_error(
+          "--bk-storage file_mmap requires --bk-mmap-dir");
+    }
+    setEnvValue("MCPD3_BK_STORAGE", bk_storage);
+    setEnvValue("MCPD3_BK_MMAP_DIR", bk_mmap_dir);
+    setEnvValue("MCPD3_BK_MMAP_ADVISE", bk_mmap_advise);
+
     if (rpc_compression == mcpd4::TransportCompression::SNAPPY &&
         !mcpd4::snappyCompressionAvailable()) {
       throw std::runtime_error(
@@ -401,6 +465,9 @@ int main(int argc, char **argv) {
     status_state.setCompression(rpc_compression);
     status_state.setStorageMode(streaming_partitions, streaming_dir,
                                 streaming_cache_bytes);
+    status_state.setBkStorage(effectiveBkStorageMode(),
+                              envValue("MCPD3_BK_MMAP_DIR"),
+                              envValue("MCPD3_BK_MMAP_ADVISE"));
     std::unique_ptr<mcpd4::StatusServer> status_server;
     if (status_port != 0) {
       status_server = std::make_unique<mcpd4::StatusServer>(
