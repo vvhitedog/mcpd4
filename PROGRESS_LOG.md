@@ -1,5 +1,25 @@
 # Progress Log
 
+## 2026-07-03 02:28 PDT
+
+- Added worker-side validation that BK `file_mmap` directories are not on
+  memory-backed filesystems (`tmpfs`, `ramfs`, `hugetlbfs`). This prevents a
+  worker from silently placing BK mmap arrays in RAM when a path such as `/tmp`
+  is memory-backed on that machine.
+- Added process integration coverage using `/dev/shm` when available: a worker
+  configured with `--bk-storage file_mmap --bk-mmap-dir /dev/shm/...` must fail
+  before connecting and report a memory-backed filesystem error.
+- The p32 large-adhead distributed restart reached two workers and began
+  loading partitions. The remote worker successfully loaded partitions `0`,
+  `2`, and `4`, then disconnected during partition `6`; coordinator failed with
+  `worker remote-worker failed loading partition 6 ... socket closed during
+  read`. The leading suspicion is remote BK mmap directory disk exhaustion,
+  especially if the remote worker used a small `/tmp`/tmpfs-backed path.
+- Local `/tmp` on this laptop is ext4-backed, but remote `/tmp` may be tmpfs.
+  The implicit worker-owned BK mmap directory was moved to `/var/tmp`, and
+  future large distributed worker commands should still use an explicit
+  verified disk-backed BK mmap directory, not `/tmp` by habit.
+
 ## 2026-07-03 02:08 PDT
 
 - Changed mcpd4 worker BK storage default from heap-backed `malloc` to
@@ -7,7 +27,7 @@
   - when no `--bk-storage`/`MCPD3_BK_STORAGE` override is present, the worker
     now sets `MCPD3_BK_STORAGE=file_mmap`;
   - when no mmap directory is supplied, the worker creates an owned
-    `/tmp/mcpd4-bk-mmap-<pid>` directory;
+    `/var/tmp/mcpd4-bk-mmap-<pid>` directory;
   - explicit `--bk-mmap-dir` directories are created if missing;
   - explicit `--bk-storage malloc` and existing `MCPD3_BK_*` env overrides
     remain supported.

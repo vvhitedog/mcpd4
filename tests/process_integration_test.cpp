@@ -8,6 +8,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -17,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 #include <netinet/in.h>
+#include <sys/vfs.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <thread>
@@ -26,6 +28,18 @@
 namespace {
 
 using namespace std::chrono_literals;
+
+#ifndef TMPFS_MAGIC
+#define TMPFS_MAGIC 0x01021994
+#endif
+
+#ifndef RAMFS_MAGIC
+#define RAMFS_MAGIC 0x858458f6
+#endif
+
+#ifndef HUGETLBFS_MAGIC
+#define HUGETLBFS_MAGIC 0x958458f6
+#endif
 
 void require(bool condition, const std::string &message) {
   if (!condition) {
@@ -1202,7 +1216,7 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
                 std::string::npos,
             "worker should default to file-backed BK storage\n" +
                 worker_status_output);
-    require(worker_status_output.find("bk_mmap_dir /tmp/mcpd4-bk-mmap-") !=
+    require(worker_status_output.find("bk_mmap_dir /var/tmp/mcpd4-bk-mmap-") !=
                 std::string::npos,
             "worker should report its default BK mmap directory\n" +
                 worker_status_output);
@@ -1256,6 +1270,46 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
   }
 }
 
+bool pathIsMemoryBackedFilesystem(const std::string &path) {
+  struct statfs fs {};
+  if (::statfs(path.c_str(), &fs) != 0) {
+    return false;
+  }
+  const auto type = static_cast<unsigned long>(fs.f_type);
+  return type == TMPFS_MAGIC || type == RAMFS_MAGIC ||
+         type == HUGETLBFS_MAGIC;
+}
+
+void workerRejectsMemoryBackedBkMmapDir(const std::string &worker_bin) {
+  const std::string memory_fs = "/dev/shm";
+  if (!pathIsMemoryBackedFilesystem(memory_fs)) {
+    return;
+  }
+
+  const std::string bk_mmap_dir =
+      memory_fs + "/mcpd4-process-test-bk-mmap-" +
+      std::to_string(::getpid());
+  std::filesystem::remove_all(bk_mmap_dir);
+
+  auto worker = spawnProcess({worker_bin,
+                              "127.0.0.1",
+                              "1",
+                              "--name",
+                              "memory-backed-worker",
+                              "--bk-storage",
+                              "file_mmap",
+                              "--bk-mmap-dir",
+                              bk_mmap_dir});
+  const int worker_exit = waitForExit(&worker, 5s);
+  std::filesystem::remove_all(bk_mmap_dir);
+  require(worker_exit != 0,
+          "worker should reject memory-backed BK mmap directory\n" +
+              worker.output);
+  require(worker.output.find("memory-backed filesystem") != std::string::npos,
+          "worker should explain memory-backed BK mmap rejection\n" +
+              worker.output);
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1297,6 +1351,7 @@ int main(int argc, char **argv) {
                                            fixture_dir);
     discoveryModeAcceptsDiscoveredWorkersAndClose(
         coordinator_bin, worker_bin, discovery_bin, status_bin, fixture_dir);
+    workerRejectsMemoryBackedBkMmapDir(worker_bin);
   } catch (const std::exception &e) {
     std::cerr << "process_integration_test failed: " << e.what() << "\n";
     return EXIT_FAILURE;

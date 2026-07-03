@@ -2,10 +2,12 @@
 #include <mcpd4/runtime.h>
 #include <mcpd4/status.h>
 
+#include <cerrno>
 #include <chrono>
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <iostream>
@@ -16,10 +18,23 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <sys/vfs.h>
 #include <unistd.h>
 #include <vector>
 
 namespace {
+
+#ifndef TMPFS_MAGIC
+#define TMPFS_MAGIC 0x01021994
+#endif
+
+#ifndef RAMFS_MAGIC
+#define RAMFS_MAGIC 0x858458f6
+#endif
+
+#ifndef HUGETLBFS_MAGIC
+#define HUGETLBFS_MAGIC 0x958458f6
+#endif
 
 std::uint16_t parsePort(const std::string &value) {
   const long parsed = std::stol(value);
@@ -114,7 +129,8 @@ std::string effectiveBkStorageMode() {
 }
 
 std::string defaultBkMmapDir() {
-  return "/tmp/mcpd4-bk-mmap-" + std::to_string(static_cast<long>(::getpid()));
+  return "/var/tmp/mcpd4-bk-mmap-" +
+         std::to_string(static_cast<long>(::getpid()));
 }
 
 void createDirectoryOrThrow(const std::string &path,
@@ -124,6 +140,33 @@ void createDirectoryOrThrow(const std::string &path,
   if (ec) {
     throw std::runtime_error("failed to create " + description + " " + path +
                              ": " + ec.message());
+  }
+}
+
+std::string memoryBackedFilesystemName(const std::string &path) {
+  struct statfs fs {};
+  if (::statfs(path.c_str(), &fs) != 0) {
+    throw std::runtime_error("failed to inspect BK mmap directory " + path +
+                             ": " + std::strerror(errno));
+  }
+  switch (static_cast<unsigned long>(fs.f_type)) {
+  case TMPFS_MAGIC:
+    return "tmpfs";
+  case RAMFS_MAGIC:
+    return "ramfs";
+  case HUGETLBFS_MAGIC:
+    return "hugetlbfs";
+  default:
+    return {};
+  }
+}
+
+void requireDiskBackedBkMmapDir(const std::string &path) {
+  const std::string fs_name = memoryBackedFilesystemName(path);
+  if (!fs_name.empty()) {
+    throw std::runtime_error(
+        "BK mmap directory " + path + " is on memory-backed filesystem " +
+        fs_name + "; choose a disk-backed --bk-mmap-dir");
   }
 }
 
@@ -174,8 +217,12 @@ void configureBkStorageDefaults(std::string *bk_storage,
       !env_mmap_dir) {
     *bk_mmap_dir = defaultBkMmapDir();
     owned_mmap_dir->create(*bk_mmap_dir);
+    requireDiskBackedBkMmapDir(*bk_mmap_dir);
   } else if (effective_storage == "file_mmap" && !bk_mmap_dir->empty()) {
     createDirectoryOrThrow(*bk_mmap_dir, "BK mmap directory");
+    requireDiskBackedBkMmapDir(*bk_mmap_dir);
+  } else if (effective_storage == "file_mmap" && env_mmap_dir) {
+    requireDiskBackedBkMmapDir(envValue("MCPD3_BK_MMAP_DIR"));
   }
 }
 

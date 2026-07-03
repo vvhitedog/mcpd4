@@ -1,5 +1,21 @@
 # Failed Approaches And Taboos
 
+## 2026-07-03 02:28 PDT
+
+- Do not use a BK mmap directory on a memory-backed filesystem. Paths under
+  `/tmp` are not portable: this laptop has `/tmp` on ext4, but many Linux
+  systems mount `/tmp` or `/dev/shm` as `tmpfs`. If BK `file_mmap` lands on
+  tmpfs, it is effectively RAM-backed and can kill the worker during partition
+  loading. mcpd4 workers now reject `tmpfs`, `ramfs`, and `hugetlbfs` for BK
+  mmap dirs.
+- The p32 large-adhead distributed restart connected both workers, then the
+  remote worker disconnected while loading partition `6` after completing
+  partitions `0`, `2`, and `4`. Do not interpret the coordinator-side
+  `socket closed during read` as a network root cause without first checking
+  the remote worker log, mount point for `--bk-mmap-dir`, free disk, and kernel
+  OOM messages. Remote BK mmap directory disk exhaustion is the leading
+  suspicion for this run.
+
 ## 2026-07-03 02:08 PDT
 
 - Do not assume BK arrays are file-backed unless worker status says
@@ -8,10 +24,10 @@
   logged worker commands lacked `--bk-storage file_mmap`/`--bk-mmap-dir`.
   Kernel OOM logs showed `anon-rss` around `7.8 GB` and `file-rss` near zero,
   confirming heap pressure rather than file-backed page-cache pressure.
-- Do not rely on the default `/tmp/mcpd4-bk-mmap-<pid>` directory for large
-  production benchmarks on a nearly full root filesystem. Pass
-  `--bk-mmap-dir` on a fast disk with enough free space for that worker's
-  assigned BK node/arc arrays.
+- Do not rely on an implicit BK mmap directory for large production benchmarks
+  on a nearly full root filesystem. The default is `/var/tmp`, but large runs
+  should pass `--bk-mmap-dir` on a known disk-backed fast filesystem with
+  enough free space for that worker's assigned BK node/arc arrays.
 
 ## 2026-07-03 01:54 PDT
 

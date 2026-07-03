@@ -228,13 +228,13 @@ Then start exactly two workers, matching `--workers 2`:
 
 ```bash
 ./build/mcpd4_worker 127.0.0.1 50051 --name local-a \
-  --bk-mmap-dir /tmp/mcpd4-bk-local-a \
+  --bk-mmap-dir /var/tmp/mcpd4-bk-local-a \
   --rpc-compression none
 ```
 
 ```bash
 ./build/mcpd4_worker 127.0.0.1 50051 --name local-b \
-  --bk-mmap-dir /tmp/mcpd4-bk-local-b \
+  --bk-mmap-dir /var/tmp/mcpd4-bk-local-b \
   --rpc-compression none
 ```
 
@@ -561,23 +561,27 @@ usage: mcpd4_worker HOST PORT [--name NAME]
 - `--bk-storage MODE`: choose BK graph node/arc-array backing for resident
   local max-flow solvers. `file_mmap` is the mcpd4 worker default and stores BK
   arrays in unlinked files under `--bk-mmap-dir`; when no directory is supplied,
-  the worker creates `/tmp/mcpd4-bk-mmap-<pid>`. `malloc` is an explicit opt-out
-  for heap-backed BK arrays, and `anon_mmap` uses anonymous mappings. Existing
-  `MCPD3_BK_STORAGE` is still respected when this flag is omitted.
+  the worker creates `/var/tmp/mcpd4-bk-mmap-<pid>`. `malloc` is an explicit
+  opt-out for heap-backed BK arrays, and `anon_mmap` uses anonymous mappings.
+  Existing `MCPD3_BK_STORAGE` is still respected when this flag is omitted.
 - `--bk-mmap-dir DIR`: directory for `file_mmap` BK storage. Passing this
-  without `--bk-storage` implies `file_mmap`. For large runs, set this to a
-  fast local filesystem with enough free space for the worker's assigned BK
-  node/arc arrays.
+  without `--bk-storage` implies `file_mmap`. This must be on a disk-backed
+  filesystem; the worker rejects memory-backed filesystems such as `tmpfs`,
+  `ramfs`, and `hugetlbfs` because they defeat the purpose of file-backed BK
+  arrays. For large runs, set this to a fast local filesystem with enough free
+  space for the worker's assigned BK node/arc arrays.
 - `--bk-mmap-advise ADVISE`: optional BK mmap advice passed through to mcpd3.
   Supported values include `none`, `willneed`, `populate`, `dontdump`,
   `lock_onfault`, and `lock` where supported by the OS.
 
 For large resident distributed runs, keep the default `file_mmap` storage and
 pass `--bk-mmap-dir` on each worker so it uses a fast local disk with enough
-free space. This is separate from `--streaming-partitions`: BK mmap keeps
-assigned solvers resident but backs their largest internal arrays with files,
-while streaming workers evict whole partition solvers and reload them on
-demand.
+free space. Do not use `/tmp` unless `findmnt -T /tmp` confirms it is a
+disk-backed filesystem on that machine; prefer an explicit path under a known
+disk mount such as `/var/tmp` or a data volume. This is separate from
+`--streaming-partitions`: BK mmap keeps assigned solvers resident but backs
+their largest internal arrays with files, while streaming workers evict whole
+partition solvers and reload them on demand.
 
 Workers receive all partition data from the coordinator after connecting. They
 do not need the DIMACS file.
