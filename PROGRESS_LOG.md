@@ -1,5 +1,39 @@
 # Progress Log
 
+## 2026-07-03 02:51 PDT
+
+- Completed a full distributed large-adhead resident run across this laptop plus
+  the remote worker:
+  - run directory:
+    `benchmark_results/large_adhead_distributed_p32_resident_20260703_022001_restart_20260703_023441`;
+  - DIMACS: `data/maxflow/adhead.n26c100/adhead.n26c100.max`;
+  - configuration: directed, `32` partitions, `2` workers, objective scale
+    `1000`, schedule start `1000`, schedule levels `4`, Snappy RPC,
+    saturated overflow mode;
+  - worker assignment: local worker `15` partitions, remote worker `17`
+    partitions;
+  - final objective: `734905`, matching the known optimum;
+  - final certified lower bound: `734905`;
+  - total iterations: `550`;
+  - final disagreement count: `0`;
+  - regularization cleanup occurred at schedule scale `10` with budget `120`,
+    contribution `120`, and `12` active sink-side anchors;
+  - total coordinator wall time: `985.08s` (`16.42 min`);
+  - solve segment wall time: `498.45s` (`8.31 min`);
+  - one-time partition load RPC wall time: `187.27s`;
+  - logical partition package bytes: `5.49 GB`; compressed wire bytes total:
+    `2.06 GB`;
+  - solve request bytes: `93.90 MB`; solve result bytes: `125.53 MB`;
+  - aggregate worker solve time: `532.22s`; aggregate solve RPC overhead:
+    `186.87s`.
+- Important observations:
+  - resident distributed solving avoided the minute-scale per-iteration behavior
+    seen in local streaming probes;
+  - transport was not dominant after setup, although remote worker batches were
+    slower and owned more partitions;
+  - the disk-backed remote BK mmap path fixed the earlier partition-6 worker
+    death.
+
 ## 2026-07-03 02:28 PDT
 
 - Added worker-side validation that BK `file_mmap` directories are not on
