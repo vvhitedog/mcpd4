@@ -35,6 +35,19 @@ template <typename Fn> void requireThrows(Fn fn, const std::string &message) {
   require(threw, message);
 }
 
+template <typename Fn>
+void requireThrowsContaining(Fn fn, const std::string &needle,
+                             const std::string &message) {
+  try {
+    fn();
+  } catch (const std::runtime_error &e) {
+    require(std::string(e.what()).find(needle) != std::string::npos,
+            message + "\nactual: " + e.what());
+    return;
+  }
+  throw std::runtime_error(message + "\nactual: no exception");
+}
+
 void sendRawAll(int fd, const std::uint8_t *data, std::size_t size) {
   std::size_t sent = 0;
   while (sent < size) {
@@ -340,6 +353,29 @@ void remoteWorkerReportsErrorsAsExceptions() {
     stopAndJoin(worker.get(), client);
     throw;
   }
+}
+
+void loadPartitionDisconnectReportsWorkerAndPartitionContext() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  const auto port = mcpd4::localPort(listener);
+  std::thread client([&] {
+    auto socket = mcpd4::connectTcp("127.0.0.1", port);
+    mcpd4::sendFrameBytes(socket,
+                          mcpd4::encodeHello(makeHello("closing-worker")));
+  });
+  auto worker = mcpd4::acceptTcpPartitionWorker(&listener, 2s);
+  client.join();
+
+  mcpd3::PartitionPackage package;
+  package.partition_id = 42;
+  package.local_node_count = 1;
+  package.terminal_capacities = {0};
+  package.local_to_global = {7};
+
+  requireThrowsContaining(
+      [&] { worker->loadPartition(package); },
+      "worker closing-worker failed loading partition 42",
+      "load partition disconnect should include worker and partition context");
 }
 
 void remoteWorkerScalesLoadedObjective() {
@@ -688,6 +724,7 @@ int main() {
     rejectsInvalidWorkerHello();
     remoteWorkerExposesHandshakeResources();
     remoteWorkerReportsErrorsAsExceptions();
+    loadPartitionDisconnectReportsWorkerAndPartitionContext();
     remoteWorkerScalesLoadedObjective();
     remoteWorkerSaturatesScaleObjectiveOverflow();
     remoteWorkerSolvesExplicitBatch();

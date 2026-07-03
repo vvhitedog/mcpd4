@@ -3,8 +3,10 @@
 #include <chrono>
 #include <cstdlib>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -29,13 +31,30 @@ long parsePositiveLong(const std::string &value, const std::string &name) {
 
 void usage(const char *argv0) {
   std::cerr << "usage: " << argv0
-            << " HOST PORT [--token TOKEN] [--timeout-ms N]\n";
+            << " HOST PORT [--token TOKEN] [--timeout-ms N]\n"
+            << "       " << argv0 << " --file PATH\n";
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
   try {
+    if (argc == 3 && std::string(argv[1]) == "--file") {
+      std::ifstream in(argv[2]);
+      if (!in) {
+        throw std::runtime_error("failed to open status file: " +
+                                 std::string(argv[2]));
+      }
+      std::ostringstream contents;
+      contents << in.rdbuf();
+      std::cout << contents.str();
+      if (contents.str().empty() ||
+          contents.str().back() != '\n') {
+        std::cout << "\n";
+      }
+      return EXIT_SUCCESS;
+    }
+
     if (argc < 3) {
       usage(argv[0]);
       return EXIT_FAILURE;

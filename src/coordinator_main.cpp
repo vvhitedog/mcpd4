@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
@@ -69,6 +70,7 @@ struct Config {
   std::string advertise_host;
   std::uint16_t status_port = 0;
   std::string status_token = mcpd4::kDefaultStatusToken;
+  std::string status_file;
   std::string telemetry_csv_prefix;
   mcpd4::TransportCompression rpc_compression =
       mcpd4::TransportCompression::NONE;
@@ -707,6 +709,8 @@ struct CoordinatorStatusState {
   std::vector<std::string> worker_details;
   std::vector<SegmentState> segments;
   long solve_iteration_budget = 0;
+  std::string last_error = "-";
+  std::string status_file_path;
 
   void initialize(const Config &config) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -719,11 +723,19 @@ struct CoordinatorStatusState {
     solve_iteration_budget =
         static_cast<long>(config.max_iterations) *
         static_cast<long>(config.schedule_levels);
+    persistLocked();
+  }
+
+  void setStatusFile(const std::string &path) {
+    std::lock_guard<std::mutex> lock(mutex);
+    status_file_path = path;
+    persistLocked();
   }
 
   void setPhase(const std::string &value) {
     std::lock_guard<std::mutex> lock(mutex);
     phase = value;
+    persistLocked();
   }
 
   void setPorts(std::uint16_t tcp, std::uint16_t discovery,
@@ -732,6 +744,7 @@ struct CoordinatorStatusState {
     tcp_port = tcp;
     discovery_port = discovery;
     status_port = status;
+    persistLocked();
   }
 
   void beginSegment(const std::string &name, const std::string &phase_value,
@@ -749,6 +762,7 @@ struct CoordinatorStatusState {
     segment.progress_total = progress_total;
     segment.external_wait = external_wait;
     segment.stats = statusValue(stats);
+    persistLocked();
   }
 
   void updateSegmentProgress(const std::string &name, long progress_current,
@@ -764,6 +778,7 @@ struct CoordinatorStatusState {
     if (!stats.empty()) {
       segment.stats = statusValue(stats);
     }
+    persistLocked();
   }
 
   void finishSegment(const std::string &name, const std::string &stats = "") {
@@ -775,6 +790,7 @@ struct CoordinatorStatusState {
     if (!stats.empty()) {
       segment.stats = statusValue(stats);
     }
+    persistLocked();
   }
 
   void recordWorker(const mcpd4::TcpPartitionWorker &worker) {
@@ -786,6 +802,7 @@ struct CoordinatorStatusState {
     worker_resources.push_back(
         name + ":cpu=" + std::to_string(snapshot.cpu_count) +
         ":ram_gb=" + std::to_string(snapshot.ram_gb));
+    persistLocked();
   }
 
   void recordWorkerDetails(const std::vector<mcpd4::TcpPartitionWorker *>
@@ -831,6 +848,7 @@ struct CoordinatorStatusState {
           std::to_string(snapshot.timing.solve_round_worker_wall_us));
       addRpcByteStats(&rpc_bytes, snapshot.timing.rpc_bytes);
     }
+    persistLocked();
   }
 
   void recordProgress(const mcpd3::PartitionWorkerProgressRecord &record,
@@ -899,6 +917,7 @@ struct CoordinatorStatusState {
           ":worker_solve_us=" +
           std::to_string(snapshot.timing.solve_round_worker_wall_us));
     }
+    persistLocked();
   }
 
   void recordFinal(
@@ -930,10 +949,23 @@ struct CoordinatorStatusState {
             ":final_disagreement_count=" +
             std::to_string(result.final_disagreement_count) +
             ":objective_scale=" + std::to_string(result.scale));
+    persistLocked();
+  }
+
+  void recordFailure(const std::string &message) {
+    std::lock_guard<std::mutex> lock(mutex);
+    phase = "error";
+    last_error = statusValue(message);
+    persistLocked();
   }
 
   std::string snapshot() const {
     std::lock_guard<std::mutex> lock(mutex);
+    return snapshotLocked();
+  }
+
+private:
+  std::string snapshotLocked() const {
     std::ostringstream out;
     out << "role coordinator"
         << " phase " << phase
@@ -995,6 +1027,7 @@ struct CoordinatorStatusState {
         << " rpc_ready_rx_bytes " << rpc_bytes.ready_rx_bytes
         << " rpc_stop_tx_bytes " << rpc_bytes.stop_tx_bytes
         << " rpc_error_rx_bytes " << rpc_bytes.error_rx_bytes
+        << " last_error " << statusValue(last_error)
         << " segments " << segmentSummaryLocked()
         << " worker_names " << joinStatusValues(worker_names)
         << " worker_resources " << joinStatusValues(worker_resources)
@@ -1003,7 +1036,25 @@ struct CoordinatorStatusState {
     return out.str();
   }
 
-private:
+  void persistLocked() const {
+    if (status_file_path.empty()) {
+      return;
+    }
+    const std::string tmp_path = status_file_path + ".tmp";
+    {
+      std::ofstream out(tmp_path, std::ios::trunc);
+      if (!out) {
+        return;
+      }
+      out << snapshotLocked() << "\n";
+      out.close();
+      if (!out) {
+        return;
+      }
+    }
+    (void)std::rename(tmp_path.c_str(), status_file_path.c_str());
+  }
+
   SegmentState &segmentForNameLocked(const std::string &name) {
     for (auto &segment : segments) {
       if (segment.name == name) {
@@ -1164,6 +1215,7 @@ void usage(const char *argv0) {
       << "       [--discovery-port PORT] [--discovery-token TOKEN]\n"
       << "       [--advertise-host HOST]\n"
       << "       [--status-port PORT] [--status-token TOKEN]\n"
+      << "       [--status-file PATH]\n"
       << "       [--telemetry-csv-prefix PATH]\n"
       << "       [--rpc-compression none|snappy]\n"
       << "       [--saturate-capacity-overflow]\n"
@@ -1217,6 +1269,8 @@ Config parseArgs(int argc, char **argv) {
       config.status_port = parsePort(require_value(arg));
     } else if (arg == "--status-token") {
       config.status_token = require_value(arg);
+    } else if (arg == "--status-file") {
+      config.status_file = require_value(arg);
     } else if (arg == "--telemetry-csv-prefix") {
       config.telemetry_csv_prefix = require_value(arg);
     } else if (arg == "--rpc-compression") {
@@ -1730,14 +1784,17 @@ void printProgress(
 } // namespace
 
 int main(int argc, char **argv) {
+  CoordinatorStatusState status_state;
+  bool parsed_args = false;
   try {
     const auto total_start = std::chrono::steady_clock::now();
     RuntimeTiming timing;
     const Config config = parseArgs(argc, argv);
+    parsed_args = true;
     TelemetryRecorder telemetry;
     telemetry.open(config);
-    CoordinatorStatusState status_state;
     status_state.initialize(config);
+    status_state.setStatusFile(config.status_file);
     std::unique_ptr<mcpd4::StatusServer> status_server;
     if (config.status_port != 0) {
       status_server = std::make_unique<mcpd4::StatusServer>(
@@ -1981,8 +2038,13 @@ int main(int argc, char **argv) {
     }
     printTiming(timing, remote_workers);
   } catch (const std::exception &e) {
+    status_state.recordFailure(e.what());
     std::cerr << "mcpd4_coordinator failed: " << e.what() << "\n";
-    usage(argv[0]);
+    std::cerr << "mcpd4_coordinator_status "
+              << status_state.snapshot() << "\n";
+    if (!parsed_args) {
+      usage(argv[0]);
+    }
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;

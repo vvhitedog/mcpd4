@@ -1,5 +1,17 @@
 # Failed Approaches And Taboos
 
+## 2026-07-03 01:54 PDT
+
+- Do not rely on the coordinator UDP status endpoint for post-mortem errors.
+  It is an in-process thread and disappears when the coordinator exits. Use
+  `mcpd4_coordinator --status-file PATH` and inspect it with
+  `mcpd4_status --file PATH` after a crash/failure.
+- Do not treat a bare `socket write failed: Broken pipe` or
+  `socket closed during read` as sufficient distributed-run diagnostics.
+  That error only says the peer disconnected. The runtime now logs partition
+  load begin/done/failed lines with worker and partition context so the failing
+  package can be identified.
+
 ## 2026-07-03 01:30 PDT
 
 - Do not benchmark large adhead resident distributed workers on the 15 GB

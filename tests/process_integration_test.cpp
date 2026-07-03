@@ -606,6 +606,53 @@ void coordinatorAcceptTimeoutIsExposed(const std::string &coordinator_bin,
   }
 }
 
+void coordinatorDurableStatusSurvivesFailure(
+    const std::string &coordinator_bin, const std::string &status_bin,
+    const std::string &fixture_dir) {
+  const auto port = reservePort();
+  const std::string status_file =
+      "/tmp/mcpd4-stage5-status-" + std::to_string(::getpid()) + ".txt";
+  std::remove(status_file.c_str());
+
+  auto coordinator = spawnProcess({coordinator_bin,
+                                   fixture_dir + "/missing-input.max",
+                                   "--port",
+                                   std::to_string(port),
+                                   "--workers",
+                                   "1",
+                                   "--partitions",
+                                   "1",
+                                   "--status-file",
+                                   status_file});
+  try {
+    const int exit_code = waitForExit(&coordinator, 5s);
+    require(exit_code != 0,
+            "coordinator should fail for a missing DIMACS input");
+    require(coordinator.output.find("mcpd4_coordinator_status ") !=
+                std::string::npos,
+            "coordinator failure should print a compact status snapshot\n" +
+                coordinator.output);
+
+    auto status = spawnProcess({status_bin, "--file", status_file});
+    const int status_exit = waitForExit(&status, 5s);
+    require(status_exit == 0,
+            "mcpd4_status --file should read durable coordinator status\n" +
+                status.output);
+    require(status.output.find("role coordinator") != std::string::npos,
+            "durable status should identify the coordinator\n" + status.output);
+    require(status.output.find("phase error") != std::string::npos,
+            "durable status should preserve failed phase\n" + status.output);
+    require(status.output.find("last_error ") != std::string::npos,
+            "durable status should preserve the failure message\n" +
+                status.output);
+    std::remove(status_file.c_str());
+  } catch (...) {
+    killIfRunning(&coordinator);
+    std::remove(status_file.c_str());
+    throw;
+  }
+}
+
 void capacityOverflowSaturationIsOptIn(const std::string &coordinator_bin,
                                        const std::string &worker_bin,
                                        const std::string &fixture_dir) {
@@ -1250,6 +1297,8 @@ int main(int argc, char **argv) {
                    /*worker_count=*/2,
                    /*partition_count=*/3});
     coordinatorAcceptTimeoutIsExposed(coordinator_bin, fixture_dir);
+    coordinatorDurableStatusSurvivesFailure(coordinator_bin, status_bin,
+                                            fixture_dir);
     capacityOverflowSaturationIsOptIn(coordinator_bin, worker_bin,
                                       fixture_dir);
     progressTelemetryIsStreamed(coordinator_bin, worker_bin, fixture_dir);

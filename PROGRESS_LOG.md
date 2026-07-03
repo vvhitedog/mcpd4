@@ -1,5 +1,34 @@
 # Progress Log
 
+## 2026-07-03 01:54 PDT
+
+- Added durable coordinator status snapshots:
+  - `mcpd4_coordinator --status-file PATH` atomically writes the latest status
+    line to disk;
+  - `mcpd4_status --file PATH` prints that snapshot after the coordinator has
+    exited or failed;
+  - fatal coordinator errors now record `phase error`, `last_error`, and print
+    a compact `mcpd4_coordinator_status ...` line instead of dumping usage for
+    runtime failures.
+- Added partition-load diagnostics on both sides of the TCP runtime:
+  - coordinator logs `mcpd4_load_partition_begin|done|failed` with worker name,
+    partition id, local node count, arc/capacity/vector counts, endpoint count,
+    logical frame bytes, wire bytes, and elapsed time;
+  - worker logs `mcpd4_worker_load_partition_begin|done` and records live
+    `current_load_*` fields in worker status while loading a partition.
+- Added regression coverage:
+  - coordinator-side load disconnect errors must include worker and partition
+    context;
+  - durable status files remain queryable with `mcpd4_status --file` after a
+    coordinator failure.
+- Verified:
+  - `cmake --build build -j`;
+  - `./build/tcp_loopback_test`;
+  - `./build/process_integration_test ./build/mcpd4_coordinator ./build/mcpd4_worker ./build/mcpd4_discovery ./build/mcpd4_status tests/fixtures`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`.
+
 ## 2026-07-03 01:30 PDT
 
 - Added first-class mcpd4 worker controls for mcpd3 BK graph storage:

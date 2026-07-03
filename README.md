@@ -456,6 +456,7 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
        [--discovery-port PORT] [--discovery-token TOKEN]
        [--advertise-host HOST]
        [--status-port PORT] [--status-token TOKEN]
+       [--status-file PATH]
        [--telemetry-csv-prefix PATH]
        [--rpc-compression none|snappy]
        [--saturate-capacity-overflow] [--directed]
@@ -486,6 +487,9 @@ usage: mcpd4_coordinator DIMACS --port PORT [--bind HOST] [--workers N]
 - `--status-port PORT`: enable a UDP status endpoint on this port.
 - `--status-token TOKEN`: token required for status queries. Default is
   `mcpd4`.
+- `--status-file PATH`: atomically write the latest coordinator status snapshot
+  to this file. Unlike the UDP status server, this remains readable after the
+  coordinator process exits or fails.
 - `--telemetry-csv-prefix PATH`: write raw post-run telemetry CSVs at
   `PATH.*.csv`. This records every optimizer iteration even when
   `--progress-every 0`.
@@ -581,23 +585,34 @@ usage: mcpd4_discovery list [--host HOST] [--port PORT] [--token TOKEN]
 
 ```text
 usage: mcpd4_status HOST PORT [--token TOKEN] [--timeout-ms N]
+       mcpd4_status --file PATH
 ```
 
 - `HOST`: coordinator or worker host/IP.
 - `PORT`: UDP status port configured with `--status-port`.
 - `--token TOKEN`: status token. Default is `mcpd4`.
 - `--timeout-ms N`: wait timeout for the status response.
+- `--file PATH`: print a durable coordinator status snapshot written by
+  `mcpd4_coordinator --status-file PATH`. Use this for post-mortem inspection
+  after the coordinator process has died.
 
 Coordinator status includes the current phase, accepted worker count, worker
 names/resources, partition ownership, partition count, objective scale, latest
 schedule/iteration state, lower-bound fields, regularization diagnostics,
 disagreement count, aggregate solve/RPC counts, RPC byte/wire counters,
-compression timing, per-worker solve timing, and a `segments` timing summary.
+compression timing, per-worker solve timing, last error, and a `segments`
+timing summary.
 Worker status includes its phase, CPU/RAM, temp path, coordinator endpoint,
 worker storage mode, streaming directory/cache settings, BK storage/mmap
-settings, loaded partition ids, current round/partition ids, solve counts,
-batch RPC count, worker solve wall
-time, RPC byte/wire counters, compression timing, and last error.
+settings, loaded partition ids, current partition-load fields, current
+round/partition ids, solve counts, batch RPC count, worker solve wall time, RPC
+byte/wire counters, compression timing, and last error.
+
+Example post-mortem query:
+
+```bash
+./build/mcpd4_status --file benchmark_results/run/status.txt
+```
 
 The coordinator `segments` field is a comma-separated summary of algorithm
 segments that have started. Not-yet-started segments are omitted. Each record

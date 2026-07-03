@@ -106,6 +106,9 @@ struct WorkerRuntimeStatusHooks {
       on_frame_sent;
   std::function<void(MessageType type, const FrameTransferStats &transfer)>
       on_frame_received;
+  std::function<void(const mcpd3::PartitionPackage &package,
+                     std::uint64_t logical_frame_bytes)>
+      on_partition_loading;
   std::function<void(int partition_id)> on_partition_loaded;
   std::function<void(long round_id, const std::vector<int> &partition_ids)>
       on_solve_start;

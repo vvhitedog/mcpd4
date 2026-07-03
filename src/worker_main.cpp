@@ -129,6 +129,12 @@ struct WorkerStatusState {
   std::uint16_t status_port = 0;
   long loaded_partition_count = 0;
   std::vector<int> partition_ids;
+  int current_load_partition_id = -1;
+  std::uint64_t current_load_logical_bytes = 0;
+  int current_load_local_node_count = 0;
+  std::uint64_t current_load_arc_int_count = 0;
+  std::uint64_t current_load_constraint_endpoint_count = 0;
+  int last_loaded_partition_id = -1;
   long current_round_id = 0;
   std::vector<int> current_partition_ids;
   long partition_solve_call_count_total = 0;
@@ -182,11 +188,30 @@ struct WorkerStatusState {
     phase = value;
   }
 
+  void recordPartitionLoading(const mcpd3::PartitionPackage &package,
+                              std::uint64_t logical_frame_bytes) {
+    std::lock_guard<std::mutex> lock(mutex);
+    phase = "loading_partition";
+    current_load_partition_id = package.partition_id;
+    current_load_logical_bytes = logical_frame_bytes;
+    current_load_local_node_count = package.local_node_count;
+    current_load_arc_int_count =
+        static_cast<std::uint64_t>(package.arcs.size());
+    current_load_constraint_endpoint_count =
+        static_cast<std::uint64_t>(package.constraint_endpoints.size());
+  }
+
   void recordPartitionLoaded(int partition_id) {
     std::lock_guard<std::mutex> lock(mutex);
     phase = "connected";
     partition_ids.push_back(partition_id);
     loaded_partition_count = static_cast<long>(partition_ids.size());
+    last_loaded_partition_id = partition_id;
+    current_load_partition_id = -1;
+    current_load_logical_bytes = 0;
+    current_load_local_node_count = 0;
+    current_load_arc_int_count = 0;
+    current_load_constraint_endpoint_count = 0;
   }
 
   void recordSolveStart(long round_id, const std::vector<int> &ids) {
@@ -317,6 +342,15 @@ struct WorkerStatusState {
         << " status_port " << status_port
         << " loaded_partition_count " << loaded_partition_count
         << " partition_ids " << joinInts(partition_ids)
+        << " current_load_partition_id " << current_load_partition_id
+        << " current_load_logical_bytes " << current_load_logical_bytes
+        << " current_load_local_node_count "
+        << current_load_local_node_count
+        << " current_load_arc_int_count "
+        << current_load_arc_int_count
+        << " current_load_constraint_endpoint_count "
+        << current_load_constraint_endpoint_count
+        << " last_loaded_partition_id " << last_loaded_partition_id
         << " current_round_id " << current_round_id
         << " current_partition_ids " << joinInts(current_partition_ids)
         << " partition_solve_call_count_total "
@@ -506,6 +540,11 @@ int main(int argc, char **argv) {
         [&status_state](mcpd4::MessageType type,
                         const mcpd4::FrameTransferStats &transfer) {
           status_state.recordFrameReceived(type, transfer);
+        };
+    hooks.on_partition_loading =
+        [&status_state](const mcpd3::PartitionPackage &package,
+                        std::uint64_t logical_frame_bytes) {
+          status_state.recordPartitionLoading(package, logical_frame_bytes);
         };
     hooks.on_partition_loaded = [&status_state](int partition_id) {
       status_state.recordPartitionLoaded(partition_id);
