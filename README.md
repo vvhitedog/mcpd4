@@ -132,6 +132,7 @@ Use this on each process-level worker:
 ```bash
 ./build/mcpd4_worker 10.0.0.10 50051 \
   --name worker-a \
+  --bk-mmap-dir /fast-disk/mcpd4-bk-worker-a \
   --streaming-partitions \
   --streaming-dir /fast-disk/mcpd4-worker-a \
   --streaming-cache-bytes 4000000000
@@ -226,11 +227,15 @@ first in terminal 1:
 Then start exactly two workers, matching `--workers 2`:
 
 ```bash
-./build/mcpd4_worker 127.0.0.1 50051 --name local-a --rpc-compression none
+./build/mcpd4_worker 127.0.0.1 50051 --name local-a \
+  --bk-mmap-dir /tmp/mcpd4-bk-local-a \
+  --rpc-compression none
 ```
 
 ```bash
-./build/mcpd4_worker 127.0.0.1 50051 --name local-b --rpc-compression none
+./build/mcpd4_worker 127.0.0.1 50051 --name local-b \
+  --bk-mmap-dir /tmp/mcpd4-bk-local-b \
+  --rpc-compression none
 ```
 
 The coordinator waits for all requested workers before solving. If a worker
@@ -263,19 +268,27 @@ firewall. Use `0.0.0.0` to accept connections on all IPv4 interfaces:
 On each worker machine, use the coordinator machine's reachable IP or DNS name:
 
 ```bash
-./build/mcpd4_worker 10.0.0.10 50051 --name worker-a --rpc-compression none
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-a \
+  --bk-mmap-dir /fast-disk/mcpd4-bk-worker-a \
+  --rpc-compression none
 ```
 
 ```bash
-./build/mcpd4_worker 10.0.0.10 50051 --name worker-b --rpc-compression none
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-b \
+  --bk-mmap-dir /fast-disk/mcpd4-bk-worker-b \
+  --rpc-compression none
 ```
 
 ```bash
-./build/mcpd4_worker 10.0.0.10 50051 --name worker-c --rpc-compression none
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-c \
+  --bk-mmap-dir /fast-disk/mcpd4-bk-worker-c \
+  --rpc-compression none
 ```
 
 ```bash
-./build/mcpd4_worker 10.0.0.10 50051 --name worker-d --rpc-compression none
+./build/mcpd4_worker 10.0.0.10 50051 --name worker-d \
+  --bk-mmap-dir /fast-disk/mcpd4-bk-worker-d \
+  --rpc-compression none
 ```
 
 Use one worker process per machine to start. A worker can own multiple
@@ -324,6 +337,7 @@ Baseline run:
 
 ```bash
 ./build/mcpd4_worker 10.0.0.10 50051 --name worker-a \
+  --bk-mmap-dir /fast-disk/mcpd4-bk-worker-a \
   --rpc-compression none
 ```
 
@@ -347,6 +361,7 @@ Compressed run:
 
 ```bash
 ./build/mcpd4_worker 10.0.0.10 50051 --name worker-a \
+  --bk-mmap-dir /fast-disk/mcpd4-bk-worker-a \
   --rpc-compression snappy
 ```
 
@@ -421,6 +436,7 @@ Start workers in discovery mode:
   --status-port 51053 \
   --status-token lab-run-1 \
   --name worker-a \
+  --bk-mmap-dir /fast-disk/mcpd4-bk-worker-a \
   --rpc-compression none
 ```
 
@@ -543,22 +559,25 @@ usage: mcpd4_worker HOST PORT [--name NAME]
   materialized partitions. `0` disables eviction.
 - `--name NAME`: optional worker name used in logs and progress output.
 - `--bk-storage MODE`: choose BK graph node/arc-array backing for resident
-  local max-flow solvers. `malloc` is the default, `file_mmap` stores BK arrays
-  in unlinked files under `--bk-mmap-dir`, and `anon_mmap` uses anonymous
-  mappings. Existing `MCPD3_BK_STORAGE` is still respected when this flag is
-  omitted.
+  local max-flow solvers. `file_mmap` is the mcpd4 worker default and stores BK
+  arrays in unlinked files under `--bk-mmap-dir`; when no directory is supplied,
+  the worker creates `/tmp/mcpd4-bk-mmap-<pid>`. `malloc` is an explicit opt-out
+  for heap-backed BK arrays, and `anon_mmap` uses anonymous mappings. Existing
+  `MCPD3_BK_STORAGE` is still respected when this flag is omitted.
 - `--bk-mmap-dir DIR`: directory for `file_mmap` BK storage. Passing this
-  without `--bk-storage` implies `file_mmap`.
+  without `--bk-storage` implies `file_mmap`. For large runs, set this to a
+  fast local filesystem with enough free space for the worker's assigned BK
+  node/arc arrays.
 - `--bk-mmap-advise ADVISE`: optional BK mmap advice passed through to mcpd3.
   Supported values include `none`, `willneed`, `populate`, `dontdump`,
   `lock_onfault`, and `lock` where supported by the OS.
 
-For large resident distributed runs, prefer `--bk-storage file_mmap` on each
-worker with a fast local disk that has enough free space for that worker's
-assigned BK node/arc arrays. This is separate from `--streaming-partitions`:
-BK mmap keeps assigned solvers resident but backs their largest internal arrays
-with files, while streaming workers evict whole partition solvers and reload
-them on demand.
+For large resident distributed runs, keep the default `file_mmap` storage and
+pass `--bk-mmap-dir` on each worker so it uses a fast local disk with enough
+free space. This is separate from `--streaming-partitions`: BK mmap keeps
+assigned solvers resident but backs their largest internal arrays with files,
+while streaming workers evict whole partition solvers and reload them on
+demand.
 
 Workers receive all partition data from the coordinator after connecting. They
 do not need the DIMACS file.

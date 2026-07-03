@@ -1,5 +1,18 @@
 # Failed Approaches And Taboos
 
+## 2026-07-03 02:08 PDT
+
+- Do not assume BK arrays are file-backed unless worker status says
+  `bk_storage file_mmap`. The p24/p32/p48 large-adhead resident runs were
+  launched before mcpd4 defaulted workers to file-backed BK storage, and the
+  logged worker commands lacked `--bk-storage file_mmap`/`--bk-mmap-dir`.
+  Kernel OOM logs showed `anon-rss` around `7.8 GB` and `file-rss` near zero,
+  confirming heap pressure rather than file-backed page-cache pressure.
+- Do not rely on the default `/tmp/mcpd4-bk-mmap-<pid>` directory for large
+  production benchmarks on a nearly full root filesystem. Pass
+  `--bk-mmap-dir` on a fast disk with enough free space for that worker's
+  assigned BK node/arc arrays.
+
 ## 2026-07-03 01:54 PDT
 
 - Do not rely on the coordinator UDP status endpoint for post-mortem errors.

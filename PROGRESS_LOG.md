@@ -1,5 +1,27 @@
 # Progress Log
 
+## 2026-07-03 02:08 PDT
+
+- Changed mcpd4 worker BK storage default from heap-backed `malloc` to
+  file-backed `file_mmap`:
+  - when no `--bk-storage`/`MCPD3_BK_STORAGE` override is present, the worker
+    now sets `MCPD3_BK_STORAGE=file_mmap`;
+  - when no mmap directory is supplied, the worker creates an owned
+    `/tmp/mcpd4-bk-mmap-<pid>` directory;
+  - explicit `--bk-mmap-dir` directories are created if missing;
+  - explicit `--bk-storage malloc` and existing `MCPD3_BK_*` env overrides
+    remain supported.
+- Updated process integration coverage so a worker with no BK flags must report
+  `bk_storage file_mmap` and a default mmap directory in status.
+- Updated README worker examples to pass `--bk-mmap-dir` explicitly for
+  repeatable large-run behavior on a known filesystem.
+- Verified:
+  - `cmake --build build -j`;
+  - `./build/process_integration_test ./build/mcpd4_coordinator ./build/mcpd4_worker ./build/mcpd4_discovery ./build/mcpd4_status tests/fixtures`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`.
+
 ## 2026-07-03 01:54 PDT
 
 - Added durable coordinator status snapshots:

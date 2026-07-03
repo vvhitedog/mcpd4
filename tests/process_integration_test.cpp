@@ -18,7 +18,6 @@
 #include <string>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -998,10 +997,7 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
       "process-test-" + std::to_string(::getpid()) + "-status";
   const std::string ready_file =
       "/tmp/mcpd4-discovery-" + std::to_string(::getpid()) + ".ready";
-  const std::string bk_mmap_dir =
-      "/tmp/mcpd4-bk-mmap-" + std::to_string(::getpid());
   std::remove(ready_file.c_str());
-  (void)::mkdir(bk_mmap_dir.c_str(), 0700);
 
   ChildProcess coordinator;
   ChildProcess worker;
@@ -1071,13 +1067,7 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
                            "--status-token",
                            status_token,
                            "--name",
-                           "discovered-worker",
-                           "--bk-storage",
-                           "file_mmap",
-                           "--bk-mmap-dir",
-                           bk_mmap_dir,
-                           "--bk-mmap-advise",
-                           "dontdump"});
+                           "discovered-worker"});
 
     auto query_status = [&](std::uint16_t port) {
       auto status = spawnProcess({status_bin,
@@ -1210,15 +1200,15 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
                 worker_status_output);
     require(worker_status_output.find("bk_storage file_mmap") !=
                 std::string::npos,
-            "worker status should report BK storage mode\n" +
+            "worker should default to file-backed BK storage\n" +
                 worker_status_output);
-    require(worker_status_output.find("bk_mmap_dir " + bk_mmap_dir) !=
+    require(worker_status_output.find("bk_mmap_dir /tmp/mcpd4-bk-mmap-") !=
                 std::string::npos,
-            "worker status should report BK mmap directory\n" +
+            "worker should report its default BK mmap directory\n" +
                 worker_status_output);
-    require(worker_status_output.find("bk_mmap_advise dontdump") !=
+    require(worker_status_output.find("bk_mmap_advise -") !=
                 std::string::npos,
-            "worker status should report BK mmap advice\n" +
+            "worker should not apply BK mmap advice unless requested\n" +
                 worker_status_output);
 
     auto close = spawnProcess({discovery_bin,
@@ -1258,12 +1248,10 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
     const auto distributed = parseCoordinatorOutput(coordinator.output);
     requireEqual(distributed, reference, "discovery");
     std::remove(ready_file.c_str());
-    (void)::rmdir(bk_mmap_dir.c_str());
   } catch (...) {
     killIfRunning(&coordinator);
     killIfRunning(&worker);
     std::remove(ready_file.c_str());
-    (void)::rmdir(bk_mmap_dir.c_str());
     throw;
   }
 }

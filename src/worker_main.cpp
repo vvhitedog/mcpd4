@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -14,6 +15,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -107,7 +110,73 @@ std::string effectiveBkStorageMode() {
   if (!storage.empty()) {
     return storage;
   }
-  return envValue("MCPD3_BK_MMAP_DIR").empty() ? "malloc" : "file_mmap";
+  return "file_mmap";
+}
+
+std::string defaultBkMmapDir() {
+  return "/tmp/mcpd4-bk-mmap-" + std::to_string(static_cast<long>(::getpid()));
+}
+
+void createDirectoryOrThrow(const std::string &path,
+                            const std::string &description) {
+  std::error_code ec;
+  std::filesystem::create_directories(path, ec);
+  if (ec) {
+    throw std::runtime_error("failed to create " + description + " " + path +
+                             ": " + ec.message());
+  }
+}
+
+class OwnedDirectory {
+public:
+  void create(const std::string &path) {
+    if (path.empty()) {
+      return;
+    }
+    createDirectoryOrThrow(path, "BK mmap directory");
+    path_ = path;
+  }
+
+  ~OwnedDirectory() {
+    if (path_.empty()) {
+      return;
+    }
+    std::error_code ec;
+    std::filesystem::remove(path_, ec);
+  }
+
+  OwnedDirectory(const OwnedDirectory &) = delete;
+  OwnedDirectory &operator=(const OwnedDirectory &) = delete;
+  OwnedDirectory() = default;
+
+private:
+  std::string path_;
+};
+
+void configureBkStorageDefaults(std::string *bk_storage,
+                                std::string *bk_mmap_dir,
+                                OwnedDirectory *owned_mmap_dir) {
+  if (bk_storage->empty() && !bk_mmap_dir->empty()) {
+    *bk_storage = "file_mmap";
+  }
+
+  const bool explicit_storage = !bk_storage->empty();
+  const bool env_storage = !envValue("MCPD3_BK_STORAGE").empty();
+  const bool env_mmap_dir = !envValue("MCPD3_BK_MMAP_DIR").empty();
+
+  if (!explicit_storage && !env_storage) {
+    *bk_storage = "file_mmap";
+  }
+
+  const std::string effective_storage =
+      !bk_storage->empty() ? *bk_storage : envValue("MCPD3_BK_STORAGE");
+  if (effective_storage == "file_mmap" && bk_mmap_dir->empty() &&
+      !env_mmap_dir) {
+    *bk_mmap_dir = defaultBkMmapDir();
+    owned_mmap_dir->create(*bk_mmap_dir);
+  } else if (effective_storage == "file_mmap" && !bk_mmap_dir->empty()) {
+    createDirectoryOrThrow(*bk_mmap_dir, "BK mmap directory");
+  }
 }
 
 struct WorkerStatusState {
@@ -471,9 +540,9 @@ int main(int argc, char **argv) {
     if (!bk_storage.empty() && !isValidBkStorageMode(bk_storage)) {
       throw std::runtime_error("unknown --bk-storage mode: " + bk_storage);
     }
-    if (bk_storage.empty() && !bk_mmap_dir.empty()) {
-      bk_storage = "file_mmap";
-    }
+    OwnedDirectory owned_bk_mmap_dir;
+    configureBkStorageDefaults(&bk_storage, &bk_mmap_dir,
+                               &owned_bk_mmap_dir);
     if (bk_storage == "file_mmap" && bk_mmap_dir.empty() &&
         envValue("MCPD3_BK_MMAP_DIR").empty()) {
       throw std::runtime_error(
