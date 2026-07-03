@@ -7,9 +7,9 @@
   the previous local cut labels; losing that label vector made a forced
   streaming reload disagree with the resident in-process worker on
   regularization budget diagnostics.
-- Do not count disk-backed streaming workers as a warm-solver performance
-  optimization yet. The current implementation preserves correctness-critical
-  alpha and label state across eviction, but it intentionally rebuilds BK
+- Historical pre-warm-state limitation: disk-backed streaming workers were
+  not initially a warm-solver performance optimization. That version preserved
+  correctness-critical alpha and label state across eviction, but rebuilt BK
   solver/residual state on reload.
 
 ## 2026-06-29 00:24:08 PDT

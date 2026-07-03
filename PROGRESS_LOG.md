@@ -1,5 +1,34 @@
 # Progress Log
 
+## 2026-07-02 22:17 PDT
+
+- Added warm-state preservation for streaming partition eviction:
+  - BK `Graph` now exposes pointer-safe reusable state using arc/node indices
+    rather than raw pointers;
+  - `PrimalDualMinCutSolver` can capture/restore primal-dual vectors, labels,
+    cached multipliers, regularization anchors, mincut value, iteration flags,
+    and BK residual/tree state;
+  - `InProcessPartitionWorker` exposes solver warm-state capture/restore by
+    partition id;
+  - `StreamingPartitionWorker` writes warm state to disk when cache eviction
+    drops a resident solver and restores it when the partition is reloaded.
+- Objective-scale handling:
+  - resident streaming solvers still scale in place;
+  - evicted warm snapshots are invalidated on objective-scale promotion, then
+    the worker falls back to persisted labels for correctness until a fresh
+    resident solver is solved and evicted again.
+- Added test coverage:
+  - streaming eviction test now asserts a warm-state write on eviction and a
+    warm-state restore on reload, while still matching the resident
+    in-process worker result.
+- Verified:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `cmake --build build/no-snappy -j`;
+  - `ctest --test-dir build/no-snappy --output-on-failure`.
+
 ## 2026-07-02 00:53 PDT
 
 - Implemented explicit disk-backed streaming partition workers:

@@ -154,9 +154,11 @@ limit is approximate and based on BK array plus solver-vector estimates; one
 oversized partition is still allowed to load when the cache is otherwise empty.
 The streaming worker preserves alpha state and the previous local cut labels
 across eviction, which is required by the current scaled-epsilon
-regularization. It does not preserve warm BK residual graph state, so the
-first product goal is correctness and reduced memory pressure rather than
-maximum local runtime.
+regularization. It also spills warm solver state on cache eviction, including
+primal-dual flow vectors and BK residual/tree state, then restores it when the
+partition is materialized again. Evicted warm snapshots are invalidated across
+objective-scale promotions; resident solvers still scale in place and will
+write a fresh warm snapshot on later eviction.
 
 ## Quick Localhost Run
 
