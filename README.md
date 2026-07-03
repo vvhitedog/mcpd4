@@ -36,6 +36,11 @@ planning details live in [AGENT_HANDOFF.md](AGENT_HANDOFF.md), progress is in
 The current runtime is IPv4 TCP. It can optionally compress RPC frames with
 Snappy, but it does not provide authentication or encryption, so run it on a
 trusted network or behind an SSH/VPN tunnel.
+Each logical protocol frame is capped at 1 GiB by default. The coordinator
+checks this before writing and workers check it while reading, so oversized
+partition packages fail with a local frame-size error instead of a remote
+connection reset. Increase `--partitions` if a very large graph creates
+packages above that cap.
 
 ## Get The Code
 
@@ -653,6 +658,8 @@ With `--progress-every`, the coordinator also prints:
 RPC byte counters are cumulative. Logical byte counters include encoded
 protocol frame headers before transport compression. Wire byte counters report
 actual bytes written to the TCP connection, including any Snappy envelope.
+Logical frames are bounded by the runtime frame cap before compression, so a
+package must fit the cap even if Snappy would shrink it on the wire.
 Useful fields:
 
 - `rpc_tx_bytes_total` and `rpc_rx_bytes_total`: total bytes sent and received

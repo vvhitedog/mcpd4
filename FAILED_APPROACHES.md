@@ -1,5 +1,15 @@
 # Failed Approaches And Taboos
 
+## 2026-07-03 01:04 PDT
+
+- Large adhead p16 resident distributed run failed under the old TCP frame cap:
+  workers reported `frame payload exceeds maximum size` because p16 partition
+  packages are roughly 320-359 MiB logical, while the runtime still had a
+  256 MiB receive limit. Snappy does not avoid this because the cap applies to
+  the logical protocol frame before compression. Fix: use the shared 1 GiB
+  frame cap and sender-side enforcement; if a future graph exceeds that cap,
+  increase the partition count or implement multipart partition-package RPC.
+
 ## 2026-07-02 00:53 PDT
 
 - Do not evict and cold-reload a regularized partition while preserving only

@@ -1,5 +1,21 @@
 # Progress Log
 
+## 2026-07-03 01:04 PDT
+
+- Raised mcpd4's default TCP logical frame cap from 256 MiB to 1 GiB and
+  centralized it as `mcpd4::kDefaultMaxFrameBytes`.
+- Added sender-side frame-size enforcement so oversized partition packages
+  fail before the coordinator writes a partial frame and resets the worker
+  connection.
+- Updated all runtime receive sites to use the shared frame cap instead of a
+  hard-coded 256 MiB literal.
+- Added TCP loopback coverage for:
+  - receiver-side oversize rejection;
+  - sender-side oversize rejection;
+  - Snappy logical-frame oversize rejection;
+  - the observed large adhead p16 package size fitting under the new default
+    cap.
+
 ## 2026-07-02 22:17 PDT
 
 - Added warm-state preservation for streaming partition eviction:

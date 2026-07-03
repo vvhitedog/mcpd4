@@ -25,6 +25,7 @@ constexpr std::uint32_t kCompressedFrameMagic = 0x345a504d; // "MPZ4"
 constexpr std::uint32_t kCompressedFrameStored = 0;
 constexpr std::uint32_t kCompressedFrameSnappy = 1;
 constexpr std::size_t kCompressedFrameHeaderBytes = 24;
+constexpr std::size_t kProtocolFrameHeaderBytes = 12;
 
 std::runtime_error socketError(const std::string &message) {
   return std::runtime_error(message + ": " + std::strerror(errno));
@@ -100,6 +101,14 @@ std::uint64_t elapsedUs(std::chrono::steady_clock::time_point start) {
       std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start)
           .count());
+}
+
+void requireFrameWithinLimit(std::uint64_t size,
+                             std::size_t max_frame_bytes,
+                             const char *message) {
+  if (size > static_cast<std::uint64_t>(max_frame_bytes)) {
+    throw std::runtime_error(message);
+  }
 }
 
 } // namespace
@@ -264,10 +273,13 @@ TransportCompression parseTransportCompression(const std::string &value) {
 void sendFrameBytes(const SocketHandle &socket,
                     const std::vector<std::uint8_t> &frame,
                     TransportCompression compression,
-                    FrameTransferStats *stats) {
+                    FrameTransferStats *stats,
+                    std::size_t max_frame_bytes) {
   if (!socket.valid()) {
     throw std::runtime_error("cannot write to invalid socket");
   }
+  requireFrameWithinLimit(frame.size(), max_frame_bytes,
+                          "frame payload exceeds maximum size");
   if (stats != nullptr) {
     *stats = {};
     stats->logical_bytes = static_cast<std::uint64_t>(frame.size());
@@ -324,7 +336,7 @@ void sendFrameBytes(const SocketHandle &socket,
 }
 
 std::vector<std::uint8_t> receiveFrameBytes(
-    const SocketHandle &socket, std::size_t max_payload_bytes,
+    const SocketHandle &socket, std::size_t max_frame_bytes,
     TransportCompression compression, FrameTransferStats *stats) {
   if (stats != nullptr) {
     *stats = {};
@@ -341,12 +353,10 @@ std::vector<std::uint8_t> receiveFrameBytes(
     const auto codec = readLittleU32(header.data() + 4);
     const auto logical_size = readLittleU64(header.data() + 8);
     const auto payload_size = readLittleU64(header.data() + 16);
-    if (logical_size > max_payload_bytes) {
-      throw std::runtime_error("frame payload exceeds maximum size");
-    }
-    if (payload_size > max_payload_bytes) {
-      throw std::runtime_error("transport frame exceeds maximum size");
-    }
+    requireFrameWithinLimit(logical_size, max_frame_bytes,
+                            "frame payload exceeds maximum size");
+    requireFrameWithinLimit(payload_size, max_frame_bytes,
+                            "transport frame exceeds maximum size");
     std::vector<std::uint8_t> payload(static_cast<std::size_t>(payload_size));
     readAll(socket.get(), payload.data(), payload.size());
 
@@ -406,7 +416,10 @@ std::vector<std::uint8_t> receiveFrameBytes(
   readAll(socket.get(), frame.data(), frame.size());
 
   const auto payload_size = readLittleU64(frame.data() + 4);
-  if (payload_size > max_payload_bytes) {
+  if (max_frame_bytes < kProtocolFrameHeaderBytes ||
+      payload_size >
+          static_cast<std::uint64_t>(max_frame_bytes -
+                                     kProtocolFrameHeaderBytes)) {
     throw std::runtime_error("frame payload exceeds maximum size");
   }
   frame.resize(frame.size() + static_cast<std::size_t>(payload_size));

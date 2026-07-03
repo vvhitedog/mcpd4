@@ -1,7 +1,8 @@
 #pragma once
 
-#include <cstdint>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,8 @@ enum class TransportCompression {
   NONE,
   SNAPPY,
 };
+
+constexpr std::size_t kDefaultMaxFrameBytes = 1024ULL * 1024ULL * 1024ULL;
 
 struct FrameTransferStats {
   std::uint64_t logical_bytes = 0;
@@ -57,10 +60,11 @@ TransportCompression parseTransportCompression(const std::string &value);
 void sendFrameBytes(
     const SocketHandle &socket, const std::vector<std::uint8_t> &frame,
     TransportCompression compression = TransportCompression::NONE,
-    FrameTransferStats *stats = nullptr);
+    FrameTransferStats *stats = nullptr,
+    std::size_t max_frame_bytes = kDefaultMaxFrameBytes);
 std::vector<std::uint8_t> receiveFrameBytes(
     const SocketHandle &socket,
-    std::size_t max_payload_bytes = 256ULL * 1024ULL * 1024ULL,
+    std::size_t max_frame_bytes = kDefaultMaxFrameBytes,
     TransportCompression compression = TransportCompression::NONE,
     FrameTransferStats *stats = nullptr);
 

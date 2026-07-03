@@ -140,7 +140,7 @@ Frame receiveTypedFrame(const SocketHandle &socket,
                             TransportCompression::NONE) {
   FrameTransferStats transfer;
   *frame_bytes =
-      receiveFrameBytes(socket, 256ULL * 1024ULL * 1024ULL, compression,
+      receiveFrameBytes(socket, kDefaultMaxFrameBytes, compression,
                         &transfer);
   const auto frame = decodeFrame(*frame_bytes);
   recordFrameReceived(stats, frame.type, transfer);
@@ -434,7 +434,7 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
   while (true) {
     FrameTransferStats receive_transfer;
     const auto frame_bytes =
-        receiveFrameBytes(socket, 256ULL * 1024ULL * 1024ULL, compression,
+        receiveFrameBytes(socket, kDefaultMaxFrameBytes, compression,
                           &receive_transfer);
     const auto frame = decodeFrame(frame_bytes);
     if (status_hooks.on_frame_received) {
@@ -577,7 +577,7 @@ std::unique_ptr<TcpPartitionWorker> acceptTcpPartitionWorker(
   SocketHandle socket = acceptTcp(listener, timeout);
   FrameTransferStats transfer;
   const auto frame_bytes =
-      receiveFrameBytes(socket, 256ULL * 1024ULL * 1024ULL,
+      receiveFrameBytes(socket, kDefaultMaxFrameBytes,
                         TransportCompression::NONE, &transfer);
   const auto frame = decodeFrame(frame_bytes);
   if (frame.type != MessageType::HELLO) {

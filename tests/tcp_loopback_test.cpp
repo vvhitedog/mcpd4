@@ -211,6 +211,48 @@ void rejectsOversizedPayloadBeforeReadingBody() {
       "oversized TCP frame should be rejected");
 }
 
+void rejectsOversizedPayloadBeforeWritingBody() {
+  auto pair = makeConnectedPair();
+  const std::vector<std::uint8_t> payload{1, 2, 3, 4};
+  const auto frame = mcpd4::encodeFrame(
+      mcpd4::MessageType::READY, payload);
+  requireThrows(
+      [&] {
+        mcpd4::sendFrameBytes(pair.client, frame,
+                              mcpd4::TransportCompression::NONE, nullptr,
+                              frame.size() - 1);
+      },
+      "oversized TCP frame should be rejected before send");
+}
+
+void defaultFrameLimitCoversObservedLargeAdheadP16Package() {
+  constexpr std::size_t kLargestObservedP16PackageFrame =
+      358612992ULL + 12ULL;
+  require(mcpd4::kDefaultMaxFrameBytes >=
+              kLargestObservedP16PackageFrame,
+          "default frame limit should cover the observed p16 adhead package");
+}
+
+void rejectsOversizedSnappyLogicalFrameBeforeReadingBody() {
+  if (!mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto pair = makeConnectedPair();
+  mcpd4::ReadyMessage ready;
+  ready.worker_name = std::string(1024, 'a');
+  const auto frame = mcpd4::encodeReady(ready);
+
+  mcpd4::sendFrameBytes(pair.client, frame,
+                        mcpd4::TransportCompression::SNAPPY);
+  requireThrows(
+      [&] {
+        (void)mcpd4::receiveFrameBytes(
+            pair.server, frame.size() - 1,
+            mcpd4::TransportCompression::SNAPPY);
+      },
+      "oversized snappy logical frame should be rejected");
+}
+
 void snappyCompressedFrameRoundTrips() {
   if (!mcpd4::snappyCompressionAvailable()) {
     return;
@@ -639,6 +681,9 @@ int main() {
   try {
     receivesFrameSplitAcrossTcpPackets();
     rejectsOversizedPayloadBeforeReadingBody();
+    rejectsOversizedPayloadBeforeWritingBody();
+    defaultFrameLimitCoversObservedLargeAdheadP16Package();
+    rejectsOversizedSnappyLogicalFrameBeforeReadingBody();
     snappyCompressedFrameRoundTrips();
     rejectsInvalidWorkerHello();
     remoteWorkerExposesHandshakeResources();
