@@ -1,5 +1,40 @@
 # Progress Log
 
+## 2026-07-11 05:50 PDT
+
+- Ran full local TCP schedule probes for the current best single-scale point
+  (`babyface.n6c10`, p15/w15, malloc-backed BK storage, no compression,
+  schedule start `10000`, five schedule levels, max `20` iterations per
+  scale).
+- Strict overflow mode:
+  `benchmark_results/local_tcp_fullschedule_p15_w15_malloc_babyface_none_20260711_054117`
+  reached total_iteration `51`, then attempted objective-scale promotion after
+  regularization budget pressure and failed with
+  `objective scale promotion exceeds int`. Last status snapshot reported
+  schedule scale `100`, objective scale `1000`, `398,414` disagreements, and
+  solve elapsed `113,980,430us`.
+- Saturating overflow mode:
+  `benchmark_results/local_tcp_fullschedule_p15_w15_malloc_babyface_saturate_20260711_054457`
+  completed without crashing:
+  - status `2` / stop_reason `3`, both `ITERATION_COUNT_EXCEEDED`;
+  - final objective scale `100000` after `2` promotions;
+  - total iterations `195`;
+  - final disagreements `3,099`;
+  - best certified lower bound `19,369.2`
+    (`best_certified_lower_bound_raw=1,936,919,910`);
+  - total wall `293,768,552us`, coordinator setup `4,939,864us`, solve wall
+    `285,146,898us`;
+  - aggregate worker solve `2,043,549,031us`, worker RPC overhead
+    `67,877,700us`, partition-load RPC `62,990,600us`;
+  - solve request TX `311,366,120` bytes, solve result RX `298,942,225`
+    bytes.
+- Conclusion: freeing memory makes the malloc-backed p15/w15 full-schedule run
+  stable, and `--saturate-capacity-overflow` correctly keeps objective-scale
+  promotion alive, but the current `20`-iteration-per-scale cap does not reach
+  agreement. The next convergence experiment should raise the per-scale
+  iteration cap or adjust the schedule; the current run is a useful baseline,
+  not a solved local TCP target.
+
 ## 2026-07-11 05:40 PDT
 
 - Increased the coordinator TCP listen backlog from the default `16` to

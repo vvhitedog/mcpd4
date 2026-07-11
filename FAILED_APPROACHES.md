@@ -1,5 +1,24 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 05:50 PDT
+
+- Do not treat the p15/w15 full schedule with max `20` iterations per scale as
+  a clean local TCP solve for `babyface.n6c10`.
+- Strict overflow mode failed at total_iteration `51`:
+  `benchmark_results/local_tcp_fullschedule_p15_w15_malloc_babyface_none_20260711_054117`.
+  The regularization budget warning forced objective-scale promotion, and
+  scaling the existing 32-bit capacities by another decade exceeded the int
+  range.
+- Saturating overflow mode completed but still did not reach agreement:
+  `benchmark_results/local_tcp_fullschedule_p15_w15_malloc_babyface_saturate_20260711_054457`
+  ended with status `2` / stop_reason `3` (`ITERATION_COUNT_EXCEEDED`), final
+  objective scale `100000`, `2` promotions, `195` total iterations, and
+  `3,099` remaining disagreements after `293,768,552us` wall time.
+- Interpretation: saturation is useful for continuing past overflow in
+  exploratory runs, but it is not itself a convergence fix. Future full-schedule
+  probes should increase the per-scale iteration cap or improve the schedule
+  logic rather than assuming truncation will finish the primal recovery.
+
 ## 2026-07-11 05:38 PDT
 
 - `perf stat` is not usable for this optimization pass under the current
