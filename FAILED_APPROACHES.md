@@ -1,5 +1,28 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 05:35 PDT
+
+- Do not add a second vector/index-map cache to the temporal label delta codec
+  as a presumed CPU fast path. The prototype kept wire bytes identical but
+  regressed p15/w15 local TCP wall time badly and was reverted.
+- Benchmark evidence, `babyface.n6c10`, p15/w15, `--max-iterations 20`
+  stopping after 11 iterations, malloc-backed BK storage, no compression:
+  - baseline p15/w15
+    `benchmark_results/local_tcp_early_listen_20iter_p15_w15_malloc_babyface_none_20260711_053009`:
+    total `29,852,306us`, setup `4,945,809us`, solve `21,232,761us`,
+    aggregate partition-load RPC `63,945,975us`;
+  - label-vector fast path
+    `benchmark_results/local_tcp_label_vector_fastpath_p15_w15_malloc_babyface_none_20260711_053359`:
+    total `33,110,423us`, setup `8,016,959us`, solve `21,458,399us`,
+    aggregate partition-load RPC `108,246,485us`;
+  - label-vector fast path repeat
+    `benchmark_results/local_tcp_label_vector_fastpath_p15_w15_malloc_babyface_none_20260711_053432`:
+    total `34,632,108us`, setup `9,284,759us`, solve `21,714,667us`,
+    aggregate partition-load RPC `127,515,380us`.
+- Interpretation: the extra label state likely worsens memory/cache pressure
+  enough to dominate any avoided hash lookups. Keep the simpler map-only codec
+  until profiling shows a more precise CPU hotspot.
+
 ## 2026-07-11 05:14 PDT
 
 - For the current in-memory-sized `babyface.n6c10` local TCP p16/w16
