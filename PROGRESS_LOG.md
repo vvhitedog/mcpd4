@@ -2186,3 +2186,46 @@
   - `./build/tcp_loopback_test`;
   - `ctest --test-dir build --output-on-failure`;
   - `ctest --test-dir build/mcpd3-native --output-on-failure`.
+
+## 2026-07-11 02:42 PDT
+
+- After freeing memory on the laptop, reran local TCP `babyface.n6c10`
+  one-iteration setup sweeps with file-backed BK mmap, `willneed`, no
+  compression, `objective_scale=1000`, and one local worker per partition.
+- The cleaned-memory p10/w10 repeat improved substantially:
+  - `benchmark_results/local_tcp_willneed_after_memfree_babyface_p10_w10_none_20260711_023544`;
+  - coordinator total `11,076,306us`, setup `5,948,891us`, solve
+    `911,493us`, aggregate partition-load RPC `51,338,181us`;
+  - wrapper wall `0:11.33`, max RSS `1,419,540 KiB`.
+- Swept partition/worker counts under the same settings:
+  - p3/w3:
+    `benchmark_results/local_tcp_willneed_after_memfree_babyface_p3_w3_none_20260711_024211`,
+    total `9,221,119us`, setup `3,492,283us`, solve `1,533,910us`;
+  - p4/w4:
+    `benchmark_results/local_tcp_willneed_after_memfree_babyface_p4_w4_none_20260711_023913`,
+    total `9,139,006us`, setup `3,356,574us`, solve `1,661,378us`;
+  - p5/w5:
+    `benchmark_results/local_tcp_willneed_after_memfree_seq_babyface_p5_w5_none_20260711_024039`,
+    total `11,488,365us`, setup `3,459,302us`, solve `3,900,836us`;
+  - p6/w6:
+    `benchmark_results/local_tcp_willneed_after_memfree_babyface_p6_w6_none_20260711_023831`,
+    total `8,868,286us`, setup `3,608,384us`, solve `1,094,849us`;
+  - p6/w6 repeat:
+    `benchmark_results/local_tcp_willneed_after_memfree_repeat_babyface_p6_w6_none_20260711_024150`,
+    total `9,077,283us`, setup `3,804,701us`, solve `1,114,780us`;
+  - p7/w7:
+    `benchmark_results/local_tcp_willneed_after_memfree_seq_babyface_p7_w7_none_20260711_024104`,
+    total `9,975,008us`, setup `4,810,056us`, solve `882,539us`;
+  - p8/w8:
+    `benchmark_results/local_tcp_willneed_after_memfree_babyface_p8_w8_none_20260711_023754`,
+    total `10,634,266us`, setup `5,008,980us`, solve `1,483,682us`;
+  - p12/w12:
+    `benchmark_results/local_tcp_willneed_after_memfree_babyface_p12_w12_none_20260711_023712`,
+    total `12,306,096us`, setup `7,098,151us`, solve `877,886us`;
+  - p16/w16:
+    `benchmark_results/local_tcp_willneed_after_memfree_babyface_p16_w16_none_20260711_023633`,
+    total `14,435,133us`, setup `9,130,204us`, solve `1,016,999us`.
+- Current best measured local TCP one-iteration point on this machine is
+  p6/w6, repeatable around `8.9s-9.1s` coordinator wall. Higher p/w counts
+  reduce some solve time but lose more to package/load contention; lower p/w
+  counts reduce load cost but lose solve parallelism.

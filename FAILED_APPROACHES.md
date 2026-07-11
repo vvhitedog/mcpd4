@@ -572,3 +572,19 @@
   `benchmark_results/local_tcp_snappy_filemmap_babyface_p10_w10_20260711_022738`,
   but setup `8,391,191us` and total `14,641,085us` did not beat no-compression
   with BK mmap `willneed`.
+
+## 2026-07-11 02:42 PDT
+
+- Do not compare local TCP benchmark runs launched concurrently as if they were
+  independent points. The first p5/w5 and p7/w7 after-memory-free probes were
+  started at the same time:
+  - `benchmark_results/local_tcp_willneed_after_memfree_babyface_p5_w5_none_20260711_024001`;
+  - `benchmark_results/local_tcp_willneed_after_memfree_babyface_p7_w7_none_20260711_024001`.
+  They share CPU, disk, and page cache pressure, so use the later sequential
+  p5/w5 and p7/w7 runs for comparisons.
+- Do not run benchmarks from this worktree with a relative `data/...` DIMACS
+  path unless the data directory has been linked into the worktree. Run
+  `benchmark_results/local_tcp_willneed_after_memfree_babyface_p10_w10_none_20260711_023518`
+  failed before graph load because `data/maxflow/babyface.n6c10/babyface.n6c10.max`
+  was not present under `.worktrees/local-tcp-opt`; the valid rerun used the
+  absolute path from the main checkout.
