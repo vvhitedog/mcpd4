@@ -3258,3 +3258,37 @@
   observed local TCP adhead point on this machine: about `2.78x` faster than
   the older p8 note and about `1.81x` faster than the matched current
   start-10000 control.
+
+## 2026-07-11 08:15 PDT
+
+- Swept close partition-count neighbors around the p8/w8 start-1000 adhead
+  result and found a faster p9/w9 point.
+- New best `adhead.n6c10` local TCP result:
+  - run:
+    `benchmark_results/local_tcp_adhead_n6c10_p9_w9_os2000_start1000_iter60_malloc_20260711_081212`;
+  - settings: p9/w9, `MCPD3_PARTITIONER=basic`, no RPC compression,
+    malloc-backed BK storage, `objective_scale=2000`, schedule start `1000`,
+    four schedule levels, max `60` iterations per scale, capacity saturation
+    enabled;
+  - status `0`, stop_reason `2`, final objective `48373`, final certified
+    lower bound `48373`, final disagreements `0`, no objective-scale
+    promotions;
+  - total iterations `79`, final regularization budget `80`;
+  - wall `44,476,676us`, read graph `5,749,441us`, partition `2,590,184us`,
+    setup `4,044,231us`, solve `32,092,212us`, aggregate worker solve
+    `96,253,242us`, worker RPC overhead `10,141,968us`, partition-load RPC
+    `30,902,832us`;
+  - partition-load bytes `988,152,168`.
+- Repeat confirmed the p9/w9 result:
+  - run:
+    `benchmark_results/local_tcp_adhead_n6c10_p9_w9_os2000_start1000_iter60_malloc_repeat_20260711_081347`;
+  - same exact objective/certified lower bound and zero disagreements;
+  - total iterations `79`, final regularization budget `80`;
+  - wall `44,702,682us`, solve `32,219,588us`, aggregate worker solve
+    `95,794,075us`, worker RPC overhead `9,991,863us`, partition-load RPC
+    `31,631,552us`.
+- Compared with the p8/w8 start-1000 baseline
+  `benchmark_results/local_tcp_adhead_n6c10_p8_w8_os2000_start1000_iter60_malloc_20260711_080335`
+  (`50,217,621us`, `106` iterations), p9/w9 saves about `5.5s` wall time and
+  reduces the solve schedule to `79` iterations. p9/w9 is the current best
+  observed local TCP point for `adhead.n6c10` on this machine.

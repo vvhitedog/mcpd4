@@ -54,10 +54,25 @@
   reached iteration `10`, with best raw lower bound `80,680,000` and
   `35,684` disagreements. The p8/w8 start-1000 run had reached iteration `30`
   by about the same time and completed in `50.2s`, so p10/w10 was stopped.
-- Current best local TCP adhead schedule from these probes is start `1000`,
-  four schedule levels, max `60`, `objective_scale=2000`, p8/w8, malloc BK,
-  no compression:
+- Do not lower the tuned adhead local TCP shape to p7/w7. Run
+  `benchmark_results/local_tcp_adhead_n6c10_p7_w7_os2000_start1000_iter60_malloc_20260711_081056`
+  fit in memory, but at `44s` elapsed it had only reached iteration `10`,
+  with best raw lower bound `87,378,000` and `55,689` disagreements. It could
+  not beat p8/w8 start-1000, and p9/w9 later proved faster still.
+- At this point in the sweep, p8/w8 was the best local TCP adhead schedule:
+  start `1000`, four schedule levels, max `60`, `objective_scale=2000`,
+  malloc BK, no compression:
   `benchmark_results/local_tcp_adhead_n6c10_p8_w8_os2000_start1000_iter60_malloc_20260711_080335`.
+
+## 2026-07-11 08:15 PDT
+
+- Supersede the 08:07 "current best" p8/w8 note: p9/w9 with the same start
+  `1000`, max `60`, `objective_scale=2000`, malloc BK, and no compression is
+  now the best observed adhead local TCP point. Runs
+  `benchmark_results/local_tcp_adhead_n6c10_p9_w9_os2000_start1000_iter60_malloc_20260711_081212`
+  and
+  `benchmark_results/local_tcp_adhead_n6c10_p9_w9_os2000_start1000_iter60_malloc_repeat_20260711_081347`
+  completed in `44.48s` and `44.70s`, versus p8/w8 at `50.22s`.
 
 ## 2026-07-11 07:36 PDT
 
