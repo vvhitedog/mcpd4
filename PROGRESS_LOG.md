@@ -1,5 +1,59 @@
 # Progress Log
 
+## 2026-07-11 05:13 PDT
+
+- Ran a 10-iteration local TCP sweep on `babyface.n6c10` to avoid optimizing
+  only for setup time. Settings: one objective scale, malloc-backed BK storage,
+  no compression, one worker per partition.
+- Key result: p3/w3 is best for a one-iteration setup-dominated probe, but it
+  is much worse once solve rounds are repeated. p16/w16 is the best observed
+  10-iteration point on this machine.
+- Results:
+  - p3/w3
+    `benchmark_results/local_tcp_early_listen_10iter_p3_w3_malloc_babyface_none_20260711_050447`:
+    total `121,345,303us`, setup `2,037,059us`, solve
+    `116,126,091us`, final disagreements `162,685`;
+  - p6/w6
+    `benchmark_results/local_tcp_early_listen_10iter_p6_w6_malloc_babyface_none_20260711_050648`:
+    total `65,678,122us`, setup `2,233,575us`, solve
+    `60,148,854us`, final disagreements `230,773`;
+  - p8/w8
+    `benchmark_results/local_tcp_early_listen_10iter_p8_w8_malloc_babyface_none_20260711_050812`:
+    total `51,423,203us`, setup `2,985,054us`, solve
+    `45,073,636us`, final disagreements `312,976`;
+  - p10/w10
+    `benchmark_results/local_tcp_early_listen_10iter_p10_w10_malloc_babyface_none_20260711_050903`:
+    total `34,394,785us`, setup `3,756,691us`, solve
+    `27,171,299us`, final disagreements `436,053`;
+  - p12/w12
+    `benchmark_results/local_tcp_early_listen_10iter_p12_w12_malloc_babyface_none_20260711_050938`:
+    total `30,284,165us`, setup `4,323,281us`, solve
+    `22,402,263us`, final disagreements `455,590`;
+  - p14/w14
+    `benchmark_results/local_tcp_early_listen_10iter_p14_w14_malloc_babyface_none_20260711_051141`:
+    total `30,269,646us`, setup `4,582,792us`, solve
+    `22,044,017us`, final disagreements `346,570`;
+  - p16/w16
+    `benchmark_results/local_tcp_early_listen_10iter_p16_w16_malloc_babyface_none_20260711_051029`:
+    total `27,878,130us`, setup `5,153,077us`, solve
+    `19,015,852us`, final disagreements `499,015`;
+  - p16/w16 repeat
+    `benchmark_results/local_tcp_early_listen_10iter_repeat_p16_w16_malloc_babyface_none_20260711_051254`:
+    total `28,369,133us`, setup `5,185,741us`, solve
+    `19,487,864us`, final disagreements `499,015`;
+  - p18/w18
+    `benchmark_results/local_tcp_early_listen_10iter_p18_w18_malloc_babyface_none_20260711_051211`:
+    total `31,844,764us`, setup `6,469,179us`, solve
+    `21,275,144us`, final disagreements `793,515`;
+  - p20/w20
+    `benchmark_results/local_tcp_early_listen_10iter_p20_w20_malloc_babyface_none_20260711_051058`:
+    total `31,504,549us`, setup `7,108,028us`, solve
+    `20,236,423us`, final disagreements `729,405`.
+- Conclusion: for setup microbenchmarks, use p3/w3; for actual iterative local
+  TCP solves on this machine, use roughly p16/w16 as the current best point.
+  More partitions reduce per-round wall time until around p16, after which RPC
+  and worker-load overhead dominate.
+
 ## 2026-07-11 04:54 PDT
 
 - After freeing memory, reran the current early-listen local TCP partition
