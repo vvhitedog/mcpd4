@@ -1229,3 +1229,20 @@
   competitive. Future local out-of-core work needs a windowing/scheduling
   policy that avoids full assigned-set thrash, or a cache/work assignment where
   each worker's assigned set fits.
+
+## 2026-07-11 09:17 PDT
+
+- Do not use a `1.8 GiB` per-worker streaming cache for p32/w8 large
+  `adhead.n26c100` on this 15 GiB laptop.
+- Probe:
+  `benchmark_results/large_adhead_inprocess_stream_resfirst_p32_w8_cache1800m_os1000_start1000_20260711_092100`.
+- Settings: resident-first streaming worker, p32/w8, `objective_scale=1000`,
+  schedule start `1000`, four schedule levels, progress every iteration,
+  `--streaming-cache-bytes 1800000000`, capacity saturation enabled.
+- Result: killed with status `137` before the first progress line. `/usr/bin/time`
+  reported max RSS `15023928 KiB`; live monitoring showed swap nearly full.
+- Interpretation: this cache size is large enough to attempt two resident
+  partitions per worker on most workers, but the resulting aggregate resident
+  BK/solver footprint is over the physical-memory limit here. The practical
+  p32/w8 local streaming cache on this machine remains about `1 GiB` per worker
+  unless worker count, partition count, or host memory changes.

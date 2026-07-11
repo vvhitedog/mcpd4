@@ -3314,3 +3314,40 @@
   (`44,702,682us` wall, `32,219,588us` solve), the two paths are effectively
   tied at this problem size and schedule. The remaining high-impact target for
   this case is solver/partition/schedule behavior, not TCP transport overhead.
+
+## 2026-07-11 09:17 PDT
+
+- Implemented and tested resident-first batch ordering in the mcpd3 streaming
+  worker. `StreamingPartitionWorker::solveRoundBatch` now solves partitions
+  already resident in memory before nonresident partitions from the same batch.
+  This preserves result correctness because the coordinator consumes batch
+  results by `partition_id`, and it avoids evicting the only warm resident
+  partition before using it when the cache is small.
+- Added focused mcpd3 test coverage:
+  - `streamingBatchSolvesResidentPartitionsFirst` creates two streaming
+    partitions with a one-partition cache, runs the same request order twice,
+    verifies results against the in-process worker, and checks the second batch
+    performs only one warm-state write and one restore.
+- Verification:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.
+- Large `adhead.n26c100` in-process streaming comparison:
+  - run:
+    `benchmark_results/large_adhead_inprocess_stream_resfirst_p32_w8_cache1g_os1000_start1000_20260711_090915`;
+  - settings: p32/w8, `MCPD3_PARTITIONER=basic`, `objective_scale=1000`,
+    schedule start `1000`, four schedule levels, progress every iteration,
+    streaming workers with `--streaming-cache-bytes 1000000000`;
+  - status `124` from the same 390s timeout budget;
+  - reached 17 completed iterations, best scaled lower bound `379330000`, and
+    last disagreements `241155`;
+  - previous p32/w8 1 GiB streaming baseline reached only 10 iterations and
+    best scaled lower bound `272113000` in the same timeout;
+  - scratch payload storage used about `9.1 GiB` and was removed after log
+    extraction.
+- Interpretation: resident-first ordering is a real local streaming
+  optimization. It does not solve the full large-adhead convergence/runtime
+  problem by itself, but it removes a major self-inflicted cache-thrash path
+  and gets the streaming path to the same best lower bound observed in earlier
+  p32 local large-adhead probes under the 390s window.
