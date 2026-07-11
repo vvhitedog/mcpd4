@@ -2353,3 +2353,35 @@
   malloc-backed BK storage and no transport compression. The lower partition
   counts now fit in memory, but p2 and p5 lose badly on local solve time, and
   p3/p4 are close but still slower than p6.
+
+## 2026-07-11 03:14 PDT
+
+- Optimized the mcpd3 directed DIMACS streaming reader used by mcpd4
+  `--directed` coordinator runs:
+  - scan the DIMACS header before the existing streaming parse;
+  - pre-size `terminal_capacities` from the declared node count;
+  - reserve directed arc/capacity vectors from the declared arc count;
+  - use a larger stdio buffer for DIMACS reads.
+- Added mcpd3 regression coverage for directed streaming inputs with declared
+  internal nodes that have no incident arcs, so the reader preserves
+  `p max` node count instead of only sizing from touched nodes.
+- Benchmarked the current local TCP p6/w6 malloc/no-compression
+  `babyface.n6c10` one-iteration probe after the reader change:
+  - `benchmark_results/local_tcp_presized_dimacs_malloc_babyface_p6_w6_none_20260711_031310`:
+    total `8,042,428us`, read graph `2,104,099us`, setup `3,278,394us`,
+    solve `901,577us`;
+  - `benchmark_results/local_tcp_presized_dimacs_repeat_malloc_babyface_p6_w6_none_20260711_031335`:
+    total `7,993,139us`, read graph `2,107,230us`, setup `3,260,440us`,
+    solve `894,638us`.
+- Previous matched p6/w6 malloc repeat
+  `benchmark_results/local_tcp_endpoint_malloc_repeat_babyface_p6_w6_none_20260711_030710`
+  was total `8,324,249us`, read graph `2,493,347us`, setup `3,252,579us`,
+  solve `900,272us`. The reader change saves roughly `386-389ms` on graph
+  read and about `281-331ms` on total local TCP wall time for this probe, with
+  unchanged output (`final_objective_raw=1,970,000`,
+  `final_disagreement_count=134,985`).
+- Verified:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.
