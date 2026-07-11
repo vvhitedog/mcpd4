@@ -1152,3 +1152,39 @@
   and repeat
   `benchmark_results/local_tcp_adhead_n6c10_p9_w9_os2000_start1000_iter60_malloc_repeat_20260711_081347`,
   both exact with zero disagreements in about `44.5s`.
+
+## 2026-07-11 08:45 PDT
+
+- Do not use one-machine p32/w8 local TCP resident solving with file-backed BK
+  arrays as the large `adhead.n26c100` competitor on this 15 GiB laptop. Even
+  after freeing memory, both p32/w8 probes filled swap, drove sustained IO
+  pressure, and were far slower than the known two-machine resident run
+  `benchmark_results/large_adhead_distributed_p32_resident_20260703_022001_restart_20260703_023441`
+  (550 iterations, solve segment `498.45s`, exact objective `734905`).
+- `willneed` mmap advice was stopped manually:
+  - run:
+    `benchmark_results/large_adhead_local_tcp_p32_w8_os1000_start1000_filemmap_willneed_20260711_082902`;
+  - settings: p32/w8, `objective_scale=1000`, schedule start `1000`,
+    file-backed BK, no RPC compression, capacity saturation enabled;
+  - status `143` from manual stop at about `6:00.9` wall;
+  - reached 9 complete iterations plus a partial iteration 10;
+  - first complete iteration max worker solve batch was `115.5s`;
+  - warm complete iterations were still roughly `9.4s` to `17.7s` max worker
+    batch time;
+  - disk returned from `19 GiB` free during the run to `39 GiB` after cleanup.
+- The matched no-advice file-mmap run was also noncompetitive:
+  - run:
+    `benchmark_results/large_adhead_local_tcp_p32_w8_os1000_start1000_filemmap_none_20260711_083706`;
+  - status `124` from the 390s timeout;
+  - reached 16 iterations, best lower bound only `379330000` scaled
+    (`379330` unscaled) with `178750` disagreements at the last progress line;
+  - first complete iteration improved to `89.4s` max worker solve batch, but
+    warm iterations were still mostly `8.0s` to `15.4s` with one `24.0s` spike;
+  - aggregate worker solve at iteration 16 was `2,027,686,781us`, while worker
+    RPC overhead was only `8,781,192us`, so transport is not the bottleneck.
+- If local large-adhead is revisited, avoid all-resident p32 on this machine.
+  The next plausible local-only direction is a true streaming/windowed worker
+  policy that keeps the active BK working set below RAM without touching every
+  partition's mapped pages each iteration, or a machine with materially more
+  RAM. `willneed` should not be assumed best under memory pressure; no-advice
+  was better on the first iteration but still not viable.
