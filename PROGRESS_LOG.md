@@ -1,5 +1,18 @@
 # Progress Log
 
+## 2026-07-11 04:28 PDT
+
+- Added mcpd4 TCP loopback coverage for worker-load partition packages whose
+  arc capacity vectors must remain full because forward and reverse capacities
+  are both nonzero:
+  - verifies no directed-capacity compaction is applied in that case;
+  - verifies the package still omits worker-redundant `local_to_global`,
+    endpoint global id, and endpoint momentum fields;
+  - checks both no-compression direct receive and Snappy fallback paths against
+    an in-process worker result.
+- The attempted chunked direct compact-capacity expansion was benchmarked and
+  reverted because it was slower; see `FAILED_APPROACHES.md`.
+
 ## 2026-07-11 04:22 PDT
 
 - Replaced the scaled directed DIMACS reader's `fgets` line-buffer parse with

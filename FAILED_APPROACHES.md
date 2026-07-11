@@ -1,5 +1,29 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 04:28 PDT
+
+- Do not replace the worker's direct compact directed-capacity receive path
+  with chunked socket reads that expand directly into the final full capacity
+  vector. The idea was to avoid the temporary compact capacity vector and a
+  second expansion pass, but it made local TCP setup substantially slower.
+- Benchmark evidence on `babyface.n6c10`, p6/w6, one iteration,
+  malloc-backed BK storage, no compression:
+  - current mmap-reader baseline
+    `benchmark_results/local_tcp_mmap_reader_p6_w6_malloc_babyface_none_20260711_042215`:
+    total `6,553,760us`, setup `2,221,805us`, aggregate partition-load RPC
+    `12,205,983us`;
+  - chunked direct expansion
+    `benchmark_results/local_tcp_direct_cap_expand_p6_w6_malloc_babyface_none_20260711_042654`:
+    total `7,789,046us`, setup `3,332,625us`, aggregate partition-load RPC
+    `18,788,815us`;
+  - chunked direct expansion repeat
+    `benchmark_results/local_tcp_direct_cap_expand_repeat_p6_w6_malloc_babyface_none_20260711_042702`:
+    total `7,733,168us`, setup `3,331,078us`, aggregate partition-load RPC
+    `18,929,735us`.
+- Interpretation: large contiguous `recv` into the compact vector followed by
+  in-memory expansion is faster than many chunked socket reads on localhost,
+  even though it temporarily holds the compact vector.
+
 ## 2026-07-03 02:28 PDT
 
 - Do not use a BK mmap directory on a memory-backed filesystem. Paths under

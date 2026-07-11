@@ -192,6 +192,25 @@ mcpd3::PartitionPackage makeDirectedCapacityPackage(int partition_id) {
   return package;
 }
 
+mcpd3::PartitionPackage makeFullArcCapacityPackage(int partition_id) {
+  mcpd3::PartitionPackage package;
+  package.partition_id = partition_id;
+  package.local_node_count = 2;
+  package.arcs = {0, 1};
+  package.arc_capacities = {4, 7};
+  package.terminal_capacities = {-2, 3};
+  package.local_to_global = {400, 401};
+  package.constraint_endpoints.push_back(
+      mcpd3::ConstraintEndpointBinding{/*constraint_id=*/40000,
+                                        /*global_node_id=*/400,
+                                        /*local_index=*/0,
+                                        /*is_source=*/true,
+                                        /*alpha=*/0,
+                                        /*last_alpha=*/0,
+                                        /*alpha_momentum=*/0});
+  return package;
+}
+
 std::unique_ptr<mcpd4::TcpPartitionWorker> startRemoteWorker(
     mcpd4::SocketHandle *listener, WorkerClientThread **client,
     const std::string &worker_name,
@@ -360,6 +379,58 @@ void remoteWorkerLoadPartitionCompactsDirectedArcCapacitiesOverTcp(
     require(result.constrained_labels[0].label ==
                 expected.constrained_labels[0].label,
             "directed compact package load should preserve endpoint label");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
+void remoteWorkerLoadPartitionKeepsFullArcCapacitiesOverTcp(
+    mcpd4::TransportCompression compression) {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  if (compression == mcpd4::TransportCompression::SNAPPY &&
+      !mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker =
+      startRemoteWorker(&listener, &client, "full-capacity-worker",
+                        compression);
+  try {
+    const auto package = makeFullArcCapacityPackage(/*partition_id=*/7);
+    const auto full_frame_size =
+        mcpd4::encodePartitionPackage(package).size();
+    worker->loadPartition(package);
+
+    const auto load_bytes =
+        worker->timingStats().rpc_bytes.partition_load_tx_bytes;
+    const auto expected_savings =
+        package.local_to_global.size() * sizeof(int) +
+        package.constraint_endpoints.size() * (sizeof(int) + sizeof(float));
+    require(load_bytes + expected_savings == full_frame_size,
+            "remote full-capacity load should not compact nonzero reverse "
+            "capacities");
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = package.partition_id;
+    mcpd3::InProcessPartitionWorker reference;
+    reference.loadPartition(package);
+    const auto expected = reference.solveRound(request);
+    const auto result = worker->solveRound(request);
+    require(result.lower_bound == expected.lower_bound,
+            "full-capacity package load should preserve objective value");
+    require(result.constrained_labels.size() == 1,
+            "full-capacity package load should preserve endpoint labels");
+    require(result.constrained_labels[0].constraint_id == 40000,
+            "full-capacity package load should preserve constraint id");
+    require(result.constrained_labels[0].label ==
+                expected.constrained_labels[0].label,
+            "full-capacity package load should preserve endpoint label");
     stopAndJoin(worker.get(), client);
   } catch (...) {
     stopAndJoin(worker.get(), client);
@@ -914,6 +985,10 @@ int main() {
     remoteWorkerLoadPartitionCompactsDirectedArcCapacitiesOverTcp(
         mcpd4::TransportCompression::NONE);
     remoteWorkerLoadPartitionCompactsDirectedArcCapacitiesOverTcp(
+        mcpd4::TransportCompression::SNAPPY);
+    remoteWorkerLoadPartitionKeepsFullArcCapacitiesOverTcp(
+        mcpd4::TransportCompression::NONE);
+    remoteWorkerLoadPartitionKeepsFullArcCapacitiesOverTcp(
         mcpd4::TransportCompression::SNAPPY);
     rejectsOversizedPayloadBeforeReadingBody();
     rejectsOversizedPayloadBeforeWritingBody();
