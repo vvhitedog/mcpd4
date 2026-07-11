@@ -508,9 +508,7 @@ void TcpPartitionWorker::loadPartition(
   std::uint64_t frame_logical_bytes = 0;
   FrameTransferStats transfer;
   try {
-    const bool use_buffered_send =
-        compression_ == TransportCompression::NONE &&
-        partitionPackageFrameBuffersSupported();
+    const bool use_buffered_send = partitionPackageFrameBuffersSupported();
     if (use_buffered_send) {
       PartitionPackageFrameBuffers frame_buffers(
           package, PartitionPackageFrameBuffers::Mode::WORKER_LOAD);

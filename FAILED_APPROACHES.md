@@ -588,3 +588,13 @@
   failed before graph load because `data/maxflow/babyface.n6c10/babyface.n6c10.max`
   was not present under `.worktrees/local-tcp-opt`; the valid rerun used the
   absolute path from the main checkout.
+
+## 2026-07-11 02:53 PDT
+
+- Do not switch localhost p6/w6 local TCP to Snappy by default after the compact
+  worker-load package change. Run
+  `benchmark_results/local_tcp_omit_l2g_snappy_filemmap_babyface_p6_w6_20260711_025317`
+  reduced coordinator wire TX to `249,634,612` bytes, but took
+  `9,425,194us` total versus `8,778,549us` for no-compression in
+  `benchmark_results/local_tcp_omit_l2g_filemmap_babyface_p6_w6_none_20260711_024927`.
+  Compression alone cost `1,100,580us`.

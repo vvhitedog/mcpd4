@@ -2266,6 +2266,13 @@
   Wall-time improvement is modest on this setup, but it is a strictly smaller
   local TCP transfer and keeps results unchanged (`final_objective_raw`
   `1,970,000`, `final_disagreement_count` `134,985` in all matched p6 runs).
+- Extended the compact worker-load package path to Snappy transport as well.
+  The compact Snappy p6/w6 file-backed run
+  `benchmark_results/local_tcp_omit_l2g_snappy_filemmap_babyface_p6_w6_20260711_025317`
+  transmitted the same `532,500,240` logical partition-load bytes, reduced
+  total coordinator wire TX to `249,634,612` bytes, and spent `1,100,580us`
+  in compression. Local wall time was `9,425,194us`, so no-compression remains
+  faster for localhost.
 - Verified:
   - `cmake --build build -j`;
   - `./build/protocol_serialization_test`;

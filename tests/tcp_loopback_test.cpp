@@ -236,14 +236,20 @@ void sendsFrameFromMultipleBuffers() {
           "buffered send should report wire bytes");
 }
 
-void remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp() {
+void remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp(
+    mcpd4::TransportCompression compression) {
   if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  if (compression == mcpd4::TransportCompression::SNAPPY &&
+      !mcpd4::snappyCompressionAvailable()) {
     return;
   }
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
   auto worker =
-      startRemoteWorker(&listener, &client, "compact-package-worker");
+      startRemoteWorker(&listener, &client, "compact-package-worker",
+                        compression);
   try {
     constexpr int kBoundaryLabelCount = 128;
     const auto package = makeManyBoundaryLabelsPackage(
@@ -257,6 +263,13 @@ void remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp() {
     require(load_bytes + package.local_to_global.size() * sizeof(int) ==
                 full_frame_size,
             "remote load should omit local-to-global payload bytes");
+    if (compression == mcpd4::TransportCompression::SNAPPY) {
+      require(worker->timingStats()
+                  .rpc_bytes.tx_compressed_frame_count +
+                  worker->timingStats().rpc_bytes.tx_stored_frame_count >
+              0,
+              "snappy compact package load should use compression framing");
+    }
 
     mcpd3::PartitionSolveRequest request;
     request.round_id = 1;
@@ -821,7 +834,10 @@ int main() {
   try {
     receivesFrameSplitAcrossTcpPackets();
     sendsFrameFromMultipleBuffers();
-    remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp();
+    remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp(
+        mcpd4::TransportCompression::NONE);
+    remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp(
+        mcpd4::TransportCompression::SNAPPY);
     rejectsOversizedPayloadBeforeReadingBody();
     rejectsOversizedPayloadBeforeWritingBody();
     rejectsUnknownMessageTypeOnReceiveWithoutCompression();
