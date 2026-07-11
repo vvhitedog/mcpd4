@@ -1,5 +1,65 @@
 # Progress Log
 
+## 2026-07-11 04:54 PDT
+
+- After freeing memory, reran the current early-listen local TCP partition
+  sweep on `babyface.n6c10`: one iteration, malloc-backed BK storage, no
+  compression, one worker per partition. System memory at the time was about
+  `12GiB` available.
+- Results:
+  - p1/w1
+    `benchmark_results/local_tcp_early_listen_p1_w1_malloc_babyface_none_20260711_045149`:
+    total `10,172,368us`, setup `1,681,198us`, solve `5,334,753us`,
+    partition-load TX `384,750,040` bytes;
+  - p2/w2
+    `benchmark_results/local_tcp_early_listen_sweep_p2_w2_malloc_babyface_none_20260711_045251`:
+    total `10,226,668us`, setup `2,253,123us`, solve `4,817,758us`;
+  - p3/w3
+    `benchmark_results/local_tcp_early_listen_sweep_p3_w3_malloc_babyface_none_20260711_045302`:
+    total `6,414,628us`, setup `2,048,162us`, solve `1,185,389us`,
+    partition-load TX `394,875,120` bytes;
+  - p4/w4
+    `benchmark_results/local_tcp_early_listen_sweep_p4_w4_malloc_babyface_none_20260711_045308`:
+    total `6,599,280us`, setup `1,979,474us`, solve `1,393,322us`;
+  - p5/w5
+    `benchmark_results/local_tcp_early_listen_sweep_p5_w5_malloc_babyface_none_20260711_045315`:
+    total `8,516,844us`, setup `2,080,898us`, solve `3,178,352us`;
+  - p6/w6
+    `benchmark_results/local_tcp_early_listen_sweep_p6_w6_malloc_babyface_none_20260711_045324`:
+    total `6,430,783us`, setup `2,213,397us`, solve `895,838us`;
+  - p7/w7
+    `benchmark_results/local_tcp_early_listen_sweep_p7_w7_malloc_babyface_none_20260711_045330`:
+    total `7,022,121us`, setup `2,898,015us`, solve `768,757us`;
+  - p8/w8
+    `benchmark_results/local_tcp_early_listen_p8_w8_malloc_babyface_none_20260711_045215`:
+    total `7,639,330us`, setup `2,975,196us`, solve `1,286,668us`;
+  - p10/w10
+    `benchmark_results/local_tcp_early_listen_p10_w10_malloc_babyface_none_20260711_045223`:
+    total `7,708,537us`, setup `3,522,568us`, solve `727,304us`;
+  - p12/w12
+    `benchmark_results/local_tcp_early_listen_p12_w12_malloc_babyface_none_20260711_045231`:
+    total `8,251,951us`, setup `4,006,850us`, solve `738,640us`.
+- Repeated p3/w3 and p6/w6 because they were close:
+  - p3 repeats:
+    `benchmark_results/local_tcp_early_listen_repeat_p3_w3_malloc_babyface_none_20260711_045348`
+    total `6,438,462us`;
+    `benchmark_results/local_tcp_early_listen_repeat_p3_w3_malloc_babyface_none_20260711_045355`
+    total `6,394,721us`;
+    `benchmark_results/local_tcp_early_listen_repeat_p3_w3_malloc_babyface_none_20260711_045401`
+    total `6,389,020us`;
+  - p6 repeats:
+    `benchmark_results/local_tcp_early_listen_repeat_p6_w6_malloc_babyface_none_20260711_045408`
+    total `6,470,651us`;
+    `benchmark_results/local_tcp_early_listen_repeat_p6_w6_malloc_babyface_none_20260711_045414`
+    total `6,458,023us`;
+    `benchmark_results/local_tcp_early_listen_repeat_p6_w6_malloc_babyface_none_20260711_045421`
+    total `6,444,772us`.
+- Conclusion: with the current memory state and early-listen coordinator, p3/w3
+  is the best observed local TCP point for this one-iteration babyface probe.
+  It wins by keeping package-load/setup lower; p6 solves faster but pays more
+  worker-load wall time. The margin is small, so p3 and p6 should both remain
+  candidates for larger or multi-iteration runs.
+
 ## 2026-07-11 04:48 PDT
 
 - Moved fixed-worker TCP listener setup before graph read/partitioning in the
