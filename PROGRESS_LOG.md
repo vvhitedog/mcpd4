@@ -3292,3 +3292,25 @@
   (`50,217,621us`, `106` iterations), p9/w9 saves about `5.5s` wall time and
   reduces the solve schedule to `79` iterations. p9/w9 is the current best
   observed local TCP point for `adhead.n6c10` on this machine.
+
+## 2026-07-11 08:22 PDT
+
+- Compared the best p9/w9 `adhead.n6c10` local TCP run against the in-process
+  worker coordinator path to estimate process/TCP overhead.
+- Matched in-process run:
+  - run:
+    `benchmark_results/inprocess_adhead_n6c10_p9_w9_os2000_start1000_iter60_malloc_20260711_082133`;
+  - settings: p9/w9, `MCPD3_PARTITIONER=basic`, directed input,
+    `objective_scale=2000`, schedule start `1000`, four schedule levels, max
+    `60`, capacity saturation enabled;
+  - status `0`, stop_reason `2`, final objective/certified lower bound
+    `48373`, zero disagreements, no objective-scale promotions;
+  - total iterations `79`, final regularization budget `80`;
+  - coordinator wall `44,584,527us`, read graph `4,934,490us`, partition
+    `2,630,352us`, setup `5,707,588us`, solve `30,987,077us`;
+  - peak observed RSS `8,230,970 KiB`.
+- Compared with the local TCP p9 repeat
+  `benchmark_results/local_tcp_adhead_n6c10_p9_w9_os2000_start1000_iter60_malloc_repeat_20260711_081347`
+  (`44,702,682us` wall, `32,219,588us` solve), the two paths are effectively
+  tied at this problem size and schedule. The remaining high-impact target for
+  this case is solver/partition/schedule behavior, not TCP transport overhead.
