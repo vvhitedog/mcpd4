@@ -1,5 +1,16 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 05:38 PDT
+
+- `perf stat` is not usable for this optimization pass under the current
+  system permissions. The kernel has `perf_event_paranoid=4`, and the process
+  lacks the needed profiling capabilities.
+- Command attempted:
+  `perf stat -e task-clock,context-switches,cpu-migrations,cycles,instructions,cache-misses -- ...`
+- Future profiling should either lower `perf_event_paranoid`, run with the
+  required capability, or use a userspace/instrumented profiler. Do not spend
+  time trying normal unprivileged `perf` commands in this environment.
+
 ## 2026-07-11 05:35 PDT
 
 - Do not add a second vector/index-map cache to the temporal label delta codec
