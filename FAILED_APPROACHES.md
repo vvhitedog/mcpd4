@@ -73,6 +73,13 @@
   and
   `benchmark_results/local_tcp_adhead_n6c10_p9_w9_os2000_start1000_iter60_malloc_repeat_20260711_081347`
   completed in `44.48s` and `44.70s`, versus p8/w8 at `50.22s`.
+- Do not skip directly to p9/w9 schedule start `100` for this adhead target.
+  Run
+  `benchmark_results/local_tcp_adhead_n6c10_p9_w9_os2000_start100_iter60_malloc_20260711_081644`
+  was stopped after `51.2s`: at the first progress checkpoint it had only
+  reached iteration `10`, with best raw lower bound `72,358,000` and `70,155`
+  disagreements. The p9/w9 start-1000 run completes in about `44.6s`, so
+  start `100` is a clear regression despite avoiding the scale-1000 warmup.
 
 ## 2026-07-11 07:36 PDT
 
