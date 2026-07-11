@@ -1,5 +1,40 @@
 # Progress Log
 
+## 2026-07-11 05:29 PDT
+
+- Refined the 10-iteration local TCP partition/worker count around the p16
+  knee. Settings: `babyface.n6c10`, one objective scale, malloc-backed BK
+  storage, no compression.
+- Narrow partition-count sweep:
+  - p15/w15
+    `benchmark_results/local_tcp_early_listen_10iter_p15_w15_malloc_babyface_none_20260711_052715`:
+    total `27,571,126us`, setup `5,024,530us`, solve `18,848,132us`,
+    final disagreements `443,273`;
+  - p15/w15 repeat
+    `benchmark_results/local_tcp_early_listen_10iter_repeat_p15_w15_malloc_babyface_none_20260711_052830`:
+    total `27,700,308us`, setup `4,867,008us`, solve `19,180,430us`,
+    final disagreements `443,273`;
+  - p17/w17
+    `benchmark_results/local_tcp_early_listen_10iter_p17_w17_malloc_babyface_none_20260711_052743`:
+    total `30,475,038us`, setup `6,077,330us`, solve `20,628,333us`,
+    final disagreements `467,502`.
+- Tested more partitions while keeping 16 worker processes:
+  - p18/w16
+    `benchmark_results/local_tcp_early_listen_10iter_p18_w16_malloc_babyface_none_20260711_052527`:
+    total `30,903,147us`, setup `6,457,761us`, solve `20,632,537us`;
+  - p20/w16
+    `benchmark_results/local_tcp_early_listen_10iter_p20_w16_malloc_babyface_none_20260711_052558`:
+    total `31,567,904us`, setup `7,453,603us`, solve `20,220,629us`;
+  - p24/w16
+    `benchmark_results/local_tcp_early_listen_10iter_p24_w16_malloc_babyface_none_20260711_052630`:
+    total `32,799,228us`, setup `8,691,633us`, solve `20,067,984us`.
+- Conclusion: p15/w15 is now the best observed local TCP point for this
+  10-iteration benchmark. It slightly beats p16/w16 by lowering setup while
+  keeping solve wall in the same band, and it also has fewer final
+  disagreements on this probe (`443,273` vs `499,015`). Splitting into more
+  than 16 partitions while keeping 16 workers is not helpful; setup and RPC
+  overhead dominate any solve-wall reduction.
+
 ## 2026-07-11 05:22 PDT
 
 - Swept worker count at fixed p16 for the 10-iteration local TCP
