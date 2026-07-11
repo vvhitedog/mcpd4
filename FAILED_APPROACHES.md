@@ -1202,3 +1202,30 @@
   partition's mapped pages each iteration, or a machine with materially more
   RAM. `willneed` should not be assumed best under memory pressure; no-advice
   was better on the first iteration but still not viable.
+
+## 2026-07-11 09:05 PDT
+
+- Do not treat the current streaming worker as a solved local large-adhead
+  performance path when its cache cannot hold each worker's assigned partition
+  set. The p32/w8, 1 GiB-cache in-process streaming probe:
+  - run:
+    `benchmark_results/large_adhead_inprocess_stream_p32_w8_cache1g_os1000_start1000_20260711_085651`;
+  - settings: `adhead.n26c100`, p32/w8, `objective_scale=1000`, schedule start
+    `1000`, four schedule levels, progress every iteration, streaming workers
+    with `--streaming-cache-bytes 1000000000`;
+  - status `124` from the 390s timeout;
+  - reached only 10 iterations, with best lower bound `272113000` scaled
+    (`272113` unscaled) and last disagreements `222421`;
+  - memory after partition was about `5.84 GiB` RSS, then dropped to about
+    `0.85 GiB` after coordinator setup because partition payloads were written
+    to disk;
+  - streaming payload scratch used about `9.1 GiB` and was removed after
+    extracting logs;
+  - stream-window estimates show one loaded solver can be about `995 MB`, while
+    eight active loaded solvers can be about `7.24 GB`.
+- Interpretation: streaming fixes the resident-memory footprint, but with
+  p32/w8 and a 1 GiB cache each worker repeatedly evicts and reloads its four
+  assigned partitions. Warm-state preservation is not enough to make that
+  competitive. Future local out-of-core work needs a windowing/scheduling
+  policy that avoids full assigned-set thrash, or a cache/work assignment where
+  each worker's assigned set fits.
