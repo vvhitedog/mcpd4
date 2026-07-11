@@ -1,5 +1,43 @@
 # Progress Log
 
+## 2026-07-11 04:22 PDT
+
+- Replaced the scaled directed DIMACS reader's `fgets` line-buffer parse with
+  a bounded read-only mmap scanner in mcpd3:
+  - preserves the existing one-pass directed streaming semantics;
+  - keeps arc capacities scaled during parse and terminal capacities scaled
+    after aggregation;
+  - avoids line-buffer copies while still reserving graph vectors from the
+    `p max` declaration.
+- Added mcpd3 coverage for a final DIMACS arc line without a trailing newline,
+  validating node count, internal arcs, scaled capacities, aggregated terminal
+  capacities, and saturation counters.
+- TDD/debug note: the first mcpd3 test run failed because the rewritten reader
+  initially missed the old explicit `g.nnode = 0` initialization. Fixed before
+  benchmarking.
+- Verified:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.
+- Benchmarked `babyface.n6c10`, p6/w6, one iteration, malloc-backed BK storage,
+  no compression:
+  - previous best nearby run
+    `benchmark_results/local_tcp_arc_reserve_memfree_p6_w6_malloc_babyface_none_20260711_041414`:
+    total `6,714,937us`, read `2,421,733us`, partition `1,129,446us`,
+    setup `2,255,429us`, solve `894,133us`;
+  - mmap-reader run
+    `benchmark_results/local_tcp_mmap_reader_p6_w6_malloc_babyface_none_20260711_042215`:
+    total `6,553,760us`, read `2,284,160us`, partition `1,134,063us`,
+    setup `2,221,805us`, solve `901,214us`;
+  - mmap-reader repeat
+    `benchmark_results/local_tcp_mmap_reader_repeat_p6_w6_malloc_babyface_none_20260711_042221`:
+    total `6,582,526us`, read `2,303,363us`, partition `1,135,770us`,
+    setup `2,232,413us`, solve `896,437us`.
+- Output and transport size were unchanged:
+  `final_objective_raw=1,970,000`, `final_disagreement_count=134,985`,
+  partition-load TX `405,000,240` bytes.
+
 ## 2026-07-11 04:14 PDT
 
 - Confirmed the laptop has substantially more free memory after cleanup:
