@@ -53,6 +53,15 @@
   TCP solves on this machine, use roughly p16/w16 as the current best point.
   More partitions reduce per-round wall time until around p16, after which RPC
   and worker-load overhead dominate.
+- Compared against the in-process worker path at the same p16/w16, 10-iteration
+  settings:
+  `benchmark_results/inprocess_10iter_p16_w16_malloc_babyface_20260711_051521`
+  reported total `30,898,554us`, setup `8,526,738us`, solve `18,742,807us`,
+  final disagreements `499,015`.
+- Interpretation: local TCP is not losing to in-process here. Solve wall is
+  similar, and local TCP setup is faster, likely because worker process
+  isolation lets partition loading/allocation proceed with less same-process
+  memory pressure.
 
 ## 2026-07-11 04:54 PDT
 
