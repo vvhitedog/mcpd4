@@ -1265,70 +1265,6 @@
   - `cmake --build build -j`;
   - `ctest --test-dir build --output-on-failure`.
 
-## 2026-07-11 02:06 PDT
-
-- Continued local TCP setup optimization in worktree
-  `/home/matt/software/mcpd3-distributed/.worktrees/local-tcp-opt` on branch
-  `local-tcp-opt`.
-- Removed another receive-side full-payload copy:
-  - `receiveFrameBytes` now validates received frames with `decodeFrameType`
-    instead of `decodeFrame`;
-  - this preserves message-type validation without constructing a copied
-    payload that is immediately discarded;
-  - added TCP regression tests for unknown message-type rejection in
-    uncompressed and snappy receive paths.
-- Removed the completed-frame return copy in `encodePartitionPackage`:
-  - added `Writer::takeBytes()`;
-  - `encodePartitionPackage` now returns the filled frame vector by move.
-- Added uncompressed partition-package scatter/gather send:
-  - introduced `ByteBufferView`;
-  - added `PartitionPackageFrameBuffers`, which exposes the same package wire
-    bytes as small headers plus views over existing `PartitionPackage` vectors;
-  - added protocol coverage that concatenating the buffers exactly matches
-    `encodePartitionPackage`;
-  - added TCP coverage for sending one frame from multiple buffers;
-  - `TcpPartitionWorker::loadPartition` uses the buffer path only for
-    uncompressed transports on little-endian 32-bit-int hosts, otherwise it
-    falls back to the existing encoded-frame path;
-  - buffer-list writes use `sendmsg` with `MSG_NOSIGNAL`.
-- Comparable mmap-backed `babyface.n6c10` p10/w2/no-compression/one-iteration
-  setup runs:
-  - previous bulk-encode baseline
-    `benchmark_results/local_tcp_parallel_bulk_babyface_p10_w2_none_20260711_012809`:
-    setup `18,017,156us`, total `25,706,023us`,
-    load RPC aggregate `35,146,645us`;
-  - receive type-peek only, default worker BK mmap path
-    `benchmark_results/local_tcp_recv_typepeek_defaultbk_babyface_p10_w2_none_20260711_015654`:
-    setup `18,397,708us`, total `25,257,601us`,
-    load RPC aggregate `36,082,765us`;
-  - receive type-peek plus move-return copy drop
-    `benchmark_results/local_tcp_sendrecv_copydrop_defaultbk_babyface_p10_w2_none_20260711_015836`:
-    setup `17,300,658us`, total `23,832,448us`,
-    load RPC aggregate `34,043,835us`;
-  - scatter/gather package send with per-buffer writes
-    `benchmark_results/local_tcp_scatter_package_defaultbk_babyface_p10_w2_none_20260711_020321`:
-    setup `17,758,739us`, total `24,141,107us`,
-    load RPC aggregate `34,832,544us`;
-  - scatter/gather package send with `sendmsg`
-    `benchmark_results/local_tcp_sendmsg_package_defaultbk_babyface_p10_w2_none_20260711_020445`:
-    setup `17,341,089us`, total `23,767,172us`,
-    load RPC aggregate `34,056,841us`.
-- Interpretation:
-  - receive type-peek alone was noisy and not a setup-time win on this point;
-  - the partition-package move-return copy drop is the measured setup win
-    (`18.02s -> 17.30s`, about `4.0%`);
-  - `sendmsg` scatter/gather is roughly setup-neutral versus the move-return
-    run but lowers coordinator memory pressure by avoiding a full serialized
-    package frame allocation for uncompressed local TCP;
-  - this is more relevant to file-backed mmap and larger local runs than the
-    earlier `malloc` speed probes.
-- Verified:
-  - `cmake --build build -j`;
-  - `./build/protocol_serialization_test`;
-  - `./build/tcp_loopback_test`;
-  - `ctest --test-dir build --output-on-failure`;
-  - `ctest --test-dir build/mcpd3-native --output-on-failure`.
-
 ## 2026-06-30 01:23 PDT
 
 - Added streaming optimizer-health telemetry to the productized coordinator:
@@ -2068,3 +2004,102 @@
   - `ctest --test-dir build/mcpd3-native --output-on-failure`;
   - `cmake --build build -j`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-07-11 02:06 PDT
+
+- Continued local TCP setup optimization in worktree
+  `/home/matt/software/mcpd3-distributed/.worktrees/local-tcp-opt` on branch
+  `local-tcp-opt`.
+- Removed another receive-side full-payload copy:
+  - `receiveFrameBytes` now validates received frames with `decodeFrameType`
+    instead of `decodeFrame`;
+  - this preserves message-type validation without constructing a copied
+    payload that is immediately discarded;
+  - added TCP regression tests for unknown message-type rejection in
+    uncompressed and snappy receive paths.
+- Removed the completed-frame return copy in `encodePartitionPackage`:
+  - added `Writer::takeBytes()`;
+  - `encodePartitionPackage` now returns the filled frame vector by move.
+- Added uncompressed partition-package scatter/gather send:
+  - introduced `ByteBufferView`;
+  - added `PartitionPackageFrameBuffers`, which exposes the same package wire
+    bytes as small headers plus views over existing `PartitionPackage` vectors;
+  - added protocol coverage that concatenating the buffers exactly matches
+    `encodePartitionPackage`;
+  - added TCP coverage for sending one frame from multiple buffers;
+  - `TcpPartitionWorker::loadPartition` uses the buffer path only for
+    uncompressed transports on little-endian 32-bit-int hosts, otherwise it
+    falls back to the existing encoded-frame path;
+  - buffer-list writes use `sendmsg` with `MSG_NOSIGNAL`.
+- Comparable mmap-backed `babyface.n6c10` p10/w2/no-compression/one-iteration
+  setup runs:
+  - previous bulk-encode baseline
+    `benchmark_results/local_tcp_parallel_bulk_babyface_p10_w2_none_20260711_012809`:
+    setup `18,017,156us`, total `25,706,023us`,
+    load RPC aggregate `35,146,645us`;
+  - receive type-peek only, default worker BK mmap path
+    `benchmark_results/local_tcp_recv_typepeek_defaultbk_babyface_p10_w2_none_20260711_015654`:
+    setup `18,397,708us`, total `25,257,601us`,
+    load RPC aggregate `36,082,765us`;
+  - receive type-peek plus move-return copy drop
+    `benchmark_results/local_tcp_sendrecv_copydrop_defaultbk_babyface_p10_w2_none_20260711_015836`:
+    setup `17,300,658us`, total `23,832,448us`,
+    load RPC aggregate `34,043,835us`;
+  - scatter/gather package send with per-buffer writes
+    `benchmark_results/local_tcp_scatter_package_defaultbk_babyface_p10_w2_none_20260711_020321`:
+    setup `17,758,739us`, total `24,141,107us`,
+    load RPC aggregate `34,832,544us`;
+  - scatter/gather package send with `sendmsg`
+    `benchmark_results/local_tcp_sendmsg_package_defaultbk_babyface_p10_w2_none_20260711_020445`:
+    setup `17,341,089us`, total `23,767,172us`,
+    load RPC aggregate `34,056,841us`.
+- Interpretation:
+  - receive type-peek alone was noisy and not a setup-time win on this point;
+  - the partition-package move-return copy drop is the measured setup win
+    (`18.02s -> 17.30s`, about `4.0%`);
+  - `sendmsg` scatter/gather is roughly setup-neutral versus the move-return
+    run but lowers coordinator memory pressure by avoiding a full serialized
+    package frame allocation for uncompressed local TCP;
+  - this is more relevant to file-backed mmap and larger local runs than the
+    earlier `malloc` speed probes.
+- Verified:
+  - `cmake --build build -j`;
+  - `./build/protocol_serialization_test`;
+  - `./build/tcp_loopback_test`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`.
+
+## 2026-07-11 02:12 PDT
+
+- Added direct worker-side receive/decode for uncompressed
+  `PARTITION_PACKAGE` frames:
+  - the worker now reads the 12-byte uncompressed frame header first;
+  - when the frame is a package and the host supports the raw int-vector
+    layout, it fills `PartitionPackage` vectors directly from the socket
+    payload;
+  - non-package uncompressed frames, snappy frames, and unsupported host layouts
+    continue through the existing full-frame receive/decode path.
+- This removes the worker-side full-frame buffer for uncompressed package
+  loads. The package vectors are still materialized because mcpd3 workers own
+  their partition packages, but the intermediate serialized frame allocation is
+  skipped.
+- Comparable mmap-backed `babyface.n6c10` p10/w2/no-compression/one-iteration
+  benchmark:
+  - previous sendmsg package-transfer run
+    `benchmark_results/local_tcp_sendmsg_package_defaultbk_babyface_p10_w2_none_20260711_020445`:
+    setup `17,341,089us`, total `23,767,172us`,
+    load RPC aggregate `34,056,841us`;
+  - direct worker package receive run
+    `benchmark_results/local_tcp_direct_recv_package_defaultbk_babyface_p10_w2_none_20260711_021113`:
+    setup `17,150,205us`, total `23,620,803us`,
+    load RPC aggregate `33,759,335us`;
+  - versus the earlier bulk-encode baseline
+    `benchmark_results/local_tcp_parallel_bulk_babyface_p10_w2_none_20260711_012809`,
+    setup moved from `18,017,156us` to `17,150,205us` and total wall moved
+    from `25,706,023us` to `23,620,803us` on this comparable point.
+- Verified:
+  - `./build/tcp_loopback_test`;
+  - `./build/process_integration_test ./build/mcpd4_coordinator ./build/mcpd4_worker ./build/mcpd4_discovery ./build/mcpd4_status tests/fixtures`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`.
