@@ -1,5 +1,24 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 05:03 PDT
+
+- Do not use `MSG_WAITALL` in the blocking TCP receive loops as a localhost
+  optimization. It passed the test suite, but did not improve the current p3/w3
+  local TCP point and was reverted.
+- Benchmark evidence, `babyface.n6c10`, p3/w3, one iteration,
+  malloc-backed BK storage, no compression:
+  - `benchmark_results/local_tcp_msg_waitall_p3_w3_malloc_babyface_none_20260711_050304`:
+    total `6,426,036us`, setup `2,062,099us`, aggregate partition-load RPC
+    `5,856,389us`;
+  - `benchmark_results/local_tcp_msg_waitall_p3_w3_malloc_babyface_none_20260711_050311`:
+    total `6,427,339us`, setup `2,055,062us`, aggregate partition-load RPC
+    `5,864,840us`;
+  - `benchmark_results/local_tcp_msg_waitall_p3_w3_malloc_babyface_none_20260711_050317`:
+    total `6,398,423us`, setup `2,024,147us`, aggregate partition-load RPC
+    `5,772,121us`.
+- These are in the same noise band as the normal p3 repeats
+  (`6,389,020us` to `6,438,462us`), with no clear upside.
+
 ## 2026-07-11 04:59 PDT
 
 - Do not switch the normal local TCP benchmark build to ad hoc
