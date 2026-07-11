@@ -2320,3 +2320,36 @@
   - `./build/tcp_loopback_test`;
   - `ctest --test-dir build --output-on-failure`;
   - `ctest --test-dir build/mcpd3-native --output-on-failure`.
+
+## 2026-07-11 03:07 PDT
+
+- After freeing system memory, reran the `babyface.n6c10` one-iteration local
+  TCP malloc-backed partition-count sweep around the p6/w6 candidate:
+  - p2/w2:
+    `benchmark_results/local_tcp_endpoint_malloc_babyface_p2_w2_none_20260711_030557`,
+    total `12,078,335us`, setup `3,219,063us`, solve `4,773,711us`,
+    partition-load TX `513,000,080` bytes;
+  - p3/w3:
+    `benchmark_results/local_tcp_endpoint_malloc_babyface_p3_w3_none_20260711_030515`,
+    total `8,478,821us`, setup `3,069,810us`, solve `1,184,767us`,
+    partition-load TX `516,375,120` bytes;
+  - p4/w4:
+    `benchmark_results/local_tcp_endpoint_malloc_babyface_p4_w4_none_20260711_030451`,
+    total `8,522,239us`, setup `3,030,707us`, solve `1,400,977us`,
+    partition-load TX `519,750,160` bytes;
+  - p5/w5:
+    `benchmark_results/local_tcp_endpoint_malloc_babyface_p5_w5_none_20260711_030634`,
+    total `10,385,090us`, setup `3,061,779us`, solve `3,182,755us`,
+    partition-load TX `523,125,200` bytes;
+  - p7/w7:
+    `benchmark_results/local_tcp_endpoint_malloc_babyface_p7_w7_none_20260711_030645`,
+    total `9,580,102us`, setup `4,517,509us`, solve `767,693us`,
+    partition-load TX `529,875,280` bytes;
+  - p6/w6 repeat:
+    `benchmark_results/local_tcp_endpoint_malloc_repeat_babyface_p6_w6_none_20260711_030710`,
+    total `8,324,249us`, setup `3,252,579us`, solve `900,272us`,
+    partition-load TX `526,500,240` bytes.
+- Current best one-iteration local TCP point on this machine remains p6/w6 with
+  malloc-backed BK storage and no transport compression. The lower partition
+  counts now fit in memory, but p2 and p5 lose badly on local solve time, and
+  p3/p4 are close but still slower than p6.

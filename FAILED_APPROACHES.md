@@ -607,3 +607,18 @@
   was `8,887,600us` versus `8,778,549us` before endpoint compaction, and the
   measured malloc run was `8,376,554us` versus `8,290,466us`. Treat it as a
   transport-size optimization, not a localhost timing win.
+
+## 2026-07-11 03:07 PDT
+
+- Do not assume fewer partitions are faster once malloc-backed BK storage fits.
+  With `13Gi` available, p2/w2 through p7/w7 all fit on `babyface.n6c10`, but
+  the one-iteration local TCP totals still favored p6/w6:
+  - p2/w2: `12,078,335us`;
+  - p3/w3: `8,478,821us`;
+  - p4/w4: `8,522,239us`;
+  - p5/w5: `10,385,090us`;
+  - p6/w6 repeat: `8,324,249us`;
+  - p7/w7: `9,580,102us`.
+- p2 has the smallest partition-load transfer in this sweep, but its solve time
+  (`4,773,711us`) dominates. Use p6/w6 as the current local TCP comparison
+  point until a larger/more complete convergence benchmark says otherwise.
