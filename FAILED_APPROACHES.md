@@ -743,3 +743,27 @@
   overhead rather than transport volume. The implementation code was reverted.
   A stronger compact directed TCP test was kept to compare remote loaded solves
   against an in-process worker and cover both signed compact capacity branches.
+
+## 2026-07-11 04:00 PDT
+
+- Do not add an always-on worker-side timing hook around
+  `worker->loadPartition` in `runWorkerClient`. The change only added
+  `steady_clock` measurement, two status fields, and a `load_wall_us` log
+  suffix, but it reproducibly slowed the p6/w6 `babyface.n6c10` local TCP
+  setup path:
+  - dirty timing-hook run
+    `benchmark_results/local_tcp_worker_load_timing_probe_p6_w6_malloc_babyface_none_20260711_035744`:
+    total `8,025,182us`, setup `3,361,237us`, load RPC aggregate
+    `18,926,363us`;
+  - dirty timing-hook repeat
+    `benchmark_results/local_tcp_worker_load_timing_probe_repeat_p6_w6_malloc_babyface_none_20260711_035837`:
+    total `7,993,266us`, setup `3,316,498us`, load RPC aggregate
+    `18,895,258us`;
+  - clean detached control worktree at `430813d`
+    `benchmark_results/control_p6_w6_malloc_babyface_none_20260711_040030`:
+    total `6,921,185us`, setup `2,201,914us`, load RPC aggregate
+    `12,170,273us`.
+- The control run was built and executed from a separate worktree at the same
+  pushed commit, with the same Release build type and benchmark command. The
+  timing-hook code was reverted. If this split is needed later, make it opt-in
+  and re-measure the off path first.
