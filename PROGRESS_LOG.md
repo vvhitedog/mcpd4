@@ -34,6 +34,18 @@
   disagreements on this probe (`443,273` vs `499,015`). Splitting into more
   than 16 partitions while keeping 16 workers is not helpful; setup and RPC
   overhead dominate any solve-wall reduction.
+- Checked p15/w15 against p16/w16 with `--max-iterations 20`; both stopped
+  after 11 total iterations with `stop_reason 4` under the existing schedule
+  stopping logic:
+  - p15/w15
+    `benchmark_results/local_tcp_early_listen_20iter_p15_w15_malloc_babyface_none_20260711_053009`:
+    total `29,852,306us`, setup `4,945,809us`, solve `21,232,761us`,
+    final disagreements `439,228`;
+  - p16/w16
+    `benchmark_results/local_tcp_early_listen_20iter_p16_w16_malloc_babyface_none_20260711_053040`:
+    total `31,001,332us`, setup `5,750,316us`, solve `21,534,772us`,
+    final disagreements `490,724`.
+- This longer run still favors p15/w15.
 
 ## 2026-07-11 05:22 PDT
 
