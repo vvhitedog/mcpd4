@@ -1133,3 +1133,22 @@
   pushed commit, with the same Release build type and benchmark command. The
   timing-hook code was reverted. If this split is needed later, make it opt-in
   and re-measure the off path first.
+
+## 2026-07-11 08:26 PDT
+
+- Do not use `MCPD3_PARTITIONER=local` as a drop-in replacement for the tuned
+  p9/w9 `adhead.n6c10` local TCP configuration. Run
+  `benchmark_results/local_tcp_adhead_n6c10_p9_w9_localpart_os2000_start1000_iter60_malloc_20260711_082348`
+  used the same memory-resident malloc worker shape as the current best
+  basic-partitioner run, but was both slower and nonconvergent:
+  - status `1`, stop_reason `4`;
+  - final objective/certified lower bound `48373`, but final disagreements
+    `10`;
+  - objective scale promoted from `2000` to `20000`;
+  - total iterations `221`, wall `110,724,502us`, solve `91,148,177us`;
+  - regularization budget warning: `3330 >= 2000`.
+- The current best basic-partitioner p9/w9 controls remain
+  `benchmark_results/local_tcp_adhead_n6c10_p9_w9_os2000_start1000_iter60_malloc_20260711_081212`
+  and repeat
+  `benchmark_results/local_tcp_adhead_n6c10_p9_w9_os2000_start1000_iter60_malloc_repeat_20260711_081347`,
+  both exact with zero disagreements in about `44.5s`.
