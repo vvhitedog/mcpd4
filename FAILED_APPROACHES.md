@@ -1,5 +1,23 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 05:14 PDT
+
+- For the current in-memory-sized `babyface.n6c10` local TCP p16/w16
+  10-iteration probe, do not prefer file-backed BK mmap over malloc when RAM is
+  available.
+- Evidence:
+  - malloc p16/w16
+    `benchmark_results/local_tcp_early_listen_10iter_p16_w16_malloc_babyface_none_20260711_051029`:
+    total `27,878,130us`, setup `5,153,077us`, solve `19,015,852us`;
+  - malloc repeat
+    `benchmark_results/local_tcp_early_listen_10iter_repeat_p16_w16_malloc_babyface_none_20260711_051254`:
+    total `28,369,133us`, setup `5,185,741us`, solve `19,487,864us`;
+  - file-backed mmap with sequential advice
+    `benchmark_results/local_tcp_early_listen_10iter_p16_w16_filemmap_babyface_none_20260711_051409`:
+    total `28,865,596us`, setup `5,461,839us`, solve `19,692,961us`.
+- File-backed BK mmap remains important for out-of-core runs, but malloc is
+  still faster for this memory-resident local benchmark.
+
 ## 2026-07-11 05:03 PDT
 
 - Do not use `MSG_WAITALL` in the blocking TCP receive loops as a localhost
