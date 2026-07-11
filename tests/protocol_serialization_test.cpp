@@ -140,6 +140,9 @@ void frameHeaderIsLittleEndian() {
               frame[8] == 0 && frame[9] == 0 && frame[10] == 0 &&
               frame[11] == 0,
           "payload length should be little-endian uint64");
+  require(mcpd4::decodeFrameType(frame) ==
+              mcpd4::MessageType::PARTITION_PACKAGE,
+          "frame type peek mismatch");
 
   const auto decoded = mcpd4::decodeFrame(frame);
   require(decoded.type == mcpd4::MessageType::PARTITION_PACKAGE,

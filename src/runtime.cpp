@@ -157,7 +157,8 @@ Frame receiveTypedFrame(const SocketHandle &socket,
   *frame_bytes =
       receiveFrameBytes(socket, kDefaultMaxFrameBytes, compression,
                         &transfer);
-  const auto frame = decodeFrame(*frame_bytes);
+  Frame frame;
+  frame.type = decodeFrameType(*frame_bytes);
   recordFrameReceived(stats, frame.type, transfer);
   return frame;
 }
@@ -479,11 +480,11 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
       const auto frame_bytes =
           receiveFrameBytes(socket, kDefaultMaxFrameBytes, compression,
                             &receive_transfer);
-      const auto frame = decodeFrame(frame_bytes);
+      const auto frame_type = decodeFrameType(frame_bytes);
       if (status_hooks.on_frame_received) {
-        status_hooks.on_frame_received(frame.type, receive_transfer);
+        status_hooks.on_frame_received(frame_type, receive_transfer);
       }
-      switch (frame.type) {
+      switch (frame_type) {
       case MessageType::PARTITION_PACKAGE:
         {
           if (status_hooks.on_phase) {
@@ -639,8 +640,8 @@ std::unique_ptr<TcpPartitionWorker> acceptTcpPartitionWorker(
   const auto frame_bytes =
       receiveFrameBytes(socket, kDefaultMaxFrameBytes,
                         TransportCompression::NONE, &transfer);
-  const auto frame = decodeFrame(frame_bytes);
-  if (frame.type != MessageType::HELLO) {
+  const auto frame_type = decodeFrameType(frame_bytes);
+  if (frame_type != MessageType::HELLO) {
     throw std::runtime_error("expected HELLO from worker");
   }
   auto hello = decodeHello(frame_bytes);

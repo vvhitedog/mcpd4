@@ -196,13 +196,47 @@ MCPD4_OBJECTIVE_SCALE              default: 10000
 MCPD4_ACCEPT_TIMEOUT_MS            default: 30000
 MCPD4_READY_TIMEOUT_SEC            default: 300
 MCPD4_PROGRESS_EVERY               default: 0
+MCPD4_TELEMETRY_CSV_PREFIX         default: unset
 MCPD4_RPC_COMPRESSION              default: none
+MCPD4_WORKER_BK_STORAGE            default: worker default (file_mmap)
+MCPD4_WORKER_BK_MMAP_DIR_PREFIX    default: unset
+MCPD4_WORKER_BK_MMAP_ADVISE        default: unset
 MCPD4_SATURATE_CAPACITY_OVERFLOW   default: 0
 ```
 
 Legacy `MCPD4_NUM_SCALES`, `MCPD4_INITIAL_STEP`,
 `MCPD4_CAPACITY_MULTIPLIER`, and `MCPD3_*` aliases are still accepted by the
 helper for compatibility.
+
+For an in-memory localhost speed benchmark where the graph and all worker BK
+state fit comfortably in RAM, use one local worker per partition and worker
+malloc storage. This is intentionally memory-heavy; do not use it for
+out-of-core or memory-constrained runs.
+
+```bash
+MCPD4_WORKERS=10 \
+MCPD4_PARTITIONS=10 \
+MCPD4_OBJECTIVE_SCALE=1000 \
+MCPD4_SCHEDULE_START=10000 \
+MCPD4_SCHEDULE_LEVELS=5 \
+MCPD4_MAX_ITERATIONS=10000 \
+MCPD4_PROGRESS_EVERY=25 \
+MCPD4_WORKER_BK_STORAGE=malloc \
+MCPD4_TELEMETRY_CSV_PREFIX=/tmp/babyface-local-tcp \
+scripts/run_local_process_benchmark.sh /data/babyface.n6c10.max --directed
+```
+
+For larger graphs or memory-constrained machines, prefer file-backed BK storage
+and give each worker a disk-backed mmap directory:
+
+```bash
+MCPD4_WORKERS=10 \
+MCPD4_PARTITIONS=10 \
+MCPD4_WORKER_BK_STORAGE=file_mmap \
+MCPD4_WORKER_BK_MMAP_DIR_PREFIX=/fast-disk/mcpd4-local-bk \
+MCPD4_WORKER_BK_MMAP_ADVISE=populate \
+scripts/run_local_process_benchmark.sh /data/graph.max --directed
+```
 
 ## Manual Localhost Run
 

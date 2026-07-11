@@ -75,6 +75,7 @@ struct TimedSolveRoundBatchResult {
 std::vector<std::uint8_t> encodeFrame(MessageType type,
                                       const std::vector<std::uint8_t> &payload);
 Frame decodeFrame(const std::vector<std::uint8_t> &bytes);
+MessageType decodeFrameType(const std::vector<std::uint8_t> &bytes);
 
 std::vector<std::uint8_t> encodeHello(const HelloMessage &message);
 HelloMessage decodeHello(const std::vector<std::uint8_t> &frame);

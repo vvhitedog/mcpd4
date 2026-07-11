@@ -513,3 +513,22 @@
   Partition-only probes increased boundary endpoint counts from p32's
   `4,194,304` to `5,275,972` and `6,291,456`, respectively, with no partition
   wall-time improvement.
+
+## 2026-07-11 01:44 PDT
+
+- Do not treat `babyface.n6c10` local TCP p10/w10 `objective_scale=1000` as an
+  exact completed benchmark. Run
+  `benchmark_results/local_tcp_optimized_full_babyface_p10_w10_none_20260711_013605`
+  reached iteration `96`, best certified lower bound raw `18,599,400`, then
+  exceeded the regularization budget and failed during objective-scale
+  promotion with `objective scale promotion exceeds int`.
+- Do not treat `babyface.n6c10` `objective_scale=10000` strict mode as runnable
+  with the current int32 capacity representation. Run
+  `benchmark_results/local_tcp_optimized_full_babyface_p10_w10_os10000_none_20260711_014141`
+  failed during the initial scale pass with `objective scale exceeds int
+  range`.
+- If using `--saturate-capacity-overflow` for these local TCP performance
+  sweeps, keep the result labeled as clipped-capacity compatibility data. The
+  saturated `babyface.n6c10` scale-10000 run clipped `11,370` terminal
+  capacities during initial scaling, so it is useful for transport/runtime
+  performance but not an exact strict-capacity proof.

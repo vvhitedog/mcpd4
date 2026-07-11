@@ -16,7 +16,11 @@ Environment overrides:
   MCPD4_ACCEPT_TIMEOUT_MS      30000
   MCPD4_READY_TIMEOUT_SEC      300
   MCPD4_PROGRESS_EVERY         0
+  MCPD4_TELEMETRY_CSV_PREFIX
   MCPD4_RPC_COMPRESSION        none
+  MCPD4_WORKER_BK_STORAGE      worker default is file_mmap
+  MCPD4_WORKER_BK_MMAP_DIR_PREFIX
+  MCPD4_WORKER_BK_MMAP_ADVISE
   MCPD4_SATURATE_CAPACITY_OVERFLOW  0
 
 Legacy MCPD4_NUM_SCALES, MCPD4_INITIAL_STEP, MCPD4_CAPACITY_MULTIPLIER, and
@@ -38,7 +42,11 @@ objective_scale=${MCPD4_OBJECTIVE_SCALE:-${MCPD4_CAPACITY_MULTIPLIER:-${MCPD3_CA
 accept_timeout_ms=${MCPD4_ACCEPT_TIMEOUT_MS:-${MCPD3_ACCEPT_TIMEOUT_MS:-30000}}
 ready_timeout_sec=${MCPD4_READY_TIMEOUT_SEC:-${MCPD3_READY_TIMEOUT_SEC:-300}}
 progress_every=${MCPD4_PROGRESS_EVERY:-${MCPD3_PROGRESS_EVERY:-0}}
+telemetry_csv_prefix=${MCPD4_TELEMETRY_CSV_PREFIX:-}
 rpc_compression=${MCPD4_RPC_COMPRESSION:-none}
+worker_bk_storage=${MCPD4_WORKER_BK_STORAGE:-}
+worker_bk_mmap_dir_prefix=${MCPD4_WORKER_BK_MMAP_DIR_PREFIX:-}
+worker_bk_mmap_advise=${MCPD4_WORKER_BK_MMAP_ADVISE:-}
 saturate_capacity_overflow=${MCPD4_SATURATE_CAPACITY_OVERFLOW:-${MCPD3_SATURATE_CAPACITY_OVERFLOW:-${MCPD3_TRUNCATE_CAPACITY_OVERFLOW:-0}}}
 
 coordinator="${build_dir}/mcpd4_coordinator"
@@ -75,6 +83,9 @@ extra_args=()
 if [[ "$saturate_capacity_overflow" != "0" && -n "$saturate_capacity_overflow" ]]; then
   extra_args+=(--saturate-capacity-overflow)
 fi
+if [[ -n "$telemetry_csv_prefix" ]]; then
+  extra_args+=(--telemetry-csv-prefix "$telemetry_csv_prefix")
+fi
 
 "$coordinator" "$dimacs_path" \
   --port "$port" \
@@ -109,8 +120,19 @@ fi
 
 worker_pids=
 for idx in $(seq 1 "$workers"); do
-  "$worker" 127.0.0.1 "$port" --name "local-benchmark-${idx}" \
-    --rpc-compression "$rpc_compression" &
+  worker_args=(--name "local-benchmark-${idx}" --rpc-compression "$rpc_compression")
+  if [[ -n "$worker_bk_storage" ]]; then
+    worker_args+=(--bk-storage "$worker_bk_storage")
+  fi
+  if [[ -n "$worker_bk_mmap_dir_prefix" ]]; then
+    worker_bk_mmap_dir="${worker_bk_mmap_dir_prefix}-${idx}"
+    mkdir -p "$worker_bk_mmap_dir"
+    worker_args+=(--bk-mmap-dir "$worker_bk_mmap_dir")
+  fi
+  if [[ -n "$worker_bk_mmap_advise" ]]; then
+    worker_args+=(--bk-mmap-advise "$worker_bk_mmap_advise")
+  fi
+  "$worker" 127.0.0.1 "$port" "${worker_args[@]}" &
   worker_pids="${worker_pids} $!"
 done
 

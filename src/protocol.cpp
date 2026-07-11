@@ -135,9 +135,17 @@ private:
 
 class Reader {
 public:
-  explicit Reader(const std::vector<std::uint8_t> &bytes) : bytes_(bytes) {}
+  explicit Reader(const std::vector<std::uint8_t> &bytes)
+      : bytes_(bytes), end_(bytes.size()) {}
 
-  bool empty() const { return offset_ == bytes_.size(); }
+  Reader(const std::vector<std::uint8_t> &bytes, std::size_t offset,
+         std::size_t size)
+      : bytes_(bytes), offset_(offset), end_(offset + size) {
+    require(offset <= bytes_.size() && size <= bytes_.size() - offset,
+            "payload view is outside frame bounds");
+  }
+
+  bool empty() const { return offset_ == end_; }
 
   std::uint8_t readU8() {
     requireRemaining(1);
@@ -232,7 +240,7 @@ public:
 
 private:
   void requireRemaining(std::size_t count) const {
-    if (count > bytes_.size() - offset_) {
+    if (count > end_ - offset_) {
       throw std::runtime_error("truncated payload");
     }
   }
@@ -244,15 +252,46 @@ private:
 
   const std::vector<std::uint8_t> &bytes_;
   std::size_t offset_ = 0;
+  std::size_t end_ = 0;
 };
 
 void requireDone(const Reader &reader) {
   require(reader.empty(), "payload has trailing bytes");
 }
 
+struct DecodedFrameView {
+  MessageType type = MessageType::ERROR;
+  std::size_t payload_offset = kFrameHeaderBytes;
+  std::size_t payload_size = 0;
+};
+
+DecodedFrameView decodeFrameView(const std::vector<std::uint8_t> &bytes) {
+  require(bytes.size() >= kFrameHeaderBytes, "frame header is truncated");
+  Reader reader(bytes);
+  const auto raw_type = reader.readU32();
+  require(isKnownMessageType(raw_type), "unknown message type");
+  const auto payload_size = reader.readU64();
+  require(payload_size <= std::numeric_limits<std::size_t>::max(),
+          "payload size is too large");
+  require(bytes.size() - kFrameHeaderBytes ==
+              static_cast<std::size_t>(payload_size),
+          "frame payload size does not match buffer size");
+  DecodedFrameView view;
+  view.type = static_cast<MessageType>(raw_type);
+  view.payload_size = static_cast<std::size_t>(payload_size);
+  return view;
+}
+
 Frame decodeExpectedFrame(const std::vector<std::uint8_t> &frame,
                           MessageType expected_type) {
   auto decoded = decodeFrame(frame);
+  require(decoded.type == expected_type, "unexpected message type");
+  return decoded;
+}
+
+DecodedFrameView decodeExpectedFrameView(
+    const std::vector<std::uint8_t> &frame, MessageType expected_type) {
+  auto decoded = decodeFrameView(frame);
   require(decoded.type == expected_type, "unexpected message type");
   return decoded;
 }
@@ -387,22 +426,18 @@ std::vector<std::uint8_t> encodeFrame(
 }
 
 Frame decodeFrame(const std::vector<std::uint8_t> &bytes) {
-  require(bytes.size() >= kFrameHeaderBytes, "frame header is truncated");
-  Reader reader(bytes);
-  const auto raw_type = reader.readU32();
-  require(isKnownMessageType(raw_type), "unknown message type");
-  const auto payload_size = reader.readU64();
-  require(payload_size <= std::numeric_limits<std::size_t>::max(),
-          "payload size is too large");
-  require(bytes.size() - kFrameHeaderBytes ==
-              static_cast<std::size_t>(payload_size),
-          "frame payload size does not match buffer size");
+  const auto view = decodeFrameView(bytes);
   Frame frame;
-  frame.type = static_cast<MessageType>(raw_type);
-  frame.payload.assign(bytes.begin() +
-                           static_cast<std::ptrdiff_t>(kFrameHeaderBytes),
-                       bytes.end());
+  frame.type = view.type;
+  frame.payload.assign(
+      bytes.begin() + static_cast<std::ptrdiff_t>(view.payload_offset),
+      bytes.begin() + static_cast<std::ptrdiff_t>(view.payload_offset +
+                                                  view.payload_size));
   return frame;
+}
+
+MessageType decodeFrameType(const std::vector<std::uint8_t> &bytes) {
+  return decodeFrameView(bytes).type;
 }
 
 std::vector<std::uint8_t> encodeHello(const HelloMessage &message) {
@@ -455,8 +490,9 @@ std::vector<std::uint8_t> encodePartitionPackage(
 
 mcpd3::PartitionPackage decodePartitionPackage(
     const std::vector<std::uint8_t> &frame) {
-  auto decoded = decodeExpectedFrame(frame, MessageType::PARTITION_PACKAGE);
-  Reader reader(decoded.payload);
+  const auto decoded =
+      decodeExpectedFrameView(frame, MessageType::PARTITION_PACKAGE);
+  Reader reader(frame, decoded.payload_offset, decoded.payload_size);
   mcpd3::PartitionPackage message;
   message.partition_id = reader.readI32();
   message.local_node_count = reader.readI32();

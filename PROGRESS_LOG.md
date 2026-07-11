@@ -1942,7 +1942,10 @@
     `benchmark_results/local_tcp_parallel_bulk_malloc_babyface_p10_w10_none_20260711_013120`,
     setup `8,085,850us`, total `13,860,731us`;
   - for this one-iteration setup-heavy benchmark, one local worker per
-    partition was best among the tested local TCP points.
+    partition was best among the tested local TCP points;
+  - important caveat: worker `malloc` storage is substantially more memory
+    heavy than file-backed BK mmap, so treat these as fits-in-RAM speed
+    measurements, not the recommended large/out-of-core configuration.
 - No-TCP in-process comparators after the same code changes:
   - p10/w2:
     `benchmark_results/inprocess_parallel_bulk_babyface_p10_w2_20260711_012845`,
@@ -1952,6 +1955,49 @@
     setup `3,764,435us`, total `9,232,235us`;
   - remaining local TCP overhead for p10/w10 is about `4.32s` in setup
     (`8.09s - 3.76s`) on this run.
+- Added a protocol frame-type peek and zero-copy payload view for
+  partition-package decode:
+  - public `decodeFrame` still preserves the copied-payload API;
+  - runtime dispatch now uses `decodeFrameType` to avoid constructing a copied
+    payload just to switch on message type;
+  - `decodePartitionPackage` now reads directly from the original frame buffer
+    rather than a copied frame payload.
+- Type-peek/zero-copy decode benchmark repeats on p10/w10/malloc/no-compression:
+  - `benchmark_results/local_tcp_typepeek_babyface_p10_w10_none_20260711_013455`,
+    setup `8,649,702us`, total `14,206,731us`;
+  - `benchmark_results/local_tcp_typepeek_repeat_babyface_p10_w10_none_20260711_013525`,
+    setup `7,670,352us`, total `13,506,131us`;
+  - result is noisy but roughly neutral-to-positive relative to the previous
+    p10/w10 best setup `8,085,850us`; keep watching on larger runs.
+- Added reproducibility knobs to `scripts/run_local_process_benchmark.sh`:
+  - `MCPD4_TELEMETRY_CSV_PREFIX`;
+  - `MCPD4_WORKER_BK_STORAGE`;
+  - `MCPD4_WORKER_BK_MMAP_DIR_PREFIX`;
+  - `MCPD4_WORKER_BK_MMAP_ADVISE`.
+- Updated README local run docs with optimized localhost examples:
+  - malloc-backed workers for in-memory local TCP performance;
+  - file-backed worker BK mmap directories for larger graphs.
+- Full local TCP `babyface.n6c10` attempts:
+  - strict p10/w10/malloc/objective-scale-1000 run
+    `benchmark_results/local_tcp_optimized_full_babyface_p10_w10_none_20260711_013605`
+    failed at iteration `96` after regularization budget exceeded and
+    objective-scale promotion overflowed int32;
+  - strict p10/w10/malloc/objective-scale-10000 run
+    `benchmark_results/local_tcp_optimized_full_babyface_p10_w10_os10000_none_20260711_014141`
+    failed during initial scaling with `objective scale exceeds int range`;
+  - saturated p10/w10/malloc/objective-scale-10000 run
+    `benchmark_results/local_tcp_optimized_full_babyface_p10_w10_os10000_saturate_none_20260711_014340`
+    started successfully and clipped `11,370` terminal capacities; after a
+    promotion it was manually stopped at total iteration `66` because it was no
+    longer a clean exactness or fast-validation run; treat this as
+    compatibility/performance data, not exact strict-capacity data.
+- Helper-script smoke for the new reproducibility knobs:
+  - run directory:
+    `benchmark_results/helper_smoke_local_tcp_20260711_014926`;
+  - command used `MCPD4_WORKER_BK_STORAGE=malloc` and
+    `MCPD4_TELEMETRY_CSV_PREFIX`;
+  - completed through local TCP with `status=0`, final objective `4`, zero
+    disagreement, and telemetry files written.
 - Verified:
   - `cmake -S third_party/mcpd3 -B build/mcpd3-native -DCMAKE_BUILD_TYPE=Release`;
   - `cmake --build build/mcpd3-native -j`;
