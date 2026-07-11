@@ -255,12 +255,27 @@ mcpd3::ConstraintLabel readConstraintLabel(Reader *reader) {
   return label;
 }
 
+void writeNodeLabel(Writer *writer, const mcpd3::NodeLabel &label) {
+  writer->writeI32(label.global_node_id);
+  writer->writeI32(label.local_index);
+  writer->writeI32(label.label);
+}
+
+mcpd3::NodeLabel readNodeLabel(Reader *reader) {
+  mcpd3::NodeLabel label;
+  label.global_node_id = reader->readI32();
+  label.local_index = reader->readI32();
+  label.label = reader->readI32();
+  return label;
+}
+
 void writeSolveRoundRequestPayload(
     Writer *writer, const mcpd3::PartitionSolveRequest &message) {
   writer->writeI64(message.round_id);
   writer->writeI32(message.partition_id);
   writer->writeI64(message.scale);
   writer->writeI32(message.regularization_strength);
+  writer->writeBool(message.return_full_labels);
   writer->writeVector<mcpd3::AlphaUpdate>(
       message.alpha_updates,
       [&](const auto &update) { writeAlphaUpdate(writer, update); });
@@ -272,6 +287,7 @@ mcpd3::PartitionSolveRequest readSolveRoundRequestPayload(Reader *reader) {
   message.partition_id = reader->readI32();
   message.scale = checkedIntegerCast<long>(reader->readI64());
   message.regularization_strength = reader->readI32();
+  message.return_full_labels = reader->readBool();
   message.alpha_updates = reader->readVector<mcpd3::AlphaUpdate>(
       [&] { return readAlphaUpdate(reader); });
   return message;
@@ -289,6 +305,9 @@ void writeSolveRoundResultPayload(
   writer->writeVector<mcpd3::ConstraintLabel>(
       message.constrained_labels,
       [&](const auto &label) { writeConstraintLabel(writer, label); });
+  writer->writeVector<mcpd3::NodeLabel>(
+      message.full_labels,
+      [&](const auto &label) { writeNodeLabel(writer, label); });
 }
 
 mcpd3::PartitionSolveResult readSolveRoundResultPayload(Reader *reader) {
@@ -305,6 +324,8 @@ mcpd3::PartitionSolveResult readSolveRoundResultPayload(Reader *reader) {
       checkedIntegerCast<long>(reader->readI64());
   message.constrained_labels = reader->readVector<mcpd3::ConstraintLabel>(
       [&] { return readConstraintLabel(reader); });
+  message.full_labels =
+      reader->readVector<mcpd3::NodeLabel>([&] { return readNodeLabel(reader); });
   return message;
 }
 

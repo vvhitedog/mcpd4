@@ -485,6 +485,7 @@ void remoteWorkerSolvesExplicitBatch() {
     first.partition_id = 0;
     first.scale = 100;
     first.regularization_strength = 0;
+    first.return_full_labels = true;
 
     mcpd3::PartitionSolveRequest second = first;
     second.partition_id = 1;
@@ -496,6 +497,12 @@ void remoteWorkerSolvesExplicitBatch() {
             "remote batch should preserve partition result order");
     require(results[0].round_id == 3 && results[1].round_id == 3,
             "remote batch should preserve round ids");
+    require(results[0].full_labels.size() == 1 &&
+                results[1].full_labels.size() == 1,
+            "remote batch should return full labels when requested");
+    require(results[0].full_labels[0].global_node_id == 11 &&
+                results[1].full_labels[0].global_node_id == 11,
+            "remote batch full labels should preserve global node ids");
     require(worker->timingStats().partition_solve_call_count == 2,
             "remote batch timing should count partition solve calls");
     require(worker->timingStats().solve_batch_rpc_count == 1,

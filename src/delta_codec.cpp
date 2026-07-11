@@ -298,6 +298,7 @@ void writeSolveRoundRequestPayload(
   writer->writeI32(message.partition_id);
   writer->writeI64(message.scale);
   writer->writeI32(message.regularization_strength);
+  writer->writeBool(message.return_full_labels);
   const auto encoded = encodeAlphaUpdatesForPartition(message, state);
   writer->writeVector<EncodedAlphaUpdate>(
       encoded, [&](const auto &update) { writeEncodedAlpha(writer, update); });
@@ -310,6 +311,7 @@ mcpd3::PartitionSolveRequest readSolveRoundRequestPayload(
   message.partition_id = reader->readI32();
   message.scale = checkedIntegerCast<long>(reader->readI64());
   message.regularization_strength = reader->readI32();
+  message.return_full_labels = reader->readBool();
   const auto encoded = reader->readVector<EncodedAlphaUpdate>(
       [&] { return readEncodedAlpha(reader); });
   message.alpha_updates =
@@ -436,6 +438,22 @@ std::vector<mcpd3::ConstraintLabel> decodeLabelsForPartition(
   return labels;
 }
 
+void writeNodeLabel(Writer *writer, const mcpd3::NodeLabel &label) {
+  require(label.label == 0 || label.label == 1,
+          "full node label must be binary for temporal encoding");
+  writer->writeI32(label.global_node_id);
+  writer->writeI32(label.local_index);
+  writer->writeBool(label.label != 0);
+}
+
+mcpd3::NodeLabel readNodeLabel(Reader *reader) {
+  mcpd3::NodeLabel label;
+  label.global_node_id = reader->readI32();
+  label.local_index = reader->readI32();
+  label.label = reader->readBool() ? 1 : 0;
+  return label;
+}
+
 void writeSolveRoundResultPayload(
     Writer *writer, const mcpd3::PartitionSolveResult &message,
     TemporalSolveCodecState *state) {
@@ -451,6 +469,9 @@ void writeSolveRoundResultPayload(
   writer->writeBool(full_sync);
   writer->writeVector<EncodedConstraintLabel>(
       labels, [&](const auto &label) { writeEncodedLabel(writer, label); });
+  writer->writeVector<mcpd3::NodeLabel>(
+      message.full_labels,
+      [&](const auto &label) { writeNodeLabel(writer, label); });
 }
 
 mcpd3::PartitionSolveResult readSolveRoundResultPayload(
@@ -471,6 +492,8 @@ mcpd3::PartitionSolveResult readSolveRoundResultPayload(
       [&] { return readEncodedLabel(reader); });
   message.constrained_labels =
       decodeLabelsForPartition(message.partition_id, full_sync, encoded, state);
+  message.full_labels =
+      reader->readVector<mcpd3::NodeLabel>([&] { return readNodeLabel(reader); });
   return message;
 }
 

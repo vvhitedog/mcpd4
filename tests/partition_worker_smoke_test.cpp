@@ -36,6 +36,7 @@ void smokeTestInProcessPartitionWorkerFromSubmodule() {
   mcpd3::PartitionSolveRequest first_request;
   first_request.round_id = 1;
   first_request.scale = 10000;
+  first_request.return_full_labels = true;
   auto first_result = worker.solveRound(first_request);
   require(first_result.round_id == 1, "first round id was not preserved");
   require(first_result.partition_id == 0, "partition id was not preserved");
@@ -47,6 +48,16 @@ void smokeTestInProcessPartitionWorkerFromSubmodule() {
           "global node id was not preserved");
   require(first_result.constrained_labels[0].local_index == 1,
           "local index was not preserved");
+  require(first_result.full_labels.size() == 2,
+          "expected one full label per local node");
+  require(first_result.full_labels[0].global_node_id == 100,
+          "first full label global node id was not preserved");
+  require(first_result.full_labels[0].local_index == 0,
+          "first full label local index was not preserved");
+  require(first_result.full_labels[1].global_node_id == 200,
+          "second full label global node id was not preserved");
+  require(first_result.full_labels[1].local_index == 1,
+          "second full label local index was not preserved");
 
   mcpd3::PartitionSolveRequest second_request;
   second_request.round_id = 2;
