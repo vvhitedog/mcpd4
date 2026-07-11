@@ -107,6 +107,7 @@ public:
 private:
   const mcpd3::PartitionPackage *message_ = nullptr;
   Mode mode_ = Mode::FULL;
+  std::size_t total_size_ = 0;
   std::array<std::uint8_t, 12> frame_header_{};
   std::array<std::uint8_t, 8> scalar_header_{};
   std::array<std::uint8_t, 4> arcs_size_{};
@@ -114,6 +115,8 @@ private:
   std::array<std::uint8_t, 4> terminal_capacities_size_{};
   std::array<std::uint8_t, 4> local_to_global_size_{};
   std::array<std::uint8_t, 4> constraint_endpoints_size_{};
+  bool use_compact_arc_capacities_ = false;
+  std::vector<int> compact_arc_capacities_;
   std::vector<std::uint8_t> constraint_endpoint_bytes_;
 };
 

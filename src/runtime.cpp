@@ -170,6 +170,32 @@ std::vector<std::uint8_t> receiveUncompressedFrameBody(
   return frame;
 }
 
+void expandCompactArcCapacities(mcpd3::PartitionPackage *message) {
+  if (message->arc_capacities.size() == message->arcs.size()) {
+    return;
+  }
+  if (message->arcs.size() % 2 != 0 ||
+      message->arc_capacities.size() != message->arcs.size() / 2) {
+    throw std::runtime_error(
+        "partition arc capacity count is neither full nor compact");
+  }
+  std::vector<int> expanded;
+  expanded.reserve(message->arcs.size());
+  for (const auto signed_capacity : message->arc_capacities) {
+    if (signed_capacity == std::numeric_limits<int>::min()) {
+      throw std::runtime_error("compact arc capacity is outside range");
+    }
+    if (signed_capacity >= 0) {
+      expanded.push_back(signed_capacity);
+      expanded.push_back(0);
+    } else {
+      expanded.push_back(0);
+      expanded.push_back(-signed_capacity);
+    }
+  }
+  message->arc_capacities = std::move(expanded);
+}
+
 class SocketPayloadReader {
 public:
   SocketPayloadReader(const SocketHandle &socket, std::uint64_t payload_size)
@@ -306,6 +332,7 @@ mcpd3::PartitionPackage receivePartitionPackagePayload(
   message.local_node_count = reader.readI32();
   message.arcs = reader.readI32Vector();
   message.arc_capacities = reader.readI32Vector();
+  expandCompactArcCapacities(&message);
   message.terminal_capacities = reader.readI32Vector();
   message.local_to_global = reader.readI32Vector();
   message.constraint_endpoints = reader.readConstraintEndpoints();

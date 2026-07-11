@@ -2385,3 +2385,57 @@
   - `ctest --test-dir build/mcpd3-native --output-on-failure`;
   - `cmake --build build -j`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-07-11 03:28 PDT
+
+- Added worker-load package compaction for single-direction arc capacities and
+  bumped the runtime protocol to `8`. Canonical package serialization remains
+  full-fidelity. Worker-load frames may now send one signed capacity per arc
+  when every arc has at most one nonzero direction:
+  - positive value: forward capacity, implicit zero backward capacity;
+  - negative value: backward capacity, implicit zero forward capacity;
+  - zero: both directions zero.
+- The worker decode path expands the compact signed vector back to the normal
+  full `arc_capacities` vector before loading the mcpd3 partition worker.
+- Added/updated coverage:
+  - protocol serialization test verifies directed worker-load capacity
+    compaction byte counts and full-vector decode;
+  - TCP loopback test verifies uncompressed and Snappy remote worker loads
+    preserve solve behavior with compact directed capacities;
+  - existing non-directed package tests still cover the non-compacting branch
+    when both arc directions have nonzero capacity.
+- Benchmarked `babyface.n6c10`, p6/w6, one iteration, malloc-backed BK storage,
+  no compression:
+  - `benchmark_results/local_tcp_compact_single_dir_caps_malloc_babyface_p6_w6_none_20260711_032553`:
+    total `7,041,625us`, setup `2,232,970us`, load RPC aggregate
+    `12,320,753us`, partition-load TX `405,000,240` bytes;
+  - `benchmark_results/local_tcp_compact_single_dir_caps_repeat_malloc_babyface_p6_w6_none_20260711_032615`:
+    total `7,087,993us`, setup `2,212,913us`, load RPC aggregate
+    `12,215,734us`, partition-load TX `405,000,240` bytes;
+  - after caching the computed frame size:
+    `benchmark_results/local_tcp_compact_single_dir_caps_cached_malloc_babyface_p6_w6_none_20260711_032828`,
+    total `7,090,183us`, setup `2,250,509us`, load RPC aggregate
+    `12,318,888us`, partition-load TX `405,000,240` bytes.
+- Compared with the post-DIMACS-reader p6/w6 baseline
+  `benchmark_results/local_tcp_presized_dimacs_repeat_malloc_babyface_p6_w6_none_20260711_031335`
+  (`7,993,139us` total, `3,260,440us` setup, `526,500,240` partition-load TX),
+  this saves `121,500,000` logical package-load bytes and roughly `0.9s` total
+  wall time on this probe, with unchanged output
+  (`final_objective_raw=1,970,000`, `final_disagreement_count=134,985`).
+- Retested lower partition counts after the compaction:
+  - p3/w3:
+    `benchmark_results/local_tcp_compact_single_dir_caps_malloc_babyface_p3_w3_none_20260711_032646`,
+    total `7,217,562us`, setup `2,086,650us`, solve `1,201,909us`,
+    partition-load TX `394,875,120` bytes;
+  - p4/w4:
+    `benchmark_results/local_tcp_compact_single_dir_caps_malloc_babyface_p4_w4_none_20260711_032653`,
+    total `7,215,526us`, setup `2,014,924us`, solve `1,416,190us`,
+    partition-load TX `398,250,160` bytes.
+- p6/w6 remains the best current one-iteration local TCP point despite higher
+  package bytes, because the p3/p4 solve cost is higher.
+- Verified:
+  - `cmake --build build -j`;
+  - `./build/protocol_serialization_test`;
+  - `./build/tcp_loopback_test`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`.

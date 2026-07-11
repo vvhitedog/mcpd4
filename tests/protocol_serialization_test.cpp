@@ -140,6 +140,12 @@ mcpd3::PartitionPackage makePackage() {
   return package;
 }
 
+mcpd3::PartitionPackage makeDirectedPackage() {
+  auto package = makePackage();
+  package.arc_capacities = {3, 0, 0, 11};
+  return package;
+}
+
 void frameHeaderIsLittleEndian() {
   const std::vector<std::uint8_t> payload{0xaa, 0xbb};
   const auto frame = mcpd4::encodeFrame(
@@ -228,6 +234,34 @@ void workerLoadPartitionPackageFrameBuffersOmitLocalToGlobal() {
           "worker-load package should omit redundant bytes");
   require(buffers.totalSize() == compact.size(),
           "worker-load package buffer size mismatch");
+
+  auto expected = message;
+  expected.local_to_global.clear();
+  for (auto &endpoint : expected.constraint_endpoints) {
+    endpoint.global_node_id = -1;
+    endpoint.alpha_momentum = 0;
+  }
+  const auto decoded = mcpd4::decodePartitionPackage(compact);
+  requirePackageEqual(decoded, expected);
+}
+
+void workerLoadPartitionPackageFrameBuffersCompactDirectedArcCapacities() {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  const auto message = makeDirectedPackage();
+  const auto encoded = mcpd4::encodePartitionPackage(message);
+  const mcpd4::PartitionPackageFrameBuffers buffers(
+      message, mcpd4::PartitionPackageFrameBuffers::Mode::WORKER_LOAD);
+  const auto compact = joinBuffers(buffers.buffers());
+  const auto expected_savings =
+      message.local_to_global.size() * sizeof(int) +
+      message.constraint_endpoints.size() * (sizeof(int) + sizeof(float)) +
+      (message.arc_capacities.size() / 2) * sizeof(int);
+  require(compact.size() + expected_savings == encoded.size(),
+          "directed worker-load package should omit implicit reverse caps");
+  require(buffers.totalSize() == compact.size(),
+          "directed worker-load package buffer size mismatch");
 
   auto expected = message;
   expected.local_to_global.clear();
@@ -822,6 +856,7 @@ int main() {
     roundTripsPartitionPackage();
     partitionPackageFrameBuffersMatchEncodedPackage();
     workerLoadPartitionPackageFrameBuffersOmitLocalToGlobal();
+    workerLoadPartitionPackageFrameBuffersCompactDirectedArcCapacities();
     roundTripsReady();
     roundTripsSolveRoundRequest();
     roundTripsSolveRoundBatchRequest();

@@ -173,6 +173,25 @@ mcpd3::PartitionPackage makeManyBoundaryLabelsPackage(int partition_id,
   return package;
 }
 
+mcpd3::PartitionPackage makeDirectedCapacityPackage(int partition_id) {
+  mcpd3::PartitionPackage package;
+  package.partition_id = partition_id;
+  package.local_node_count = 3;
+  package.arcs = {0, 1, 1, 2};
+  package.arc_capacities = {3, 0, 0, 7};
+  package.terminal_capacities = {-5, 0, 5};
+  package.local_to_global = {100, 101, 102};
+  package.constraint_endpoints.push_back(
+      mcpd3::ConstraintEndpointBinding{/*constraint_id=*/30000,
+                                        /*global_node_id=*/101,
+                                        /*local_index=*/1,
+                                        /*is_source=*/true,
+                                        /*alpha=*/0,
+                                        /*last_alpha=*/0,
+                                        /*alpha_momentum=*/0});
+  return package;
+}
+
 std::unique_ptr<mcpd4::TcpPartitionWorker> startRemoteWorker(
     mcpd4::SocketHandle *listener, WorkerClientThread **client,
     const std::string &worker_name,
@@ -289,6 +308,50 @@ void remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp(
     }
     require(saw_first_constraint_id,
             "compact package load should preserve endpoint constraint ids");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
+void remoteWorkerLoadPartitionCompactsDirectedArcCapacitiesOverTcp(
+    mcpd4::TransportCompression compression) {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  if (compression == mcpd4::TransportCompression::SNAPPY &&
+      !mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker =
+      startRemoteWorker(&listener, &client, "compact-directed-worker",
+                        compression);
+  try {
+    const auto package = makeDirectedCapacityPackage(/*partition_id=*/6);
+    const auto full_frame_size =
+        mcpd4::encodePartitionPackage(package).size();
+    worker->loadPartition(package);
+
+    const auto load_bytes =
+        worker->timingStats().rpc_bytes.partition_load_tx_bytes;
+    const auto expected_savings =
+        package.local_to_global.size() * sizeof(int) +
+        package.constraint_endpoints.size() * (sizeof(int) + sizeof(float)) +
+        (package.arc_capacities.size() / 2) * sizeof(int);
+    require(load_bytes + expected_savings == full_frame_size,
+            "remote directed load should omit implicit reverse capacities");
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = package.partition_id;
+    const auto result = worker->solveRound(request);
+    require(result.constrained_labels.size() == 1,
+            "directed compact package load should preserve endpoint labels");
+    require(result.constrained_labels[0].constraint_id == 30000,
+            "directed compact package load should preserve constraint id");
     stopAndJoin(worker.get(), client);
   } catch (...) {
     stopAndJoin(worker.get(), client);
@@ -839,6 +902,10 @@ int main() {
     remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp(
         mcpd4::TransportCompression::NONE);
     remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp(
+        mcpd4::TransportCompression::SNAPPY);
+    remoteWorkerLoadPartitionCompactsDirectedArcCapacitiesOverTcp(
+        mcpd4::TransportCompression::NONE);
+    remoteWorkerLoadPartitionCompactsDirectedArcCapacitiesOverTcp(
         mcpd4::TransportCompression::SNAPPY);
     rejectsOversizedPayloadBeforeReadingBody();
     rejectsOversizedPayloadBeforeWritingBody();

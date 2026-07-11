@@ -406,6 +406,86 @@ readConstraintEndpointVector(Reader *reader) {
   return endpoints;
 }
 
+bool canCompactDirectedArcCapacities(
+    const mcpd3::PartitionPackage &message,
+    PartitionPackageFrameBuffers::Mode mode) {
+  if (mode != PartitionPackageFrameBuffers::Mode::WORKER_LOAD) {
+    return false;
+  }
+  if (message.arc_capacities.size() != message.arcs.size() ||
+      message.arc_capacities.size() % 2 != 0) {
+    return false;
+  }
+  for (size_t i = 0; i < message.arc_capacities.size(); i += 2) {
+    const int forward = message.arc_capacities[i];
+    const int backward = message.arc_capacities[i + 1];
+    if (forward < 0 || backward < 0) {
+      return false;
+    }
+    if (forward != 0 && backward != 0) {
+      return false;
+    }
+  }
+  return !message.arc_capacities.empty();
+}
+
+std::size_t arcCapacityWireCount(
+    const mcpd3::PartitionPackage &message,
+    PartitionPackageFrameBuffers::Mode mode) {
+  return canCompactDirectedArcCapacities(message, mode)
+             ? message.arc_capacities.size() / 2
+             : message.arc_capacities.size();
+}
+
+std::size_t partitionPackageFrameSizeWithArcCapacityCount(
+    const mcpd3::PartitionPackage &message,
+    PartitionPackageFrameBuffers::Mode mode,
+    std::size_t arc_capacity_wire_count) {
+  const std::size_t local_to_global_bytes =
+      mode == PartitionPackageFrameBuffers::Mode::WORKER_LOAD
+          ? 0
+          : message.local_to_global.size() * kIntBytes;
+  const std::size_t endpoint_bytes =
+      mode == PartitionPackageFrameBuffers::Mode::WORKER_LOAD
+          ? kCompactConstraintEndpointBytes
+          : kConstraintEndpointBytes;
+  return kFrameHeaderBytes +
+         /*partition_id + local_node_count=*/8 +
+         kIntVectorHeaderBytes + message.arcs.size() * kIntBytes +
+         kIntVectorHeaderBytes + arc_capacity_wire_count * kIntBytes +
+         kIntVectorHeaderBytes +
+         message.terminal_capacities.size() * kIntBytes +
+         kIntVectorHeaderBytes + local_to_global_bytes +
+         /*constraint endpoint vector header=*/4 +
+         message.constraint_endpoints.size() * endpoint_bytes;
+}
+
+void expandCompactArcCapacities(mcpd3::PartitionPackage *message) {
+  if (message->arc_capacities.size() == message->arcs.size()) {
+    return;
+  }
+  if (message->arcs.size() % 2 != 0 ||
+      message->arc_capacities.size() != message->arcs.size() / 2) {
+    throw std::runtime_error(
+        "partition arc capacity count is neither full nor compact");
+  }
+  std::vector<int> expanded;
+  expanded.reserve(message->arcs.size());
+  for (const auto signed_capacity : message->arc_capacities) {
+    if (signed_capacity == std::numeric_limits<int>::min()) {
+      throw std::runtime_error("compact arc capacity is outside range");
+    }
+    if (signed_capacity >= 0) {
+      expanded.push_back(signed_capacity);
+      expanded.push_back(0);
+    } else {
+      expanded.push_back(0);
+      expanded.push_back(-signed_capacity);
+    }
+  }
+  message->arc_capacities = std::move(expanded);
+}
+
 void writeConstraintLabel(Writer *writer, const mcpd3::ConstraintLabel &label) {
   writer->writeI32(label.constraint_id);
   writer->writeI32(label.label);
@@ -444,23 +524,8 @@ std::size_t partitionPackageFrameSize(
     const mcpd3::PartitionPackage &message,
     PartitionPackageFrameBuffers::Mode mode =
         PartitionPackageFrameBuffers::Mode::FULL) {
-  const std::size_t local_to_global_bytes =
-      mode == PartitionPackageFrameBuffers::Mode::WORKER_LOAD
-          ? 0
-          : message.local_to_global.size() * kIntBytes;
-  const std::size_t endpoint_bytes =
-      mode == PartitionPackageFrameBuffers::Mode::WORKER_LOAD
-          ? kCompactConstraintEndpointBytes
-          : kConstraintEndpointBytes;
-  return kFrameHeaderBytes +
-         /*partition_id + local_node_count=*/8 +
-         kIntVectorHeaderBytes + message.arcs.size() * kIntBytes +
-         kIntVectorHeaderBytes + message.arc_capacities.size() * kIntBytes +
-         kIntVectorHeaderBytes +
-         message.terminal_capacities.size() * kIntBytes +
-         kIntVectorHeaderBytes + local_to_global_bytes +
-         /*constraint endpoint vector header=*/4 +
-         message.constraint_endpoints.size() * endpoint_bytes;
+  return partitionPackageFrameSizeWithArcCapacityCount(
+      message, mode, arcCapacityWireCount(message, mode));
 }
 
 void writeSolveRoundResultPayload(
@@ -579,6 +644,7 @@ mcpd3::PartitionPackage decodePartitionPackage(
   message.local_node_count = reader.readI32();
   message.arcs = reader.readI32Vector();
   message.arc_capacities = reader.readI32Vector();
+  expandCompactArcCapacities(&message);
   message.terminal_capacities = reader.readI32Vector();
   message.local_to_global = reader.readI32Vector();
   message.constraint_endpoints = readConstraintEndpointVector(&reader);
@@ -595,15 +661,29 @@ PartitionPackageFrameBuffers::PartitionPackageFrameBuffers(
     : message_(&message), mode_(mode) {
   require(partitionPackageFrameBuffersSupported(),
           "partition package frame buffers require little-endian int32 host");
-  const auto frame_size = partitionPackageFrameSize(message, mode_);
+  use_compact_arc_capacities_ =
+      canCompactDirectedArcCapacities(message, mode_);
+  if (use_compact_arc_capacities_) {
+    compact_arc_capacities_.reserve(message.arc_capacities.size() / 2);
+    for (size_t i = 0; i < message.arc_capacities.size(); i += 2) {
+      const int forward = message.arc_capacities[i];
+      const int backward = message.arc_capacities[i + 1];
+      compact_arc_capacities_.push_back(backward != 0 ? -backward : forward);
+    }
+  }
+  const auto arc_capacity_wire_count =
+      use_compact_arc_capacities_ ? compact_arc_capacities_.size()
+                                  : message.arc_capacities.size();
+  total_size_ = partitionPackageFrameSizeWithArcCapacityCount(
+      message, mode_, arc_capacity_wire_count);
   writeLittleU32(frame_header_.data(),
                  static_cast<std::uint32_t>(MessageType::PARTITION_PACKAGE));
-  writeLittleU64(frame_header_.data() + 4, frame_size - kFrameHeaderBytes);
+  writeLittleU64(frame_header_.data() + 4, total_size_ - kFrameHeaderBytes);
   writeLittleI32(scalar_header_.data(), message.partition_id);
   writeLittleI32(scalar_header_.data() + 4, message.local_node_count);
   writeLittleU32(arcs_size_.data(), checkedSize(message.arcs.size()));
   writeLittleU32(arc_capacities_size_.data(),
-                 checkedSize(message.arc_capacities.size()));
+                 checkedSize(arc_capacity_wire_count));
   writeLittleU32(terminal_capacities_size_.data(),
                  checkedSize(message.terminal_capacities.size()));
   writeLittleU32(local_to_global_size_.data(),
@@ -630,7 +710,7 @@ PartitionPackageFrameBuffers::PartitionPackageFrameBuffers(
 
 std::size_t PartitionPackageFrameBuffers::totalSize() const {
   require(message_ != nullptr, "partition package frame buffers are empty");
-  return partitionPackageFrameSize(*message_, mode_);
+  return total_size_;
 }
 
 std::vector<ByteBufferView> PartitionPackageFrameBuffers::buffers() const {
@@ -649,7 +729,9 @@ std::vector<ByteBufferView> PartitionPackageFrameBuffers::buffers() const {
   views.push_back(int_vector(message_->arcs));
   views.push_back(ByteBufferView{arc_capacities_size_.data(),
                                  arc_capacities_size_.size()});
-  views.push_back(int_vector(message_->arc_capacities));
+  views.push_back(use_compact_arc_capacities_
+                      ? int_vector(compact_arc_capacities_)
+                      : int_vector(message_->arc_capacities));
   views.push_back(ByteBufferView{terminal_capacities_size_.data(),
                                  terminal_capacities_size_.size()});
   views.push_back(int_vector(message_->terminal_capacities));

@@ -641,3 +641,16 @@
 - The uncommitted code was reverted. If this area is revisited, first add
   finer-grained package-build timing so we can see whether boundary map/set
   maintenance is actually material on larger partition counts.
+
+## 2026-07-11 03:28 PDT
+
+- Do not use the narrower directed-capacity compaction condition "all backward
+  capacity slots are zero." It passed tests but did not reduce
+  `babyface.n6c10` package bytes because mcpd3 normalizes arcs by node order,
+  so one-way directed capacities can appear in either the forward or backward
+  slot. Run
+  `benchmark_results/local_tcp_compact_directed_caps_malloc_babyface_p6_w6_none_20260711_032427`
+  still transmitted `526,500,240` partition-load bytes and took
+  `8,116,278us` total.
+- The winning version is the signed single-direction format that compacts an
+  arc when at most one direction has nonzero capacity.
