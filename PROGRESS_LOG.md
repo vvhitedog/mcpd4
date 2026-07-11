@@ -1,5 +1,50 @@
 # Progress Log
 
+## 2026-07-11 03:44 PDT
+
+- Added a scaled directed DIMACS reader in mcpd3 so directed inputs can apply
+  the objective scale during streaming load instead of doing a second full
+  `scale_graph` pass in mcpd4.
+- The reader preserves exact post-load scaling semantics:
+  - internal directed arc capacities are scaled as they are parsed;
+  - terminal capacities are accumulated unscaled first, then scaled after
+    aggregation;
+  - strict overflow mode throws;
+  - saturating overflow mode clips by sign and reports separate arc/terminal
+    saturation counts.
+- mcpd4 now uses this reader only for `--directed`; non-directed inputs still
+  use the existing read-then-scale path.
+- mcpd4 reports `objective_scale_applied_during_read 1` for directed runs so
+  users and tests can identify the single-pass scaling path.
+- Added test coverage:
+  - mcpd3 unit tests for exact scaled directed loading and strict vs saturating
+    overflow handling;
+  - mcpd4 process integration test for a directed, scaled distributed run that
+    matches the in-process reference and reports the single-pass scaling marker.
+- Benchmarked `babyface.n6c10`, p6/w6, one iteration, malloc-backed BK storage,
+  no compression:
+  - baseline
+    `benchmark_results/local_tcp_rebuilt_compact_caps_malloc_babyface_p6_w6_none_20260711_033648`:
+    total `7,047,881us`, read `2,159,047us`, scale `389,203us`,
+    partition `1,344,933us`, setup `2,241,004us`, solve `900,614us`;
+  - scaled-reader
+    `benchmark_results/local_tcp_scaled_directed_reader_malloc_babyface_p6_w6_none_20260711_034359`:
+    total `6,906,757us`, read `2,407,992us`, scale `1us`,
+    partition `1,354,420us`, setup `2,229,763us`, solve `903,164us`;
+  - repeat
+    `benchmark_results/local_tcp_scaled_directed_reader_repeat_malloc_babyface_p6_w6_none_20260711_034426`:
+    total `6,931,610us`, read `2,424,360us`, scale `1us`,
+    partition `1,356,529us`, setup `2,227,187us`, solve `905,142us`.
+- Output remained unchanged across runs:
+  `final_objective_raw=1,970,000`, `final_disagreement_count=134,985`,
+  `objective_scale_saturation_count=0`, and partition-load TX
+  `405,000,240` bytes.
+- Verified:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.
+
 ## 2026-07-03 02:51 PDT
 
 - Completed a full distributed large-adhead resident run across this laptop plus

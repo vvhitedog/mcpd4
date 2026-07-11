@@ -1642,6 +1642,8 @@ void printObjectiveScaleStats(const Config &config,
   std::cout << "objective_scale_overflow_mode "
             << (config.saturate_capacity_overflow ? "saturate" : "strict")
             << "\n";
+  std::cout << "objective_scale_applied_during_read "
+            << boolString(config.directed) << "\n";
   std::cout << "objective_scale_saturation_count "
             << total_saturation_count << "\n";
   std::cout << "objective_scale_arc_saturation_count "
@@ -1806,31 +1808,47 @@ int main(int argc, char **argv) {
       std::cout.flush();
     }
 
+    ObjectiveScaleStats objective_scale_stats;
     auto graph_start = std::chrono::steady_clock::now();
     status_state.beginSegment(
         "read_graph", "reading_graph",
-        "directed=" + boolString(config.directed));
-    auto graph = config.directed
-                     ? mcpd3::read_dimacs_directed_streaming(config.dimacs_path)
-                     : mcpd3::read_dimacs(config.dimacs_path);
+        "directed=" + boolString(config.directed) +
+            ":objective_scale=" + std::to_string(config.objective_scale));
+    auto graph = [&]() {
+      if (config.directed) {
+        mcpd3::DimacsScaleStats dimacs_scale_stats;
+        auto directed_graph = mcpd3::read_dimacs_directed_streaming_scaled(
+            config.dimacs_path, config.objective_scale,
+            config.saturate_capacity_overflow, &dimacs_scale_stats);
+        objective_scale_stats.arc_saturation_count =
+            dimacs_scale_stats.arc_saturation_count;
+        objective_scale_stats.terminal_saturation_count =
+            dimacs_scale_stats.terminal_saturation_count;
+        return directed_graph;
+      }
+      return mcpd3::read_dimacs(config.dimacs_path);
+    }();
     timing.read_graph_wall_us = elapsedUs(graph_start);
     status_state.finishSegment(
         "read_graph",
         "directed=" + boolString(config.directed) +
+            ":scaled_during_read=" + boolString(config.directed) +
             ":nodes=" + std::to_string(graph.nnode) +
             ":arcs=" + std::to_string(graph.narc));
 
-    ObjectiveScaleStats objective_scale_stats;
     const auto scale_graph_start = std::chrono::steady_clock::now();
     status_state.beginSegment(
         "scale_graph", "scaling_graph",
         "objective_scale=" + std::to_string(config.objective_scale));
-    scaleGraph(&graph, config.objective_scale,
-               config.saturate_capacity_overflow, &objective_scale_stats);
+    if (!config.directed) {
+      scaleGraph(&graph, config.objective_scale,
+                 config.saturate_capacity_overflow, &objective_scale_stats);
+    }
     timing.scale_graph_wall_us = elapsedUs(scale_graph_start);
     status_state.finishSegment(
         "scale_graph",
         "objective_scale=" + std::to_string(config.objective_scale) +
+            ":scaled_during_read=" + boolString(config.directed) +
             ":arc_saturations=" +
             std::to_string(objective_scale_stats.arc_saturation_count) +
             ":terminal_saturations=" +

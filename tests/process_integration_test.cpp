@@ -373,6 +373,23 @@ long parseLongField(const std::map<std::string, std::string> &fields,
   return std::stol(iter->second);
 }
 
+long parseLongOutputLine(const std::string &output, const std::string &key) {
+  const std::string prefix = key + " ";
+  std::string::size_type offset = 0;
+  while (offset < output.size()) {
+    auto end = output.find('\n', offset);
+    if (end == std::string::npos) {
+      end = output.size();
+    }
+    const std::string line = output.substr(offset, end - offset);
+    if (line.rfind(prefix, 0) == 0) {
+      return std::stol(line.substr(prefix.size()));
+    }
+    offset = end + 1;
+  }
+  throw std::runtime_error("missing coordinator output field: " + key);
+}
+
 SolveSummary parseCoordinatorOutput(const std::string &output) {
   const std::vector<std::string> keys{
       "status",
@@ -581,6 +598,31 @@ void fixtureProcessMatchesInProcessReference(
   const auto distributed_run =
       runDistributedProcess(coordinator_bin, worker_bin, fixture_dir, config);
   requireEqual(distributed_run.summary, reference, config.name);
+}
+
+void directedScaledReaderProcessMatchesReference(
+    const std::string &coordinator_bin, const std::string &worker_bin,
+    const std::string &fixture_dir) {
+  CaseConfig config{/*name=*/"directed_scaled_reader",
+                    /*fixture=*/"dead_end.max",
+                    /*worker_count=*/1,
+                    /*partition_count=*/1,
+                    /*max_iterations=*/5,
+                    /*schedule_levels=*/1,
+                    /*schedule_start=*/10000,
+                    /*objective_scale=*/1000};
+  const auto reference = runInProcessReference(fixture_dir, config);
+  const auto directed_run = runDistributedProcess(
+      coordinator_bin, worker_bin, fixture_dir, config, {"--directed"});
+  requireEqual(directed_run.summary, reference, config.name);
+  require(parseLongOutputLine(directed_run.output,
+                              "objective_scale_applied_during_read") == 1,
+          "directed run should report objective scaling during read\n" +
+              directed_run.output);
+  require(parseLongOutputLine(directed_run.output,
+                              "objective_scale_saturation_count") == 0,
+          "directed scaled reader should preserve saturation count reporting\n" +
+              directed_run.output);
 }
 
 void coordinatorAcceptTimeoutIsExposed(const std::string &coordinator_bin,
@@ -1338,6 +1380,8 @@ int main(int argc, char **argv) {
                    /*fixture=*/"random_small.max",
                    /*worker_count=*/2,
                    /*partition_count=*/3});
+    directedScaledReaderProcessMatchesReference(coordinator_bin, worker_bin,
+                                                fixture_dir);
     coordinatorAcceptTimeoutIsExposed(coordinator_bin, fixture_dir);
     coordinatorDurableStatusSurvivesFailure(coordinator_bin, status_bin,
                                             fixture_dir);
