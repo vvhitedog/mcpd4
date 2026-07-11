@@ -1,5 +1,43 @@
 # Progress Log
 
+## 2026-07-11 06:56 PDT
+
+- Used the additional available RAM to continue memory-resident local TCP
+  full-schedule probes on `babyface.n6c10`. Settings unless noted:
+  malloc-backed BK storage, no compression, `--saturate-capacity-overflow`,
+  schedule start `10000`, five schedule levels, objective scale `1000`.
+- Best new result: p2/w2 with max `25` iterations per scale:
+  `benchmark_results/local_tcp_fullschedule_p2_w2_iter25_malloc_babyface_saturate_20260711_065248`
+  reached status `0`, stop_reason `2`, final disagreements `0`, no objective
+  scale promotions, no capacity saturations, total iterations `67`, wall
+  `197,034,265us`, setup `2,276,019us`, solve `191,604,389us`, aggregate
+  worker solve `233,165,698us`, worker RPC overhead `1,110,366us`,
+  partition-load RPC `4,385,711us`, solve request TX `15,182,692` bytes,
+  solve result RX `12,031,994` bytes.
+- Other clean p2/w2 probes:
+  - max `30`:
+    `benchmark_results/local_tcp_fullschedule_p2_w2_iter30_malloc_babyface_saturate_20260711_064511`,
+    status `0`, stop_reason `1`, final disagreements `0`, total iterations
+    `67`, wall `203,341,649us`;
+  - max `40`:
+    `benchmark_results/local_tcp_fullschedule_p2_w2_iter40_malloc_babyface_saturate_20260711_064104`,
+    status `0`, stop_reason `1`, final disagreements `0`, total iterations
+    `66`, wall `206,145,250us`.
+- p3/w3 max `40` also reached agreement:
+  `benchmark_results/local_tcp_fullschedule_p3_w3_iter40_malloc_babyface_saturate_20260711_063546`,
+  status `0`, stop_reason `2`, final disagreements `0`, total iterations
+  `219`, wall `273,475,096us`. It is slightly faster than the prior p3/w3
+  max `60` result but still much slower than p2/w2, and stderr reported a
+  regularization budget warning (`1860` not below `1000`).
+- p5/w5 max `60` was fast but not clean:
+  `benchmark_results/local_tcp_fullschedule_p5_w5_iter60_malloc_babyface_saturate_20260711_063018`,
+  status `2`, stop_reason `3`, final disagreements `186`, total iterations
+  `310`, wall `212,537,857us`.
+- Conclusion: the best observed memory-resident local TCP full solve is now
+  p2/w2 max `25` at `197.0s` wall. The extra memory was enough to make p2/w2
+  viable, and the reduction in boundary disagreement outweighed the visibly
+  imbalanced two-worker BK load.
+
 ## 2026-07-11 06:28 PDT
 
 - Used the newly freed memory to run malloc-backed full local TCP schedule

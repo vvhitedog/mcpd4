@@ -1,5 +1,21 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 06:56 PDT
+
+- Do not use p5/w5 max `60` as a full local TCP solve despite its relatively
+  low wall time. Run
+  `benchmark_results/local_tcp_fullschedule_p5_w5_iter60_malloc_babyface_saturate_20260711_063018`
+  ended with status `2`, stop_reason `3`, final disagreements `186`, total
+  iterations `310`, and wall `212,537,857us`.
+- Do not lower the p2/w2 per-scale cap to `20` for this schedule. Run
+  `benchmark_results/local_tcp_fullschedule_p2_w2_iter20_malloc_babyface_saturate_20260711_064902`
+  was faster at `190,365,239us`, but ended with status `2`, stop_reason `3`,
+  final disagreements `6`, and best certified lower bound `19445.3`; it did
+  not produce primal agreement.
+- p3/w3 max `40` is no longer the target even though it reaches agreement.
+  It took `273,475,096us` and emitted a regularization budget warning, while
+  p2/w2 max `25` reached agreement in `197,034,265us` without that warning.
+
 ## 2026-07-11 06:28 PDT
 
 - Do not pick full-schedule local TCP parameters from the short single-scale
