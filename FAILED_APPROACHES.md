@@ -623,6 +623,32 @@
   (`4,773,711us`) dominates. Use p6/w6 as the current local TCP comparison
   point until a larger/more complete convergence benchmark says otherwise.
 
+## 2026-07-11 03:54 PDT
+
+- Do not push the `babyface.n6c10` one-iteration local TCP comparison above
+  p6/w6 on this 12-thread laptop without new evidence. After the directed
+  scaled-reader and compact single-direction capacity improvements, p8/p10/p12
+  were all slower than the current p6/w6 point:
+  - current p6/w6 baseline
+    `benchmark_results/local_tcp_scaled_directed_reader_repeat_malloc_babyface_p6_w6_none_20260711_034426`:
+    total `6,931,610us`, setup `2,227,187us`, solve `905,142us`,
+    partition-load TX `405,000,240` bytes;
+  - p8/w8
+    `benchmark_results/local_tcp_scaled_reader_sweep_p8_w8_malloc_babyface_none_20260711_035406`:
+    total `7,961,762us`, setup `2,983,056us`, solve `1,285,035us`,
+    partition-load TX `411,750,320` bytes;
+  - p10/w10
+    `benchmark_results/local_tcp_scaled_reader_sweep_p10_w10_malloc_babyface_none_20260711_035414`:
+    total `8,051,264us`, setup `3,498,093us`, solve `741,053us`,
+    partition-load TX `418,500,400` bytes;
+  - p12/w12
+    `benchmark_results/local_tcp_scaled_reader_sweep_p12_w12_malloc_babyface_none_20260711_035422`:
+    total `8,743,463us`, setup `4,110,057us`, solve `721,358us`,
+    partition-load TX `425,250,480` bytes.
+- More workers reduce one-iteration solve time at p10/p12, but setup grows more
+  than enough to lose the total wall-time comparison. p6/w6 remains the current
+  local TCP tuning point for small `babyface.n6c10` probes.
+
 ## 2026-07-11 03:18 PDT
 
 - Do not replace `DualDecomposition::initializeDecomposition` constrained-node
