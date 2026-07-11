@@ -1,5 +1,21 @@
 # Progress Log
 
+## 2026-07-11 04:39 PDT
+
+- Tested 24-bit worker-load arc endpoint packing as a partition-load byte
+  reduction experiment:
+  - p6/w6 package arc endpoint payload is about `243 MB`;
+  - all p6 local endpoints fit within 24 bits, so fixed 24-bit packing reduced
+    partition-load TX from `405,000,240` bytes to `344,250,240` bytes.
+- Reverted the prototype because it was slower despite lower bytes:
+  - packed run
+    `benchmark_results/local_tcp_packed_u24_arcs_p6_w6_malloc_babyface_none_20260711_043730`:
+    total `7,777,341us`, setup `3,457,282us`;
+  - packed repeat
+    `benchmark_results/local_tcp_packed_u24_arcs_repeat_p6_w6_malloc_babyface_none_20260711_043737`:
+    total `7,741,303us`, setup `3,449,981us`.
+- Recorded the result in `FAILED_APPROACHES.md`; no product code was kept.
+
 ## 2026-07-11 04:32 PDT
 
 - Refactored mcpd3 `PartitionWorkerCoordinator` construction to avoid copying

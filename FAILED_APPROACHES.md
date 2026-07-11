@@ -1,5 +1,30 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 04:39 PDT
+
+- Do not use eager 24-bit arc-endpoint packing for worker-load partition
+  packages on localhost. It reduced partition-load bytes by the expected
+  amount, but the extra coordinator packing copy plus worker unpack cost made
+  setup much slower.
+- Benchmark evidence on `babyface.n6c10`, p6/w6, one iteration,
+  malloc-backed BK storage, no compression:
+  - current mmap-reader baseline
+    `benchmark_results/local_tcp_mmap_reader_p6_w6_malloc_babyface_none_20260711_042215`:
+    total `6,553,760us`, setup `2,221,805us`, aggregate partition-load RPC
+    `12,205,983us`, partition-load TX `405,000,240` bytes;
+  - packed 24-bit arcs
+    `benchmark_results/local_tcp_packed_u24_arcs_p6_w6_malloc_babyface_none_20260711_043730`:
+    total `7,777,341us`, setup `3,457,282us`, aggregate partition-load RPC
+    `19,499,694us`, partition-load TX `344,250,240` bytes;
+  - packed 24-bit arcs repeat
+    `benchmark_results/local_tcp_packed_u24_arcs_repeat_p6_w6_malloc_babyface_none_20260711_043737`:
+    total `7,741,303us`, setup `3,449,981us`, aggregate partition-load RPC
+    `19,497,700us`, partition-load TX `344,250,240` bytes.
+- Interpretation: saving `60,750,000` wire bytes was not enough to offset the
+  CPU and memory-copy cost of eager packing/unpacking. Any future arc endpoint
+  compression should avoid materializing a separate packed copy, or be reserved
+  for slower networks where bandwidth dominates.
+
 ## 2026-07-11 04:28 PDT
 
 - Do not replace the worker's direct compact directed-capacity receive path
