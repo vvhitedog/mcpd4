@@ -1808,6 +1808,42 @@ int main(int argc, char **argv) {
       std::cout.flush();
     }
 
+    mcpd4::SocketHandle listener;
+    mcpd4::SocketHandle discovery_socket;
+    const auto setup_transport = [&] {
+      status_state.beginSegment("transport_setup", "transport_setup");
+      listener = mcpd4::listenTcp(config.bind_host, config.port);
+      std::cout << "listening " << config.bind_host << ":"
+                << mcpd4::localPort(listener) << "\n";
+      std::cout.flush();
+      if (config.discovery_port != 0) {
+        discovery_socket =
+            mcpd4::bindDiscoveryUdp(config.bind_host, config.discovery_port);
+        std::cout << "discovery_listening port "
+                  << mcpd4::localPort(discovery_socket)
+                  << " min_worker_count " << config.worker_count << "\n";
+        std::cout.flush();
+      }
+      status_state.setPorts(mcpd4::localPort(listener),
+                            discovery_socket.valid()
+                                ? mcpd4::localPort(discovery_socket)
+                                : 0,
+                            status_server ? status_server->port() : 0);
+      status_state.finishSegment(
+          "transport_setup",
+          "tcp_port=" + std::to_string(mcpd4::localPort(listener)) +
+              ":discovery_port=" +
+              std::to_string(discovery_socket.valid()
+                                 ? mcpd4::localPort(discovery_socket)
+                                 : 0) +
+              ":status_port=" +
+              std::to_string(status_server ? status_server->port() : 0));
+      writeReadyFile(config.ready_file, mcpd4::localPort(listener));
+    };
+    if (config.discovery_port == 0) {
+      setup_transport();
+    }
+
     ObjectiveScaleStats objective_scale_stats;
     auto graph_start = std::chrono::steady_clock::now();
     status_state.beginSegment(
@@ -1890,36 +1926,9 @@ int main(int argc, char **argv) {
             ":boundary_endpoints=" +
             std::to_string(package_boundary_count));
 
-    status_state.beginSegment("transport_setup", "transport_setup");
-    auto listener =
-        mcpd4::listenTcp(config.bind_host, config.port);
-    std::cout << "listening " << config.bind_host << ":"
-              << mcpd4::localPort(listener) << "\n";
-    std::cout.flush();
-    mcpd4::SocketHandle discovery_socket;
-    if (config.discovery_port != 0) {
-      discovery_socket =
-          mcpd4::bindDiscoveryUdp(config.bind_host, config.discovery_port);
-      std::cout << "discovery_listening port "
-                << mcpd4::localPort(discovery_socket)
-                << " min_worker_count " << config.worker_count << "\n";
-      std::cout.flush();
+    if (!listener.valid()) {
+      setup_transport();
     }
-    status_state.setPorts(mcpd4::localPort(listener),
-                          discovery_socket.valid()
-                              ? mcpd4::localPort(discovery_socket)
-                              : 0,
-                          status_server ? status_server->port() : 0);
-    status_state.finishSegment(
-        "transport_setup",
-        "tcp_port=" + std::to_string(mcpd4::localPort(listener)) +
-            ":discovery_port=" +
-            std::to_string(discovery_socket.valid()
-                               ? mcpd4::localPort(discovery_socket)
-                               : 0) +
-            ":status_port=" +
-            std::to_string(status_server ? status_server->port() : 0));
-    writeReadyFile(config.ready_file, mcpd4::localPort(listener));
 
     std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
     std::vector<mcpd4::TcpPartitionWorker *> remote_workers;

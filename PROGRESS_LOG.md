@@ -1,5 +1,39 @@
 # Progress Log
 
+## 2026-07-11 04:48 PDT
+
+- Moved fixed-worker TCP listener setup before graph read/partitioning in the
+  coordinator. This lets `scripts/run_local_process_benchmark.sh` start local
+  worker processes while the coordinator is still reading and partitioning the
+  input. Discovery mode still opens TCP/discovery after partitioning, preserving
+  the existing discovery-ready behavior.
+- Added process integration coverage with a FIFO graph input that blocks graph
+  read. The fixed-worker ready file must be written before graph data is
+  available, so this test fails on the old ordering.
+- Verified:
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.
+- Benchmarked `babyface.n6c10`, p6/w6, one iteration, malloc-backed BK storage,
+  no compression:
+  - baseline restored p6/w6
+    `benchmark_results/local_tcp_worker_sweep_restored_p6_w6_malloc_babyface_none_20260711_044246`:
+    total `6,541,356us`, read graph `2,296,423us`, partition
+    `1,128,552us`, setup `2,208,413us`, solve `888,097us`, partition-load TX
+    `405,000,240` bytes;
+  - early-listen run
+    `benchmark_results/local_tcp_early_listen_p6_w6_malloc_babyface_none_20260711_044754`:
+    total `6,364,644us`, read graph `2,208,089us`, partition
+    `1,089,446us`, setup `2,171,553us`, solve `895,095us`, partition-load TX
+    `405,000,240` bytes;
+  - early-listen repeat
+    `benchmark_results/local_tcp_early_listen_repeat_p6_w6_malloc_babyface_none_20260711_044813`:
+    total `6,435,136us`, read graph `2,220,880us`, partition
+    `1,080,986us`, setup `2,229,359us`, solve `903,463us`, partition-load TX
+    `405,000,240` bytes.
+- Conclusion: keep this as a small but repeatable wall-time win. It does not
+  reduce bytes or worker solve time; it overlaps worker startup/connect with
+  coordinator graph preparation in fixed-worker mode.
+
 ## 2026-07-11 04:43 PDT
 
 - Ran a fixed-partition worker-count sweep on the restored product binary:

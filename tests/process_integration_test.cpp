@@ -20,6 +20,7 @@
 #include <netinet/in.h>
 #include <sys/vfs.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -656,6 +657,58 @@ void coordinatorAcceptTimeoutIsExposed(const std::string &coordinator_bin,
     std::remove(ready_file.c_str());
   } catch (...) {
     killIfRunning(&coordinator);
+    std::remove(ready_file.c_str());
+    throw;
+  }
+}
+
+void fixedWorkerReadyFilePrecedesGraphRead(
+    const std::string &coordinator_bin) {
+  const auto port = reservePort();
+  const std::string fifo_path =
+      "/tmp/mcpd4-stage5-ready-fifo-" + std::to_string(::getpid()) + ".max";
+  const std::string ready_file =
+      "/tmp/mcpd4-stage5-ready-fifo-" + std::to_string(::getpid()) + ".ready";
+  std::remove(fifo_path.c_str());
+  std::remove(ready_file.c_str());
+  require(::mkfifo(fifo_path.c_str(), 0600) == 0,
+          "failed to create graph-read FIFO: " +
+              std::string(std::strerror(errno)));
+
+  ChildProcess coordinator;
+  try {
+    coordinator = spawnProcess({coordinator_bin,
+                                fifo_path,
+                                "--port",
+                                std::to_string(port),
+                                "--workers",
+                                "1",
+                                "--partitions",
+                                "1",
+                                "--accept-timeout-ms",
+                                "5000",
+                                "--ready-file",
+                                ready_file});
+    waitForReadyFile(ready_file, 5s);
+    require(readTextFile(ready_file) == std::to_string(port) + "\n",
+            "fixed-worker ready file should contain the TCP listener port");
+
+    int status = 0;
+    const pid_t rc = ::waitpid(coordinator.pid, &status, WNOHANG);
+    if (rc == coordinator.pid) {
+      coordinator.pid = -1;
+      (void)readOutput(&coordinator);
+      require(false, "coordinator exited before blocking on FIFO graph read\n" +
+                         coordinator.output);
+    }
+    require(rc == 0, "failed to inspect blocked coordinator process");
+
+    killIfRunning(&coordinator);
+    std::remove(fifo_path.c_str());
+    std::remove(ready_file.c_str());
+  } catch (...) {
+    killIfRunning(&coordinator);
+    std::remove(fifo_path.c_str());
     std::remove(ready_file.c_str());
     throw;
   }
@@ -1383,6 +1436,7 @@ int main(int argc, char **argv) {
     directedScaledReaderProcessMatchesReference(coordinator_bin, worker_bin,
                                                 fixture_dir);
     coordinatorAcceptTimeoutIsExposed(coordinator_bin, fixture_dir);
+    fixedWorkerReadyFilePrecedesGraphRead(coordinator_bin);
     coordinatorDurableStatusSurvivesFailure(coordinator_bin, status_bin,
                                             fixture_dir);
     capacityOverflowSaturationIsOptIn(coordinator_bin, worker_bin,
