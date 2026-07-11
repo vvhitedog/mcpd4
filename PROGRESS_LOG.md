@@ -2152,3 +2152,37 @@
   - `ctest --test-dir build/mcpd3-native --output-on-failure`;
   - `cmake --build build -j`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-07-11 02:32 PDT
+
+- Tested local TCP configuration levers on current p10/w10/file-backed mmap
+  `babyface.n6c10` one-iteration setup:
+  - snappy:
+    `benchmark_results/local_tcp_snappy_filemmap_babyface_p10_w10_20260711_022738`,
+    setup `8,391,191us`, total `14,641,085us`, wire TX
+    `278,055,791` bytes versus logical TX `572,751,240` bytes, compression
+    wall `1,633,765us`;
+  - BK mmap `populate`:
+    `benchmark_results/local_tcp_populate_filemmap_babyface_p10_w10_none_20260711_022806`,
+    setup `8,135,957us`, total `14,374,983us`;
+  - BK mmap `willneed`:
+    `benchmark_results/local_tcp_willneed_filemmap_babyface_p10_w10_none_20260711_022833`,
+    setup `7,824,183us`, total `14,034,584us`;
+  - BK mmap `willneed` repeat:
+    `benchmark_results/local_tcp_willneed_repeat_filemmap_babyface_p10_w10_none_20260711_022913`,
+    setup `8,146,948us`, total `14,246,683us`.
+- `willneed` is the best tested file-backed local TCP setting so far on this
+  machine for the p10/w10 setup-heavy point. Updated the README large-graph
+  local benchmark example to use `MCPD4_WORKER_BK_MMAP_ADVISE=willneed`
+  instead of `populate`.
+- Tried a `TCP_NODELAY` implementation on accepted and connected sockets with
+  loopback coverage, then reverted it after benchmark evidence:
+  - run
+    `benchmark_results/local_tcp_nodelay_willneed_filemmap_babyface_p10_w10_none_20260711_023104`
+    setup `9,150,496us`, total `15,845,669us`;
+  - this was worse than both `willneed` repeats, so it was not kept.
+- Verified after the temporary TCP_NODELAY change before reverting:
+  - `cmake --build build -j`;
+  - `./build/tcp_loopback_test`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`.

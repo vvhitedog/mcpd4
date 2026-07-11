@@ -234,9 +234,13 @@ MCPD4_WORKERS=10 \
 MCPD4_PARTITIONS=10 \
 MCPD4_WORKER_BK_STORAGE=file_mmap \
 MCPD4_WORKER_BK_MMAP_DIR_PREFIX=/fast-disk/mcpd4-local-bk \
-MCPD4_WORKER_BK_MMAP_ADVISE=populate \
+MCPD4_WORKER_BK_MMAP_ADVISE=willneed \
 scripts/run_local_process_benchmark.sh /data/graph.max --directed
 ```
+
+`willneed` is a good first mmap-advice setting for local TCP runs on fast local
+disk. Benchmark `populate` on the target machine if setup is dominated by BK
+mmap page faults; it may help or hurt depending on memory pressure and storage.
 
 ## Manual Localhost Run
 

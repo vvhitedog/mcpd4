@@ -558,3 +558,17 @@
   p10/w10 baseline (`9,117,897us` versus `9,250,669us`). Keep the change as
   allocation hygiene with test coverage, and use the worker-count sweep as the
   stronger result.
+
+## 2026-07-11 02:32 PDT
+
+- Do not enable `TCP_NODELAY` as a claimed local TCP setup optimization based
+  on current evidence. A temporary implementation with loopback coverage was
+  benchmarked on p10/w10/file-backed mmap with `willneed`, then reverted:
+  `benchmark_results/local_tcp_nodelay_willneed_filemmap_babyface_p10_w10_none_20260711_023104`
+  setup `9,150,496us`, total `15,845,669us`, worse than the `willneed` runs
+  without TCP_NODELAY.
+- Do not default to snappy compression for localhost p10/w10 setup. It reduced
+  coordinator wire TX from `572,751,240` to `278,055,791` bytes in
+  `benchmark_results/local_tcp_snappy_filemmap_babyface_p10_w10_20260711_022738`,
+  but setup `8,391,191us` and total `14,641,085us` did not beat no-compression
+  with BK mmap `willneed`.
