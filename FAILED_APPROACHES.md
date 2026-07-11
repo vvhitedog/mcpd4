@@ -23,6 +23,24 @@
   and a Snappy-compatible configuration. The quick native/no-Snappy profile is
   slower for the current localhost transfer workload.
 
+## 2026-07-11 04:57 PDT
+
+- Explicitly setting `MCPD3_PARTITIONER=basic` is not a meaningful speed win
+  for the current local TCP `babyface.n6c10` p3/p6 probes. It removes the
+  `unknown=metis fallback=basic` warning, but timings stayed in the same band:
+  - p3/w3
+    `benchmark_results/local_tcp_early_listen_basic_partitioner_p3_w3_malloc_babyface_none_20260711_045747`:
+    total `6,435,543us`, partition `970,816us`, setup `2,060,543us`;
+  - p6/w6
+    `benchmark_results/local_tcp_early_listen_basic_partitioner_p6_w6_malloc_babyface_none_20260711_045753`:
+    total `6,448,699us`, partition `1,083,978us`, setup `2,241,770us`.
+- Snappy compression is still slower on localhost at the current p3/w3 point:
+  `benchmark_results/local_tcp_early_listen_snappy_p3_w3_malloc_babyface_20260711_050019`
+  cut coordinator TX wire bytes from about `395MB` to `187MB`, but total wall
+  rose to `6,960,255us` and compression took `669,749us`.
+- Interpretation: for local TCP, keep `--rpc-compression none`; Snappy is more
+  plausible for slower real networks than for localhost.
+
 ## 2026-07-11 04:43 PDT
 
 - Do not reduce the local TCP worker count below the partition count for the
