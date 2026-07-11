@@ -30,6 +30,28 @@
   stopped early. The p1/w1 no-boundary control can use objective scale `1`,
   but the distributed alpha-resolution path cannot.
 
+## 2026-07-11 08:07 PDT
+
+- Do not use the aggressive `adhead.n6c10` p8/w8 schedule start `50` as the
+  local TCP target. Run
+  `benchmark_results/local_tcp_adhead_n6c10_p8_w8_os2000_start50_iter60_malloc_20260711_075929`
+  reached iteration `60` at scale `50` with best raw lower bound `95,877,300`
+  and `418` disagreements, then entered an expensive low-scale round. It was
+  already past the matched start-10000 control time and emitted
+  `regularization budget 2190 is not below limit 2000`, so the run was both
+  slower and non-certifying under the strict budget condition. It was stopped
+  manually after about `3:42`.
+- Do not use `adhead.n6c10` p8/w8 schedule start `500` as a presumed midpoint
+  improvement. Run
+  `benchmark_results/local_tcp_adhead_n6c10_p8_w8_os2000_start500_iter60_malloc_20260711_080553`
+  was stopped after `54.7s`: at the first progress checkpoint it had only
+  reached iteration `10`, so it could not beat the clean start-1000 result
+  (`50.2s` total wall).
+- Current best local TCP adhead schedule from these probes is start `1000`,
+  four schedule levels, max `60`, `objective_scale=2000`, p8/w8, malloc BK,
+  no compression:
+  `benchmark_results/local_tcp_adhead_n6c10_p8_w8_os2000_start1000_iter60_malloc_20260711_080335`.
+
 ## 2026-07-11 07:36 PDT
 
 - Do not use the current `MCPD3_PARTITIONER=local` region-grow partitioner for

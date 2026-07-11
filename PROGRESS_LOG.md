@@ -3219,3 +3219,42 @@
   `384,750,040` because the worker-load protocol already omitted
   `local_to_global` on the wire; the win is avoiding coordinator-side
   partition construction work.
+
+## 2026-07-11 08:07 PDT
+
+- Used the newly available RAM to rerun `adhead.n6c10` with resident
+  malloc-backed local TCP workers on the current optimized branch.
+- Current best adhead local TCP result:
+  - run:
+    `benchmark_results/local_tcp_adhead_n6c10_p8_w8_os2000_start1000_iter60_malloc_20260711_080335`;
+  - settings: p8/w8, `MCPD3_PARTITIONER=basic`, no RPC compression,
+    malloc-backed BK storage, `objective_scale=2000`, schedule start `1000`,
+    four schedule levels, max `60` iterations per scale, capacity saturation
+    enabled;
+  - status `0`, stop_reason `2`, final objective `48373`, final certified
+    lower bound `48373`, final disagreements `0`, no objective-scale
+    promotions;
+  - total iterations `106`; scale split from CSV was `58` at scale `1000`,
+    `23` at scale `100`, and `25` at scale `10`;
+  - final regularization budget `1690`, below the strict objective-scale
+    budget `2000`;
+  - wall `50,217,621us`, read graph `5,818,646us`, partition `2,534,653us`,
+    setup `3,865,028us`, solve `37,998,641us`, aggregate worker solve
+    `109,221,666us`, worker RPC overhead `12,437,497us`, partition-load RPC
+    `25,749,186us`;
+  - package load transmitted `984,613,184` bytes.
+- Fresh baseline/control on the same branch:
+  - run:
+    `benchmark_results/local_tcp_adhead_n6c10_p8_w8_os2000_start10000_malloc_20260711_075727`;
+  - same p8/w8 resident malloc setup, but schedule start `10000`;
+  - status `0`, stop_reason `2`, objective/certified LB `48373`, final
+    disagreements `0`, total iterations `110`, final regularization budget
+    `80`, no promotions;
+  - wall `91,001,799us`, solve `78,141,773us`, aggregate worker solve
+    `218,223,018us`, worker RPC overhead `12,935,815us`, partition-load RPC
+    `27,631,635us`.
+- Compared with the earlier productized p8 adhead note (`139.74s`) and the
+  fresh start-10000 control (`91.0s`), the start-1000 schedule is now the best
+  observed local TCP adhead point on this machine: about `2.78x` faster than
+  the older p8 note and about `1.81x` faster than the matched current
+  start-10000 control.
