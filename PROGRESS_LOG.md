@@ -1,5 +1,40 @@
 # Progress Log
 
+## 2026-07-11 07:16 PDT
+
+- Tightened the memory-resident local TCP full-schedule cap sweep for
+  `babyface.n6c10` after more RAM was freed. Settings for all runs:
+  p2/w2, malloc-backed BK storage, no compression,
+  `--saturate-capacity-overflow`, schedule start `10000`, five schedule
+  levels, objective scale `1000`.
+- Best new result: max `23` iterations per scale:
+  `benchmark_results/local_tcp_fullschedule_p2_w2_iter23_malloc_babyface_saturate_20260711_070323`
+  reached status `0`, stop_reason `2`, final objective `19448`, final
+  certified lower bound `19448`, final disagreements `0`, no objective-scale
+  promotions, no capacity saturations, total iterations `64`, wall
+  `193,613,915us`, solve `188,159,066us`, aggregate worker solve
+  `229,728,410us`, worker RPC overhead `1,034,628us`, partition-load RPC
+  `4,401,152us`, solve request TX `15,846,686` bytes, solve result RX
+  `11,780,598` bytes.
+- Neighboring cap probes:
+  - max `24`:
+    `benchmark_results/local_tcp_fullschedule_p2_w2_iter24_malloc_babyface_saturate_20260711_065941`,
+    status `0`, stop_reason `2`, final disagreements `0`, total iterations
+    `67`, wall `194,947,825us`, final certified lower bound `19448`;
+  - max `22`:
+    `benchmark_results/local_tcp_fullschedule_p2_w2_iter22_malloc_babyface_saturate_20260711_070710`,
+    status `0`, stop_reason `2`, final disagreements `0`, total iterations
+    `71`, wall `196,501,411us`, final objective `19448`, final certified
+    lower bound `19447.7`;
+  - max `21`:
+    `benchmark_results/local_tcp_fullschedule_p2_w2_iter21_malloc_babyface_saturate_20260711_071146`,
+    status `2`, stop_reason `3`, final disagreements `9`, total iterations
+    `95`, wall `194,974,638us`.
+- Conclusion: p2/w2 max `23` is the best observed memory-resident local TCP
+  full solve so far at `193.6s` wall. It improves on the previous max `25`
+  best (`197.0s`) while preserving agreement and a matching reported final
+  certified lower bound.
+
 ## 2026-07-11 06:56 PDT
 
 - Used the additional available RAM to continue memory-resident local TCP

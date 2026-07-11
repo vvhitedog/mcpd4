@@ -1,5 +1,21 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 07:16 PDT
+
+- Do not lower the p2/w2 local TCP full-schedule cap to `21` for
+  `babyface.n6c10`. Run
+  `benchmark_results/local_tcp_fullschedule_p2_w2_iter21_malloc_babyface_saturate_20260711_071146`
+  ended with status `2`, stop_reason `3`, final disagreements `9`, total
+  iterations `95`, wall `194,974,638us`, and final certified lower bound
+  `19447.6`; it did not produce primal agreement.
+- Do not prefer p2/w2 max `22` over max `23` even though it reaches agreement.
+  Run
+  `benchmark_results/local_tcp_fullschedule_p2_w2_iter22_malloc_babyface_saturate_20260711_070710`
+  took `196,501,411us` versus `193,613,915us` for max `23`, and reported
+  final objective `19448` with final certified lower bound `19447.7`.
+- Current best clean point for this benchmark remains p2/w2 max `23`:
+  `benchmark_results/local_tcp_fullschedule_p2_w2_iter23_malloc_babyface_saturate_20260711_070323`.
+
 ## 2026-07-11 06:56 PDT
 
 - Do not use p5/w5 max `60` as a full local TCP solve despite its relatively
