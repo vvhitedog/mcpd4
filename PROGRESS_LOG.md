@@ -1,5 +1,43 @@
 # Progress Log
 
+## 2026-07-11 05:22 PDT
+
+- Swept worker count at fixed p16 for the 10-iteration local TCP
+  `babyface.n6c10` run. Settings: one objective scale, malloc-backed BK
+  storage, no compression.
+- Results:
+  - p16/w4
+    `benchmark_results/local_tcp_early_listen_10iter_p16_w4_malloc_babyface_none_20260711_052209`:
+    total `29,934,232us`, setup `6,808,441us`, solve `19,442,707us`,
+    active workers `4`, solve batch RPCs `40`;
+  - p16/w6
+    `benchmark_results/local_tcp_early_listen_10iter_p16_w6_malloc_babyface_none_20260711_052031`:
+    total `28,529,368us`, setup `5,495,884us`, solve `19,313,608us`,
+    active workers `6`, solve batch RPCs `60`;
+  - p16/w8
+    `benchmark_results/local_tcp_early_listen_10iter_p16_w8_malloc_babyface_none_20260711_051852`:
+    total `28,307,002us`, setup `5,486,728us`, solve `19,074,716us`,
+    active workers `8`, solve batch RPCs `80`;
+  - p16/w8 repeat
+    `benchmark_results/local_tcp_early_listen_10iter_p16_w8_malloc_babyface_none_20260711_052059`:
+    total `29,249,490us`, setup `6,115,888us`, solve `19,418,493us`;
+  - p16/w10
+    `benchmark_results/local_tcp_early_listen_10iter_p16_w10_malloc_babyface_none_20260711_052129`:
+    total `29,273,367us`, setup `5,946,224us`, solve `19,635,765us`;
+  - p16/w12
+    `benchmark_results/local_tcp_early_listen_10iter_p16_w12_malloc_babyface_none_20260711_051920`:
+    total `29,444,918us`, setup `6,000,226us`, solve `19,718,980us`;
+  - p16/w14
+    `benchmark_results/local_tcp_early_listen_10iter_p16_w14_malloc_babyface_none_20260711_051950`:
+    total `29,620,057us`, setup `6,490,634us`, solve `19,420,748us`.
+- Baseline p16/w16 clean-source validation remained faster:
+  `benchmark_results/local_tcp_clean_rebuild_10iter_p16_w16_malloc_babyface_none_20260711_051706`
+  total `27,822,050us`, setup `5,164,564us`, solve `18,954,568us`.
+- Conclusion: p16/w16 remains the best observed local TCP wall time for this
+  10-iteration probe. p16/w6 and p16/w8 are close alternatives when reducing
+  process count or memory pressure matters, because batched worker RPCs preserve
+  most of the per-round parallelism.
+
 ## 2026-07-11 05:13 PDT
 
 - Ran a 10-iteration local TCP sweep on `babyface.n6c10` to avoid optimizing
