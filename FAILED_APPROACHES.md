@@ -1,5 +1,23 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 04:43 PDT
+
+- Do not reduce the local TCP worker count below the partition count for the
+  current p6 `babyface.n6c10` configuration when enough memory is available.
+  Fewer workers reduce process count but force each worker to load multiple
+  partitions serially, increasing setup wall time.
+- Valid restored-binary sweep, p6 fixed partitions, one iteration,
+  malloc-backed BK storage, no compression:
+  - w2: total `9,399,596us`, setup `5,004,025us`;
+  - w3: total `7,849,642us`, setup `3,475,420us`;
+  - w4: total `7,831,989us`, setup `3,461,129us`;
+  - w5: total `7,928,203us`, setup `3,564,479us`;
+  - w6: total `6,541,356us`, setup `2,208,413us`.
+- Ignore the earlier `local_tcp_worker_sweep_p6_w*_...` directories from this
+  timestamp range: they were accidentally run against stale packed-arc
+  binaries after the source revert. Use only `local_tcp_worker_sweep_restored`
+  for product comparisons.
+
 ## 2026-07-11 04:39 PDT
 
 - Do not use eager 24-bit arc-endpoint packing for worker-load partition

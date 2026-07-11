@@ -1,5 +1,35 @@
 # Progress Log
 
+## 2026-07-11 04:43 PDT
+
+- Ran a fixed-partition worker-count sweep on the restored product binary:
+  `babyface.n6c10`, p6, one iteration, malloc-backed BK storage,
+  no compression.
+- Important process note: an earlier sweep immediately after reverting the
+  24-bit packed-arc prototype used stale binaries and reported the packed
+  `344,250,240` byte payload. Those directories are invalid for product
+  comparison. The valid restored sweep below reports the expected
+  `405,000,240` byte payload.
+- Results:
+  - w2
+    `benchmark_results/local_tcp_worker_sweep_restored_p6_w2_malloc_babyface_none_20260711_044212`:
+    total `9,399,596us`, setup `5,004,025us`, solve `933,072us`;
+  - w3
+    `benchmark_results/local_tcp_worker_sweep_restored_p6_w3_malloc_babyface_none_20260711_044221`:
+    total `7,849,642us`, setup `3,475,420us`, solve `913,428us`;
+  - w4
+    `benchmark_results/local_tcp_worker_sweep_restored_p6_w4_malloc_babyface_none_20260711_044229`:
+    total `7,831,989us`, setup `3,461,129us`, solve `926,388us`;
+  - w5
+    `benchmark_results/local_tcp_worker_sweep_restored_p6_w5_malloc_babyface_none_20260711_044237`:
+    total `7,928,203us`, setup `3,564,479us`, solve `897,545us`;
+  - w6
+    `benchmark_results/local_tcp_worker_sweep_restored_p6_w6_malloc_babyface_none_20260711_044246`:
+    total `6,541,356us`, setup `2,208,413us`, solve `888,097us`.
+- Conclusion: for p6 local TCP on this machine, using one worker per partition
+  remains best. Reducing workers makes each worker load multiple partitions
+  serially and increases setup wall time.
+
 ## 2026-07-11 04:39 PDT
 
 - Tested 24-bit worker-load arc endpoint packing as a partition-load byte
