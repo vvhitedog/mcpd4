@@ -5,11 +5,18 @@
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 
 namespace mcpd4 {
 namespace {
 
 constexpr std::size_t kFrameHeaderBytes = 12;
+constexpr std::size_t kIntVectorHeaderBytes = 4;
+constexpr std::size_t kIntBytes = 4;
+constexpr std::size_t kConstraintEndpointBytes =
+    4 + 4 + 4 + 1 + 8 + 8 + 4;
+constexpr std::size_t kCompactConstraintEndpointBytes =
+    4 + 4 + 1 + 8 + 8;
 
 void require(bool condition, const std::string &message) {
   if (!condition) {
@@ -35,6 +42,31 @@ bool isKnownMessageType(std::uint32_t value) {
   return false;
 }
 
+bool rawI32VectorsSupported() {
+  const std::uint32_t value = 1;
+  return *reinterpret_cast<const std::uint8_t *>(&value) == 1 &&
+         sizeof(int) == sizeof(std::int32_t);
+}
+
+void writeLittleU32(std::uint8_t *data, std::uint32_t value) {
+  for (int shift = 0; shift < 32; shift += 8) {
+    *data++ = static_cast<std::uint8_t>((value >> shift) & 0xff);
+  }
+}
+
+void writeLittleU64(std::uint8_t *data, std::uint64_t value) {
+  for (int shift = 0; shift < 64; shift += 8) {
+    *data++ = static_cast<std::uint8_t>((value >> shift) & 0xff);
+  }
+}
+
+void writeLittleI32(std::uint8_t *data, int value) {
+  const auto signed_value = static_cast<std::int32_t>(value);
+  std::uint32_t bits = 0;
+  std::memcpy(&bits, &signed_value, sizeof(bits));
+  writeLittleU32(data, bits);
+}
+
 template <typename T> T checkedIntegerCast(std::int64_t value) {
   static_assert(std::is_integral<T>::value, "T must be integral");
   if (value < static_cast<std::int64_t>(std::numeric_limits<T>::min()) ||
@@ -54,6 +86,9 @@ template <typename T> std::uint32_t checkedSize(T size) {
 class Writer {
 public:
   const std::vector<std::uint8_t> &bytes() const { return bytes_; }
+  std::vector<std::uint8_t> takeBytes() { return std::move(bytes_); }
+
+  void reserve(std::size_t size) { bytes_.reserve(size); }
 
   void writeU8(std::uint8_t value) { bytes_.push_back(value); }
 
@@ -105,15 +140,46 @@ public:
     }
   }
 
+  void writeI32Vector(const std::vector<int> &values) {
+    writeU32(checkedSize(values.size()));
+    if (values.empty()) {
+      return;
+    }
+    if (hostIsLittleEndian() && sizeof(int) == sizeof(std::int32_t)) {
+      const auto *begin =
+          reinterpret_cast<const std::uint8_t *>(values.data());
+      bytes_.insert(bytes_.end(), begin,
+                    begin + values.size() * sizeof(std::int32_t));
+      return;
+    }
+    for (const auto value : values) {
+      writeI32(value);
+    }
+  }
+
 private:
+  static bool hostIsLittleEndian() {
+    const std::uint32_t value = 1;
+    return *reinterpret_cast<const std::uint8_t *>(&value) == 1;
+  }
+
   std::vector<std::uint8_t> bytes_;
 };
 
 class Reader {
 public:
-  explicit Reader(const std::vector<std::uint8_t> &bytes) : bytes_(bytes) {}
+  explicit Reader(const std::vector<std::uint8_t> &bytes)
+      : bytes_(bytes), end_(bytes.size()) {}
 
-  bool empty() const { return offset_ == bytes_.size(); }
+  Reader(const std::vector<std::uint8_t> &bytes, std::size_t offset,
+         std::size_t size)
+      : bytes_(bytes), offset_(offset), end_(offset + size) {
+    require(offset <= bytes_.size() && size <= bytes_.size() - offset,
+            "payload view is outside frame bounds");
+  }
+
+  bool empty() const { return offset_ == end_; }
+  std::size_t remaining() const { return end_ - offset_; }
 
   std::uint8_t readU8() {
     requireRemaining(1);
@@ -186,19 +252,68 @@ public:
     return values;
   }
 
+  std::vector<int> readI32Vector() {
+    const auto size = readU32();
+    std::vector<int> values(static_cast<std::size_t>(size));
+    if (values.empty()) {
+      return values;
+    }
+    if (hostIsLittleEndian() && sizeof(int) == sizeof(std::int32_t)) {
+      const auto byte_count =
+          static_cast<std::size_t>(size) * sizeof(std::int32_t);
+      requireRemaining(byte_count);
+      std::memcpy(values.data(), bytes_.data() + offset_, byte_count);
+      offset_ += byte_count;
+      return values;
+    }
+    for (std::uint32_t i = 0; i < size; ++i) {
+      values[static_cast<std::size_t>(i)] = readI32();
+    }
+    return values;
+  }
+
 private:
   void requireRemaining(std::size_t count) const {
-    if (count > bytes_.size() - offset_) {
+    if (count > end_ - offset_) {
       throw std::runtime_error("truncated payload");
     }
   }
 
+  static bool hostIsLittleEndian() {
+    const std::uint32_t value = 1;
+    return *reinterpret_cast<const std::uint8_t *>(&value) == 1;
+  }
+
   const std::vector<std::uint8_t> &bytes_;
   std::size_t offset_ = 0;
+  std::size_t end_ = 0;
 };
 
 void requireDone(const Reader &reader) {
   require(reader.empty(), "payload has trailing bytes");
+}
+
+struct DecodedFrameView {
+  MessageType type = MessageType::ERROR;
+  std::size_t payload_offset = kFrameHeaderBytes;
+  std::size_t payload_size = 0;
+};
+
+DecodedFrameView decodeFrameView(const std::vector<std::uint8_t> &bytes) {
+  require(bytes.size() >= kFrameHeaderBytes, "frame header is truncated");
+  Reader reader(bytes);
+  const auto raw_type = reader.readU32();
+  require(isKnownMessageType(raw_type), "unknown message type");
+  const auto payload_size = reader.readU64();
+  require(payload_size <= std::numeric_limits<std::size_t>::max(),
+          "payload size is too large");
+  require(bytes.size() - kFrameHeaderBytes ==
+              static_cast<std::size_t>(payload_size),
+          "frame payload size does not match buffer size");
+  DecodedFrameView view;
+  view.type = static_cast<MessageType>(raw_type);
+  view.payload_size = static_cast<std::size_t>(payload_size);
+  return view;
 }
 
 Frame decodeExpectedFrame(const std::vector<std::uint8_t> &frame,
@@ -208,19 +323,22 @@ Frame decodeExpectedFrame(const std::vector<std::uint8_t> &frame,
   return decoded;
 }
 
+DecodedFrameView decodeExpectedFrameView(
+    const std::vector<std::uint8_t> &frame, MessageType expected_type) {
+  auto decoded = decodeFrameView(frame);
+  require(decoded.type == expected_type, "unexpected message type");
+  return decoded;
+}
+
 void writeAlphaUpdate(Writer *writer, const mcpd3::AlphaUpdate &update) {
   writer->writeI32(update.constraint_id);
   writer->writeI64(update.alpha);
-  writer->writeI64(update.last_alpha);
-  writer->writeFloat(update.alpha_momentum);
 }
 
 mcpd3::AlphaUpdate readAlphaUpdate(Reader *reader) {
   mcpd3::AlphaUpdate update;
   update.constraint_id = reader->readI32();
   update.alpha = checkedIntegerCast<long>(reader->readI64());
-  update.last_alpha = checkedIntegerCast<long>(reader->readI64());
-  update.alpha_momentum = reader->readFloat();
   return update;
 }
 
@@ -235,6 +353,15 @@ void writeConstraintEndpoint(Writer *writer,
   writer->writeFloat(binding.alpha_momentum);
 }
 
+void writeCompactConstraintEndpoint(
+    Writer *writer, const mcpd3::ConstraintEndpointBinding &binding) {
+  writer->writeI32(binding.constraint_id);
+  writer->writeI32(binding.local_index);
+  writer->writeBool(binding.is_source);
+  writer->writeI64(binding.alpha);
+  writer->writeI64(binding.last_alpha);
+}
+
 mcpd3::ConstraintEndpointBinding readConstraintEndpoint(Reader *reader) {
   mcpd3::ConstraintEndpointBinding binding;
   binding.constraint_id = reader->readI32();
@@ -247,18 +374,126 @@ mcpd3::ConstraintEndpointBinding readConstraintEndpoint(Reader *reader) {
   return binding;
 }
 
+std::vector<mcpd3::ConstraintEndpointBinding>
+readConstraintEndpointVector(Reader *reader) {
+  const auto size = reader->readU32();
+  const auto full_bytes =
+      static_cast<std::size_t>(size) * kConstraintEndpointBytes;
+  const auto compact_bytes =
+      static_cast<std::size_t>(size) * kCompactConstraintEndpointBytes;
+  const bool compact = reader->remaining() == compact_bytes;
+  if (!compact && reader->remaining() < full_bytes) {
+    throw std::runtime_error("truncated endpoint payload");
+  }
+
+  std::vector<mcpd3::ConstraintEndpointBinding> endpoints;
+  endpoints.reserve(size);
+  for (std::uint32_t i = 0; i < size; ++i) {
+    if (compact) {
+      mcpd3::ConstraintEndpointBinding binding;
+      binding.constraint_id = reader->readI32();
+      binding.global_node_id = -1;
+      binding.local_index = reader->readI32();
+      binding.is_source = reader->readBool();
+      binding.alpha = checkedIntegerCast<long>(reader->readI64());
+      binding.last_alpha = checkedIntegerCast<long>(reader->readI64());
+      binding.alpha_momentum = 0;
+      endpoints.push_back(binding);
+    } else {
+      endpoints.push_back(readConstraintEndpoint(reader));
+    }
+  }
+  return endpoints;
+}
+
+bool canCompactDirectedArcCapacities(
+    const mcpd3::PartitionPackage &message,
+    PartitionPackageFrameBuffers::Mode mode) {
+  if (mode != PartitionPackageFrameBuffers::Mode::WORKER_LOAD) {
+    return false;
+  }
+  if (message.arc_capacities.size() != message.arcs.size() ||
+      message.arc_capacities.size() % 2 != 0) {
+    return false;
+  }
+  for (size_t i = 0; i < message.arc_capacities.size(); i += 2) {
+    const int forward = message.arc_capacities[i];
+    const int backward = message.arc_capacities[i + 1];
+    if (forward < 0 || backward < 0) {
+      return false;
+    }
+    if (forward != 0 && backward != 0) {
+      return false;
+    }
+  }
+  return !message.arc_capacities.empty();
+}
+
+std::size_t arcCapacityWireCount(
+    const mcpd3::PartitionPackage &message,
+    PartitionPackageFrameBuffers::Mode mode) {
+  return canCompactDirectedArcCapacities(message, mode)
+             ? message.arc_capacities.size() / 2
+             : message.arc_capacities.size();
+}
+
+std::size_t partitionPackageFrameSizeWithArcCapacityCount(
+    const mcpd3::PartitionPackage &message,
+    PartitionPackageFrameBuffers::Mode mode,
+    std::size_t arc_capacity_wire_count) {
+  const std::size_t local_to_global_bytes =
+      mode == PartitionPackageFrameBuffers::Mode::WORKER_LOAD
+          ? 0
+          : message.local_to_global.size() * kIntBytes;
+  const std::size_t endpoint_bytes =
+      mode == PartitionPackageFrameBuffers::Mode::WORKER_LOAD
+          ? kCompactConstraintEndpointBytes
+          : kConstraintEndpointBytes;
+  return kFrameHeaderBytes +
+         /*partition_id + local_node_count=*/8 +
+         kIntVectorHeaderBytes + message.arcs.size() * kIntBytes +
+         kIntVectorHeaderBytes + arc_capacity_wire_count * kIntBytes +
+         kIntVectorHeaderBytes +
+         message.terminal_capacities.size() * kIntBytes +
+         kIntVectorHeaderBytes + local_to_global_bytes +
+         /*constraint endpoint vector header=*/4 +
+         message.constraint_endpoints.size() * endpoint_bytes;
+}
+
+void expandCompactArcCapacities(mcpd3::PartitionPackage *message) {
+  if (message->arc_capacities.size() == message->arcs.size()) {
+    return;
+  }
+  if (message->arcs.size() % 2 != 0 ||
+      message->arc_capacities.size() != message->arcs.size() / 2) {
+    throw std::runtime_error(
+        "partition arc capacity count is neither full nor compact");
+  }
+  std::vector<int> expanded;
+  expanded.reserve(message->arcs.size());
+  for (const auto signed_capacity : message->arc_capacities) {
+    if (signed_capacity == std::numeric_limits<int>::min()) {
+      throw std::runtime_error("compact arc capacity is outside range");
+    }
+    if (signed_capacity >= 0) {
+      expanded.push_back(signed_capacity);
+      expanded.push_back(0);
+    } else {
+      expanded.push_back(0);
+      expanded.push_back(-signed_capacity);
+    }
+  }
+  message->arc_capacities = std::move(expanded);
+}
+
 void writeConstraintLabel(Writer *writer, const mcpd3::ConstraintLabel &label) {
   writer->writeI32(label.constraint_id);
-  writer->writeI32(label.global_node_id);
-  writer->writeI32(label.local_index);
   writer->writeI32(label.label);
 }
 
 mcpd3::ConstraintLabel readConstraintLabel(Reader *reader) {
   mcpd3::ConstraintLabel label;
   label.constraint_id = reader->readI32();
-  label.global_node_id = reader->readI32();
-  label.local_index = reader->readI32();
   label.label = reader->readI32();
   return label;
 }
@@ -283,6 +518,14 @@ mcpd3::PartitionSolveRequest readSolveRoundRequestPayload(Reader *reader) {
   message.alpha_updates = reader->readVector<mcpd3::AlphaUpdate>(
       [&] { return readAlphaUpdate(reader); });
   return message;
+}
+
+std::size_t partitionPackageFrameSize(
+    const mcpd3::PartitionPackage &message,
+    PartitionPackageFrameBuffers::Mode mode =
+        PartitionPackageFrameBuffers::Mode::FULL) {
+  return partitionPackageFrameSizeWithArcCapacityCount(
+      message, mode, arcCapacityWireCount(message, mode));
 }
 
 void writeSolveRoundResultPayload(
@@ -329,22 +572,18 @@ std::vector<std::uint8_t> encodeFrame(
 }
 
 Frame decodeFrame(const std::vector<std::uint8_t> &bytes) {
-  require(bytes.size() >= kFrameHeaderBytes, "frame header is truncated");
-  Reader reader(bytes);
-  const auto raw_type = reader.readU32();
-  require(isKnownMessageType(raw_type), "unknown message type");
-  const auto payload_size = reader.readU64();
-  require(payload_size <= std::numeric_limits<std::size_t>::max(),
-          "payload size is too large");
-  require(bytes.size() - kFrameHeaderBytes ==
-              static_cast<std::size_t>(payload_size),
-          "frame payload size does not match buffer size");
+  const auto view = decodeFrameView(bytes);
   Frame frame;
-  frame.type = static_cast<MessageType>(raw_type);
-  frame.payload.assign(bytes.begin() +
-                           static_cast<std::ptrdiff_t>(kFrameHeaderBytes),
-                       bytes.end());
+  frame.type = view.type;
+  frame.payload.assign(
+      bytes.begin() + static_cast<std::ptrdiff_t>(view.payload_offset),
+      bytes.begin() + static_cast<std::ptrdiff_t>(view.payload_offset +
+                                                  view.payload_size));
   return frame;
+}
+
+MessageType decodeFrameType(const std::vector<std::uint8_t> &bytes) {
+  return decodeFrameView(bytes).type;
 }
 
 std::vector<std::uint8_t> encodeHello(const HelloMessage &message) {
@@ -378,42 +617,136 @@ HelloMessage decodeHello(const std::vector<std::uint8_t> &frame) {
 
 std::vector<std::uint8_t> encodePartitionPackage(
     const mcpd3::PartitionPackage &message) {
+  const auto frame_size = partitionPackageFrameSize(message);
   Writer writer;
+  writer.reserve(frame_size);
+  writer.writeU32(static_cast<std::uint32_t>(MessageType::PARTITION_PACKAGE));
+  writer.writeU64(frame_size - kFrameHeaderBytes);
   writer.writeI32(message.partition_id);
   writer.writeI32(message.local_node_count);
-  writer.writeVector<int>(message.arcs,
-                          [&](int value) { writer.writeI32(value); });
-  writer.writeVector<int>(message.arc_capacities,
-                          [&](int value) { writer.writeI32(value); });
-  writer.writeVector<int>(message.terminal_capacities,
-                          [&](int value) { writer.writeI32(value); });
-  writer.writeVector<int>(message.local_to_global,
-                          [&](int value) { writer.writeI32(value); });
+  writer.writeI32Vector(message.arcs);
+  writer.writeI32Vector(message.arc_capacities);
+  writer.writeI32Vector(message.terminal_capacities);
+  writer.writeI32Vector(message.local_to_global);
   writer.writeVector<mcpd3::ConstraintEndpointBinding>(
       message.constraint_endpoints,
       [&](const auto &binding) { writeConstraintEndpoint(&writer, binding); });
-  return encodeFrame(MessageType::PARTITION_PACKAGE, writer.bytes());
+  return writer.takeBytes();
 }
 
 mcpd3::PartitionPackage decodePartitionPackage(
     const std::vector<std::uint8_t> &frame) {
-  auto decoded = decodeExpectedFrame(frame, MessageType::PARTITION_PACKAGE);
-  Reader reader(decoded.payload);
+  const auto decoded =
+      decodeExpectedFrameView(frame, MessageType::PARTITION_PACKAGE);
+  Reader reader(frame, decoded.payload_offset, decoded.payload_size);
   mcpd3::PartitionPackage message;
   message.partition_id = reader.readI32();
   message.local_node_count = reader.readI32();
-  message.arcs = reader.readVector<int>([&] { return reader.readI32(); });
-  message.arc_capacities =
-      reader.readVector<int>([&] { return reader.readI32(); });
-  message.terminal_capacities =
-      reader.readVector<int>([&] { return reader.readI32(); });
-  message.local_to_global =
-      reader.readVector<int>([&] { return reader.readI32(); });
-  message.constraint_endpoints =
-      reader.readVector<mcpd3::ConstraintEndpointBinding>(
-          [&] { return readConstraintEndpoint(&reader); });
+  message.arcs = reader.readI32Vector();
+  message.arc_capacities = reader.readI32Vector();
+  expandCompactArcCapacities(&message);
+  message.terminal_capacities = reader.readI32Vector();
+  message.local_to_global = reader.readI32Vector();
+  message.constraint_endpoints = readConstraintEndpointVector(&reader);
   requireDone(reader);
   return message;
+}
+
+bool partitionPackageFrameBuffersSupported() {
+  return rawI32VectorsSupported();
+}
+
+PartitionPackageFrameBuffers::PartitionPackageFrameBuffers(
+    const mcpd3::PartitionPackage &message, Mode mode)
+    : message_(&message), mode_(mode) {
+  require(partitionPackageFrameBuffersSupported(),
+          "partition package frame buffers require little-endian int32 host");
+  use_compact_arc_capacities_ =
+      canCompactDirectedArcCapacities(message, mode_);
+  if (use_compact_arc_capacities_) {
+    compact_arc_capacities_.reserve(message.arc_capacities.size() / 2);
+    for (size_t i = 0; i < message.arc_capacities.size(); i += 2) {
+      const int forward = message.arc_capacities[i];
+      const int backward = message.arc_capacities[i + 1];
+      compact_arc_capacities_.push_back(backward != 0 ? -backward : forward);
+    }
+  }
+  const auto arc_capacity_wire_count =
+      use_compact_arc_capacities_ ? compact_arc_capacities_.size()
+                                  : message.arc_capacities.size();
+  total_size_ = partitionPackageFrameSizeWithArcCapacityCount(
+      message, mode_, arc_capacity_wire_count);
+  writeLittleU32(frame_header_.data(),
+                 static_cast<std::uint32_t>(MessageType::PARTITION_PACKAGE));
+  writeLittleU64(frame_header_.data() + 4, total_size_ - kFrameHeaderBytes);
+  writeLittleI32(scalar_header_.data(), message.partition_id);
+  writeLittleI32(scalar_header_.data() + 4, message.local_node_count);
+  writeLittleU32(arcs_size_.data(), checkedSize(message.arcs.size()));
+  writeLittleU32(arc_capacities_size_.data(),
+                 checkedSize(arc_capacity_wire_count));
+  writeLittleU32(terminal_capacities_size_.data(),
+                 checkedSize(message.terminal_capacities.size()));
+  writeLittleU32(local_to_global_size_.data(),
+                 mode_ == Mode::WORKER_LOAD
+                     ? 0
+                     : checkedSize(message.local_to_global.size()));
+  writeLittleU32(constraint_endpoints_size_.data(),
+                 checkedSize(message.constraint_endpoints.size()));
+
+  Writer endpoint_writer;
+  endpoint_writer.reserve(message.constraint_endpoints.size() *
+                          (mode_ == Mode::WORKER_LOAD
+                               ? kCompactConstraintEndpointBytes
+                               : kConstraintEndpointBytes));
+  for (const auto &binding : message.constraint_endpoints) {
+    if (mode_ == Mode::WORKER_LOAD) {
+      writeCompactConstraintEndpoint(&endpoint_writer, binding);
+    } else {
+      writeConstraintEndpoint(&endpoint_writer, binding);
+    }
+  }
+  constraint_endpoint_bytes_ = endpoint_writer.takeBytes();
+}
+
+std::size_t PartitionPackageFrameBuffers::totalSize() const {
+  require(message_ != nullptr, "partition package frame buffers are empty");
+  return total_size_;
+}
+
+std::vector<ByteBufferView> PartitionPackageFrameBuffers::buffers() const {
+  require(message_ != nullptr, "partition package frame buffers are empty");
+  const auto int_vector = [](const std::vector<int> &values) {
+    return ByteBufferView{
+        reinterpret_cast<const std::uint8_t *>(values.data()),
+        values.size() * sizeof(std::int32_t)};
+  };
+  std::vector<ByteBufferView> views;
+  views.reserve(12);
+  views.push_back(ByteBufferView{frame_header_.data(), frame_header_.size()});
+  views.push_back(
+      ByteBufferView{scalar_header_.data(), scalar_header_.size()});
+  views.push_back(ByteBufferView{arcs_size_.data(), arcs_size_.size()});
+  views.push_back(int_vector(message_->arcs));
+  views.push_back(ByteBufferView{arc_capacities_size_.data(),
+                                 arc_capacities_size_.size()});
+  views.push_back(use_compact_arc_capacities_
+                      ? int_vector(compact_arc_capacities_)
+                      : int_vector(message_->arc_capacities));
+  views.push_back(ByteBufferView{terminal_capacities_size_.data(),
+                                 terminal_capacities_size_.size()});
+  views.push_back(int_vector(message_->terminal_capacities));
+  views.push_back(ByteBufferView{local_to_global_size_.data(),
+                                 local_to_global_size_.size()});
+  if (mode_ == Mode::WORKER_LOAD) {
+    views.push_back(ByteBufferView{nullptr, 0});
+  } else {
+    views.push_back(int_vector(message_->local_to_global));
+  }
+  views.push_back(ByteBufferView{constraint_endpoints_size_.data(),
+                                 constraint_endpoints_size_.size()});
+  views.push_back(ByteBufferView{constraint_endpoint_bytes_.data(),
+                                 constraint_endpoint_bytes_.size()});
+  return views;
 }
 
 std::vector<std::uint8_t> encodeReady(const ReadyMessage &message) {
@@ -543,6 +876,7 @@ std::vector<std::uint8_t> encodeScaleObjective(
     const ScaleObjectiveMessage &message) {
   Writer writer;
   writer.writeI64(message.factor);
+  writer.writeBool(message.saturate_capacity_overflow);
   return encodeFrame(MessageType::SCALE_OBJECTIVE, writer.bytes());
 }
 
@@ -552,6 +886,7 @@ ScaleObjectiveMessage decodeScaleObjective(
   Reader reader(decoded.payload);
   ScaleObjectiveMessage message;
   message.factor = reader.readI64();
+  message.saturate_capacity_overflow = reader.readBool();
   requireDone(reader);
   return message;
 }

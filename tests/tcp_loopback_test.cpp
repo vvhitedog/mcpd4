@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -32,6 +33,19 @@ template <typename Fn> void requireThrows(Fn fn, const std::string &message) {
     threw = true;
   }
   require(threw, message);
+}
+
+template <typename Fn>
+void requireThrowsContaining(Fn fn, const std::string &needle,
+                             const std::string &message) {
+  try {
+    fn();
+  } catch (const std::runtime_error &e) {
+    require(std::string(e.what()).find(needle) != std::string::npos,
+            message + "\nactual: " + e.what());
+    return;
+  }
+  throw std::runtime_error(message + "\nactual: no exception");
 }
 
 void sendRawAll(int fd, const std::uint8_t *data, std::size_t size) {
@@ -64,10 +78,13 @@ ConnectedPair makeConnectedPair() {
 class WorkerClientThread {
 public:
   WorkerClientThread(std::uint16_t port,
-                     mcpd4::HelloMessage hello)
-      : thread_([this, port, hello] {
+                     mcpd4::HelloMessage hello,
+                     mcpd4::TransportCompression compression =
+                         mcpd4::TransportCompression::NONE)
+      : thread_([this, port, hello, compression] {
           try {
-            mcpd4::runWorkerClient("127.0.0.1", port, hello);
+            mcpd4::runWorkerClient("127.0.0.1", port, hello, {},
+                                   compression);
           } catch (...) {
             exception_ = std::current_exception();
           }
@@ -133,13 +150,79 @@ std::vector<mcpd3::PartitionPackage> makeTieBreakRegularizationPackages() {
   return {source, target};
 }
 
+mcpd3::PartitionPackage makeManyBoundaryLabelsPackage(int partition_id,
+                                                      int count) {
+  mcpd3::PartitionPackage package;
+  package.partition_id = partition_id;
+  package.local_node_count = count;
+  package.terminal_capacities.reserve(count);
+  package.local_to_global.reserve(count);
+  package.constraint_endpoints.reserve(count);
+  for (int i = 0; i < count; ++i) {
+    package.terminal_capacities.push_back((i % 2 == 0) ? -3 : 3);
+    package.local_to_global.push_back(10000 + i);
+    package.constraint_endpoints.push_back(
+        mcpd3::ConstraintEndpointBinding{/*constraint_id=*/20000 + i,
+                                          /*global_node_id=*/10000 + i,
+                                          /*local_index=*/i,
+                                          /*is_source=*/true,
+                                          /*alpha=*/0,
+                                          /*last_alpha=*/0,
+                                          /*alpha_momentum=*/0});
+  }
+  return package;
+}
+
+mcpd3::PartitionPackage makeDirectedCapacityPackage(int partition_id) {
+  mcpd3::PartitionPackage package;
+  package.partition_id = partition_id;
+  package.local_node_count = 3;
+  package.arcs = {0, 1, 1, 2};
+  package.arc_capacities = {3, 0, 0, 7};
+  package.terminal_capacities = {-5, 0, 5};
+  package.local_to_global = {100, 101, 102};
+  package.constraint_endpoints.push_back(
+      mcpd3::ConstraintEndpointBinding{/*constraint_id=*/30000,
+                                        /*global_node_id=*/101,
+                                        /*local_index=*/1,
+                                        /*is_source=*/true,
+                                        /*alpha=*/0,
+                                        /*last_alpha=*/0,
+                                        /*alpha_momentum=*/0});
+  return package;
+}
+
+mcpd3::PartitionPackage makeFullArcCapacityPackage(int partition_id) {
+  mcpd3::PartitionPackage package;
+  package.partition_id = partition_id;
+  package.local_node_count = 2;
+  package.arcs = {0, 1};
+  package.arc_capacities = {4, 7};
+  package.terminal_capacities = {-2, 3};
+  package.local_to_global = {400, 401};
+  package.constraint_endpoints.push_back(
+      mcpd3::ConstraintEndpointBinding{/*constraint_id=*/40000,
+                                        /*global_node_id=*/400,
+                                        /*local_index=*/0,
+                                        /*is_source=*/true,
+                                        /*alpha=*/0,
+                                        /*last_alpha=*/0,
+                                        /*alpha_momentum=*/0});
+  return package;
+}
+
 std::unique_ptr<mcpd4::TcpPartitionWorker> startRemoteWorker(
     mcpd4::SocketHandle *listener, WorkerClientThread **client,
-    const std::string &worker_name) {
+    const std::string &worker_name,
+    mcpd4::TransportCompression compression =
+        mcpd4::TransportCompression::NONE) {
   const auto port = mcpd4::localPort(*listener);
   auto hello = makeHello(worker_name);
-  *client = new WorkerClientThread(port, hello);
-  return mcpd4::acceptTcpPartitionWorker(listener, 2s);
+  if (compression == mcpd4::TransportCompression::SNAPPY) {
+    hello.feature_bits |= mcpd4::kFeatureSnappyCompression;
+  }
+  *client = new WorkerClientThread(port, hello, compression);
+  return mcpd4::acceptTcpPartitionWorker(listener, 2s, compression);
 }
 
 void stopAndJoin(mcpd4::TcpPartitionWorker *worker,
@@ -168,6 +251,193 @@ void receivesFrameSplitAcrossTcpPackets() {
           "split TCP frame should decode after full receive");
 }
 
+void sendsFrameFromMultipleBuffers() {
+  auto pair = makeConnectedPair();
+  mcpd4::ReadyMessage ready;
+  ready.worker_name = "buffered";
+  const auto frame = mcpd4::encodeReady(ready);
+  const std::vector<mcpd4::ByteBufferView> buffers{
+      mcpd4::ByteBufferView{frame.data(), 3},
+      mcpd4::ByteBufferView{frame.data() + 3, 5},
+      mcpd4::ByteBufferView{frame.data() + 8, frame.size() - 8}};
+
+  mcpd4::FrameTransferStats sent;
+  mcpd4::sendFrameByteBuffers(pair.client, buffers,
+                              mcpd4::TransportCompression::NONE, &sent);
+  const auto received = mcpd4::receiveFrameBytes(pair.server);
+  const auto decoded = mcpd4::decodeReady(received);
+  require(decoded.worker_name == ready.worker_name,
+          "buffered TCP frame should decode after receive");
+  require(sent.logical_bytes == frame.size(),
+          "buffered send should report logical bytes");
+  require(sent.wire_bytes == frame.size(),
+          "buffered send should report wire bytes");
+}
+
+void remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp(
+    mcpd4::TransportCompression compression) {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  if (compression == mcpd4::TransportCompression::SNAPPY &&
+      !mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker =
+      startRemoteWorker(&listener, &client, "compact-package-worker",
+                        compression);
+  try {
+    constexpr int kBoundaryLabelCount = 128;
+    const auto package = makeManyBoundaryLabelsPackage(
+        /*partition_id=*/5, kBoundaryLabelCount);
+    const auto full_frame_size =
+        mcpd4::encodePartitionPackage(package).size();
+    worker->loadPartition(package);
+
+    const auto load_bytes =
+        worker->timingStats().rpc_bytes.partition_load_tx_bytes;
+    const auto expected_savings =
+        package.local_to_global.size() * sizeof(int) +
+        package.constraint_endpoints.size() * (sizeof(int) + sizeof(float));
+    require(load_bytes + expected_savings == full_frame_size,
+            "remote load should omit redundant package payload bytes");
+    if (compression == mcpd4::TransportCompression::SNAPPY) {
+      require(worker->timingStats()
+                  .rpc_bytes.tx_compressed_frame_count +
+                  worker->timingStats().rpc_bytes.tx_stored_frame_count >
+              0,
+              "snappy compact package load should use compression framing");
+    }
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = package.partition_id;
+    const auto result = worker->solveRound(request);
+    require(result.constrained_labels.size() ==
+                static_cast<size_t>(kBoundaryLabelCount),
+            "compact package load should preserve boundary labels");
+    bool saw_first_constraint_id = false;
+    for (const auto &label : result.constrained_labels) {
+      if (label.constraint_id == 20000) {
+        saw_first_constraint_id = true;
+        break;
+      }
+    }
+    require(saw_first_constraint_id,
+            "compact package load should preserve endpoint constraint ids");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
+void remoteWorkerLoadPartitionCompactsDirectedArcCapacitiesOverTcp(
+    mcpd4::TransportCompression compression) {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  if (compression == mcpd4::TransportCompression::SNAPPY &&
+      !mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker =
+      startRemoteWorker(&listener, &client, "compact-directed-worker",
+                        compression);
+  try {
+    const auto package = makeDirectedCapacityPackage(/*partition_id=*/6);
+    const auto full_frame_size =
+        mcpd4::encodePartitionPackage(package).size();
+    worker->loadPartition(package);
+
+    const auto load_bytes =
+        worker->timingStats().rpc_bytes.partition_load_tx_bytes;
+    const auto expected_savings =
+        package.local_to_global.size() * sizeof(int) +
+        package.constraint_endpoints.size() * (sizeof(int) + sizeof(float)) +
+        (package.arc_capacities.size() / 2) * sizeof(int);
+    require(load_bytes + expected_savings == full_frame_size,
+            "remote directed load should omit implicit reverse capacities");
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = package.partition_id;
+    mcpd3::InProcessPartitionWorker reference;
+    reference.loadPartition(package);
+    const auto expected = reference.solveRound(request);
+    const auto result = worker->solveRound(request);
+    require(result.lower_bound == expected.lower_bound,
+            "directed compact package load should preserve objective value");
+    require(result.constrained_labels.size() == 1,
+            "directed compact package load should preserve endpoint labels");
+    require(result.constrained_labels[0].constraint_id == 30000,
+            "directed compact package load should preserve constraint id");
+    require(result.constrained_labels[0].label ==
+                expected.constrained_labels[0].label,
+            "directed compact package load should preserve endpoint label");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
+void remoteWorkerLoadPartitionKeepsFullArcCapacitiesOverTcp(
+    mcpd4::TransportCompression compression) {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  if (compression == mcpd4::TransportCompression::SNAPPY &&
+      !mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker =
+      startRemoteWorker(&listener, &client, "full-capacity-worker",
+                        compression);
+  try {
+    const auto package = makeFullArcCapacityPackage(/*partition_id=*/7);
+    const auto full_frame_size =
+        mcpd4::encodePartitionPackage(package).size();
+    worker->loadPartition(package);
+
+    const auto load_bytes =
+        worker->timingStats().rpc_bytes.partition_load_tx_bytes;
+    const auto expected_savings =
+        package.local_to_global.size() * sizeof(int) +
+        package.constraint_endpoints.size() * (sizeof(int) + sizeof(float));
+    require(load_bytes + expected_savings == full_frame_size,
+            "remote full-capacity load should not compact nonzero reverse "
+            "capacities");
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = package.partition_id;
+    mcpd3::InProcessPartitionWorker reference;
+    reference.loadPartition(package);
+    const auto expected = reference.solveRound(request);
+    const auto result = worker->solveRound(request);
+    require(result.lower_bound == expected.lower_bound,
+            "full-capacity package load should preserve objective value");
+    require(result.constrained_labels.size() == 1,
+            "full-capacity package load should preserve endpoint labels");
+    require(result.constrained_labels[0].constraint_id == 40000,
+            "full-capacity package load should preserve constraint id");
+    require(result.constrained_labels[0].label ==
+                expected.constrained_labels[0].label,
+            "full-capacity package load should preserve endpoint label");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
 void rejectsOversizedPayloadBeforeReadingBody() {
   auto pair = makeConnectedPair();
   const std::vector<std::uint8_t> payload{1, 2, 3, 4};
@@ -177,6 +447,117 @@ void rejectsOversizedPayloadBeforeReadingBody() {
   requireThrows(
       [&] { (void)mcpd4::receiveFrameBytes(pair.server, 3); },
       "oversized TCP frame should be rejected");
+}
+
+void rejectsOversizedPayloadBeforeWritingBody() {
+  auto pair = makeConnectedPair();
+  const std::vector<std::uint8_t> payload{1, 2, 3, 4};
+  const auto frame = mcpd4::encodeFrame(
+      mcpd4::MessageType::READY, payload);
+  requireThrows(
+      [&] {
+        mcpd4::sendFrameBytes(pair.client, frame,
+                              mcpd4::TransportCompression::NONE, nullptr,
+                              frame.size() - 1);
+      },
+      "oversized TCP frame should be rejected before send");
+}
+
+void rejectsUnknownMessageTypeOnReceiveWithoutCompression() {
+  auto pair = makeConnectedPair();
+  const std::vector<std::uint8_t> frame{
+      0xe7, 0x03, 0x00, 0x00, // message type 999
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00};
+  sendRawAll(pair.client.get(), frame.data(), frame.size());
+
+  requireThrowsContaining(
+      [&] { (void)mcpd4::receiveFrameBytes(pair.server); },
+      "unknown message type",
+      "receiveFrameBytes should validate uncompressed frame type");
+}
+
+void defaultFrameLimitCoversObservedLargeAdheadP16Package() {
+  constexpr std::size_t kLargestObservedP16PackageFrame =
+      358612992ULL + 12ULL;
+  require(mcpd4::kDefaultMaxFrameBytes >=
+              kLargestObservedP16PackageFrame,
+          "default frame limit should cover the observed p16 adhead package");
+}
+
+void rejectsOversizedSnappyLogicalFrameBeforeReadingBody() {
+  if (!mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto pair = makeConnectedPair();
+  mcpd4::ReadyMessage ready;
+  ready.worker_name = std::string(1024, 'a');
+  const auto frame = mcpd4::encodeReady(ready);
+
+  mcpd4::sendFrameBytes(pair.client, frame,
+                        mcpd4::TransportCompression::SNAPPY);
+  requireThrows(
+      [&] {
+        (void)mcpd4::receiveFrameBytes(
+            pair.server, frame.size() - 1,
+            mcpd4::TransportCompression::SNAPPY);
+      },
+      "oversized snappy logical frame should be rejected");
+}
+
+void rejectsUnknownMessageTypeOnSnappyReceive() {
+  if (!mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto pair = makeConnectedPair();
+  const std::vector<std::uint8_t> frame{
+      0xe7, 0x03, 0x00, 0x00, // message type 999
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00};
+  mcpd4::sendFrameBytes(pair.client, frame,
+                        mcpd4::TransportCompression::SNAPPY);
+
+  requireThrowsContaining(
+      [&] {
+        (void)mcpd4::receiveFrameBytes(
+            pair.server, mcpd4::kDefaultMaxFrameBytes,
+            mcpd4::TransportCompression::SNAPPY);
+      },
+      "unknown message type",
+      "receiveFrameBytes should validate snappy frame type");
+}
+
+void snappyCompressedFrameRoundTrips() {
+  if (!mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto pair = makeConnectedPair();
+  mcpd4::ReadyMessage ready;
+  ready.worker_name = std::string(1024 * 1024, 'a');
+  const auto frame = mcpd4::encodeReady(ready);
+
+  mcpd4::FrameTransferStats sent;
+  mcpd4::sendFrameBytes(pair.client, frame,
+                        mcpd4::TransportCompression::SNAPPY, &sent);
+  mcpd4::FrameTransferStats received;
+  const auto decoded_frame = mcpd4::receiveFrameBytes(
+      pair.server, 2ULL * 1024ULL * 1024ULL,
+      mcpd4::TransportCompression::SNAPPY, &received);
+  const auto decoded = mcpd4::decodeReady(decoded_frame);
+  require(decoded.worker_name == ready.worker_name,
+          "snappy transport frame should decode after round trip");
+  require(sent.logical_bytes == frame.size(),
+          "snappy send stats should preserve logical frame size");
+  require(received.logical_bytes == frame.size(),
+          "snappy receive stats should preserve logical frame size");
+  require(sent.compression_requested && received.compression_requested,
+          "snappy transfer stats should record compression mode");
+  require(sent.compressed && received.compressed,
+          "compressible frame should use snappy payload");
+  require(sent.wire_bytes < sent.logical_bytes,
+          "compressible frame should use fewer wire bytes than logical bytes");
+  require(received.wire_bytes == sent.wire_bytes,
+          "receiver should report the same compressed wire byte count");
 }
 
 void rejectsInvalidWorkerHello() {
@@ -235,6 +616,29 @@ void remoteWorkerReportsErrorsAsExceptions() {
   }
 }
 
+void loadPartitionDisconnectReportsWorkerAndPartitionContext() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  const auto port = mcpd4::localPort(listener);
+  std::thread client([&] {
+    auto socket = mcpd4::connectTcp("127.0.0.1", port);
+    mcpd4::sendFrameBytes(socket,
+                          mcpd4::encodeHello(makeHello("closing-worker")));
+  });
+  auto worker = mcpd4::acceptTcpPartitionWorker(&listener, 2s);
+  client.join();
+
+  mcpd3::PartitionPackage package;
+  package.partition_id = 42;
+  package.local_node_count = 1;
+  package.terminal_capacities = {0};
+  package.local_to_global = {7};
+
+  requireThrowsContaining(
+      [&] { worker->loadPartition(package); },
+      "worker closing-worker failed loading partition 42",
+      "load partition disconnect should include worker and partition context");
+}
+
 void remoteWorkerScalesLoadedObjective() {
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
@@ -275,9 +679,52 @@ void remoteWorkerScalesLoadedObjective() {
             "direct single solve should not count as a batch RPC");
     require(stats.scale_objective_rpc_count == 1,
             "remote timing should count objective scaling");
+    require(stats.rpc_bytes.hello_rx_bytes > 0,
+            "remote telemetry should count worker hello bytes");
+    require(stats.rpc_bytes.partition_load_tx_bytes > 0,
+            "remote telemetry should count partition load bytes");
+    require(stats.rpc_bytes.solve_request_tx_bytes > 0,
+            "remote telemetry should count solve request bytes");
+    require(stats.rpc_bytes.solve_result_rx_bytes > 0,
+            "remote telemetry should count solve result bytes");
+    require(stats.rpc_bytes.scale_objective_tx_bytes > 0,
+            "remote telemetry should count objective scaling bytes");
+    require(stats.rpc_bytes.tx_bytes_total >
+                stats.rpc_bytes.partition_load_tx_bytes,
+            "remote telemetry should aggregate transmitted bytes");
+    require(stats.rpc_bytes.rx_bytes_total >
+                stats.rpc_bytes.solve_result_rx_bytes,
+            "remote telemetry should aggregate received bytes");
     require(stats.solve_round_rpc_wall_us >=
                 stats.solve_round_worker_wall_us,
             "remote timing should split RPC and worker solve time");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
+void remoteWorkerSaturatesScaleObjectiveOverflow() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(&listener, &client, "scale-saturate-worker");
+  try {
+    mcpd3::PartitionPackage package;
+    package.partition_id = 0;
+    package.local_node_count = 1;
+    package.terminal_capacities = {
+        std::numeric_limits<int>::max() / 2 + 1};
+    package.local_to_global = {5};
+    worker->loadPartition(package);
+
+    worker->scaleObjective(2, /*saturate_capacity_overflow=*/true);
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = 0;
+    (void)worker->solveRound(request);
+    require(worker->timingStats().scale_objective_rpc_count == 1,
+            "saturated remote scale should count objective scaling");
     stopAndJoin(worker.get(), client);
   } catch (...) {
     stopAndJoin(worker.get(), client);
@@ -314,9 +761,112 @@ void remoteWorkerSolvesExplicitBatch() {
             "remote batch timing should count partition solve calls");
     require(worker->timingStats().solve_batch_rpc_count == 1,
             "remote batch timing should count batch RPCs");
+    require(worker->timingStats().rpc_bytes.solve_request_tx_bytes > 0,
+            "remote batch telemetry should count request bytes");
+    require(worker->timingStats().rpc_bytes.solve_result_rx_bytes > 0,
+            "remote batch telemetry should count result bytes");
     require(worker->timingStats().solve_round_rpc_wall_us >=
                 worker->timingStats().solve_round_worker_wall_us,
             "remote batch timing should split RPC and worker solve time");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
+void remoteWorkerDeltaEncodingReducesRepeatedSolveBytes() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(&listener, &client, "delta-worker");
+  try {
+    constexpr int kBoundaryLabelCount = 128;
+    const auto package =
+        makeManyBoundaryLabelsPackage(/*partition_id=*/5, kBoundaryLabelCount);
+    worker->loadPartition(package);
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = package.partition_id;
+    request.scale = 1000;
+    request.regularization_strength = 0;
+    request.alpha_updates.reserve(package.constraint_endpoints.size());
+    for (const auto &endpoint : package.constraint_endpoints) {
+      request.alpha_updates.push_back(mcpd3::AlphaUpdate{
+          /*constraint_id=*/endpoint.constraint_id,
+          /*alpha=*/1,
+          /*last_alpha=*/0,
+          /*alpha_momentum=*/0});
+    }
+
+    const auto before = worker->timingStats().rpc_bytes;
+    const auto first = worker->solveRound(request);
+    const auto after_first = worker->timingStats().rpc_bytes;
+    request.round_id = 2;
+    const auto second = worker->solveRound(request);
+    const auto after_second = worker->timingStats().rpc_bytes;
+
+    require(first.constrained_labels.size() == kBoundaryLabelCount,
+            "first delta loopback solve should return all labels");
+    require(second.constrained_labels.size() == kBoundaryLabelCount,
+            "second delta loopback solve should reconstruct all labels");
+    for (int i = 0; i < kBoundaryLabelCount; ++i) {
+      require(first.constrained_labels[i].constraint_id ==
+                  second.constrained_labels[i].constraint_id,
+              "delta loopback should preserve label order");
+      require(first.constrained_labels[i].label ==
+                  second.constrained_labels[i].label,
+              "delta loopback should preserve label values");
+    }
+
+    const auto first_request_bytes =
+        after_first.solve_request_tx_bytes - before.solve_request_tx_bytes;
+    const auto second_request_bytes = after_second.solve_request_tx_bytes -
+                                      after_first.solve_request_tx_bytes;
+    const auto first_result_bytes =
+        after_first.solve_result_rx_bytes - before.solve_result_rx_bytes;
+    const auto second_result_bytes = after_second.solve_result_rx_bytes -
+                                     after_first.solve_result_rx_bytes;
+    require(second_request_bytes * 2 < first_request_bytes,
+            "repeated solve request should omit unchanged alpha payload");
+    require(second_result_bytes * 2 < first_result_bytes,
+            "repeated solve result should omit unchanged label payload");
+
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
+void remoteWorkerUsesSnappyCompression() {
+  if (!mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(&listener, &client, "snappy-worker",
+                                  mcpd4::TransportCompression::SNAPPY);
+  try {
+    mcpd3::PartitionPackage package;
+    package.partition_id = 0;
+    package.local_node_count = 8192;
+    package.terminal_capacities.assign(package.local_node_count, 0);
+    package.local_to_global.reserve(package.local_node_count);
+    for (int i = 0; i < package.local_node_count; ++i) {
+      package.local_to_global.push_back(i);
+    }
+
+    worker->loadPartition(package);
+    const auto &bytes = worker->timingStats().rpc_bytes;
+    require(bytes.partition_load_tx_bytes > 0,
+            "snappy worker test should send a partition package");
+    require(bytes.tx_wire_bytes_total > 0,
+            "snappy worker test should record wire bytes");
+    require(bytes.tx_compressed_frame_count > 0,
+            "large package should be transmitted as a compressed frame");
+    require(bytes.tx_wire_bytes_total < bytes.tx_bytes_total,
+            "compressed remote load should reduce coordinator wire bytes");
     stopAndJoin(worker.get(), client);
   } catch (...) {
     stopAndJoin(worker.get(), client);
@@ -427,12 +977,35 @@ void remoteWorkerCoordinatorPromotesObjectiveScale() {
 int main() {
   try {
     receivesFrameSplitAcrossTcpPackets();
+    sendsFrameFromMultipleBuffers();
+    remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp(
+        mcpd4::TransportCompression::NONE);
+    remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp(
+        mcpd4::TransportCompression::SNAPPY);
+    remoteWorkerLoadPartitionCompactsDirectedArcCapacitiesOverTcp(
+        mcpd4::TransportCompression::NONE);
+    remoteWorkerLoadPartitionCompactsDirectedArcCapacitiesOverTcp(
+        mcpd4::TransportCompression::SNAPPY);
+    remoteWorkerLoadPartitionKeepsFullArcCapacitiesOverTcp(
+        mcpd4::TransportCompression::NONE);
+    remoteWorkerLoadPartitionKeepsFullArcCapacitiesOverTcp(
+        mcpd4::TransportCompression::SNAPPY);
     rejectsOversizedPayloadBeforeReadingBody();
+    rejectsOversizedPayloadBeforeWritingBody();
+    rejectsUnknownMessageTypeOnReceiveWithoutCompression();
+    defaultFrameLimitCoversObservedLargeAdheadP16Package();
+    rejectsOversizedSnappyLogicalFrameBeforeReadingBody();
+    rejectsUnknownMessageTypeOnSnappyReceive();
+    snappyCompressedFrameRoundTrips();
     rejectsInvalidWorkerHello();
     remoteWorkerExposesHandshakeResources();
     remoteWorkerReportsErrorsAsExceptions();
+    loadPartitionDisconnectReportsWorkerAndPartitionContext();
     remoteWorkerScalesLoadedObjective();
+    remoteWorkerSaturatesScaleObjectiveOverflow();
     remoteWorkerSolvesExplicitBatch();
+    remoteWorkerDeltaEncodingReducesRepeatedSolveBytes();
+    remoteWorkerUsesSnappyCompression();
     remoteWorkerCoordinatorSolvesRegularizedAgreement();
     remoteWorkerCoordinatorPromotesObjectiveScale();
   } catch (const std::exception &e) {

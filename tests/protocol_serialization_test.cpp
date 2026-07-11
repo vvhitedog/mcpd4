@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <mcpd4/delta_codec.h>
 #include <mcpd4/protocol.h>
 
 namespace {
@@ -36,6 +37,17 @@ void requireAlphaUpdateEqual(const mcpd3::AlphaUpdate &lhs,
           "alpha update momentum mismatch");
 }
 
+void requireCompactAlphaUpdateEqual(const mcpd3::AlphaUpdate &lhs,
+                                    const mcpd3::AlphaUpdate &rhs) {
+  require(lhs.constraint_id == rhs.constraint_id,
+          "alpha update constraint id mismatch");
+  require(lhs.alpha == rhs.alpha, "alpha update alpha mismatch");
+  require(lhs.last_alpha == 0,
+          "compact alpha update should omit last alpha");
+  require(lhs.alpha_momentum == 0,
+          "compact alpha update should omit momentum");
+}
+
 void requireEndpointEqual(const mcpd3::ConstraintEndpointBinding &lhs,
                           const mcpd3::ConstraintEndpointBinding &rhs) {
   require(lhs.constraint_id == rhs.constraint_id,
@@ -59,6 +71,16 @@ void requireLabelEqual(const mcpd3::ConstraintLabel &lhs,
   require(lhs.label == rhs.label, "label value mismatch");
 }
 
+void requireCompactLabelEqual(const mcpd3::ConstraintLabel &lhs,
+                              const mcpd3::ConstraintLabel &rhs) {
+  require(lhs.constraint_id == rhs.constraint_id, "label constraint mismatch");
+  require(lhs.global_node_id == -1,
+          "compact result label should omit global node metadata");
+  require(lhs.local_index == -1,
+          "compact result label should omit local index metadata");
+  require(lhs.label == rhs.label, "label value mismatch");
+}
+
 void requirePackageEqual(const mcpd3::PartitionPackage &lhs,
                          const mcpd3::PartitionPackage &rhs) {
   require(lhs.partition_id == rhs.partition_id, "package partition mismatch");
@@ -77,6 +99,18 @@ void requirePackageEqual(const mcpd3::PartitionPackage &lhs,
     requireEndpointEqual(lhs.constraint_endpoints[i],
                          rhs.constraint_endpoints[i]);
   }
+}
+
+std::vector<std::uint8_t> joinBuffers(
+    const std::vector<mcpd4::ByteBufferView> &buffers) {
+  std::vector<std::uint8_t> joined;
+  for (const auto &buffer : buffers) {
+    if (buffer.size == 0) {
+      continue;
+    }
+    joined.insert(joined.end(), buffer.data, buffer.data + buffer.size);
+  }
+  return joined;
 }
 
 mcpd3::PartitionPackage makePackage() {
@@ -106,6 +140,12 @@ mcpd3::PartitionPackage makePackage() {
   return package;
 }
 
+mcpd3::PartitionPackage makeDirectedPackage() {
+  auto package = makePackage();
+  package.arc_capacities = {3, 0, 0, 11};
+  return package;
+}
+
 void frameHeaderIsLittleEndian() {
   const std::vector<std::uint8_t> payload{0xaa, 0xbb};
   const auto frame = mcpd4::encodeFrame(
@@ -118,6 +158,9 @@ void frameHeaderIsLittleEndian() {
               frame[8] == 0 && frame[9] == 0 && frame[10] == 0 &&
               frame[11] == 0,
           "payload length should be little-endian uint64");
+  require(mcpd4::decodeFrameType(frame) ==
+              mcpd4::MessageType::PARTITION_PACKAGE,
+          "frame type peek mismatch");
 
   const auto decoded = mcpd4::decodeFrame(frame);
   require(decoded.type == mcpd4::MessageType::PARTITION_PACKAGE,
@@ -155,9 +198,79 @@ void roundTripsHello() {
 
 void roundTripsPartitionPackage() {
   const auto message = makePackage();
-  const auto decoded = mcpd4::decodePartitionPackage(
-      mcpd4::encodePartitionPackage(message));
+  const auto encoded = mcpd4::encodePartitionPackage(message);
+  require(encoded.size() == 162,
+          "partition package wire size should remain unchanged");
+  const auto decoded = mcpd4::decodePartitionPackage(encoded);
   requirePackageEqual(decoded, message);
+}
+
+void partitionPackageFrameBuffersMatchEncodedPackage() {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  const auto message = makePackage();
+  const auto encoded = mcpd4::encodePartitionPackage(message);
+  const mcpd4::PartitionPackageFrameBuffers buffers(message);
+  require(buffers.totalSize() == encoded.size(),
+          "partition package buffer size mismatch");
+  require(joinBuffers(buffers.buffers()) == encoded,
+          "partition package buffer wire bytes mismatch");
+}
+
+void workerLoadPartitionPackageFrameBuffersOmitLocalToGlobal() {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  const auto message = makePackage();
+  const auto encoded = mcpd4::encodePartitionPackage(message);
+  const mcpd4::PartitionPackageFrameBuffers buffers(
+      message, mcpd4::PartitionPackageFrameBuffers::Mode::WORKER_LOAD);
+  const auto compact = joinBuffers(buffers.buffers());
+  const auto expected_savings =
+      message.local_to_global.size() * sizeof(int) +
+      message.constraint_endpoints.size() * (sizeof(int) + sizeof(float));
+  require(compact.size() + expected_savings == encoded.size(),
+          "worker-load package should omit redundant bytes");
+  require(buffers.totalSize() == compact.size(),
+          "worker-load package buffer size mismatch");
+
+  auto expected = message;
+  expected.local_to_global.clear();
+  for (auto &endpoint : expected.constraint_endpoints) {
+    endpoint.global_node_id = -1;
+    endpoint.alpha_momentum = 0;
+  }
+  const auto decoded = mcpd4::decodePartitionPackage(compact);
+  requirePackageEqual(decoded, expected);
+}
+
+void workerLoadPartitionPackageFrameBuffersCompactDirectedArcCapacities() {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  const auto message = makeDirectedPackage();
+  const auto encoded = mcpd4::encodePartitionPackage(message);
+  const mcpd4::PartitionPackageFrameBuffers buffers(
+      message, mcpd4::PartitionPackageFrameBuffers::Mode::WORKER_LOAD);
+  const auto compact = joinBuffers(buffers.buffers());
+  const auto expected_savings =
+      message.local_to_global.size() * sizeof(int) +
+      message.constraint_endpoints.size() * (sizeof(int) + sizeof(float)) +
+      (message.arc_capacities.size() / 2) * sizeof(int);
+  require(compact.size() + expected_savings == encoded.size(),
+          "directed worker-load package should omit implicit reverse caps");
+  require(buffers.totalSize() == compact.size(),
+          "directed worker-load package buffer size mismatch");
+
+  auto expected = message;
+  expected.local_to_global.clear();
+  for (auto &endpoint : expected.constraint_endpoints) {
+    endpoint.global_node_id = -1;
+    endpoint.alpha_momentum = 0;
+  }
+  const auto decoded = mcpd4::decodePartitionPackage(compact);
+  requirePackageEqual(decoded, expected);
 }
 
 void roundTripsReady() {
@@ -185,8 +298,10 @@ void roundTripsSolveRoundRequest() {
                           /*last_alpha=*/-6,
                           /*alpha_momentum=*/-1.5f});
 
-  const auto decoded = mcpd4::decodeSolveRoundRequest(
-      mcpd4::encodeSolveRoundRequest(message));
+  const auto encoded = mcpd4::encodeSolveRoundRequest(message);
+  require(encoded.size() == 64,
+          "solve request should use compact 12-byte alpha updates");
+  const auto decoded = mcpd4::decodeSolveRoundRequest(encoded);
   require(decoded.round_id == message.round_id, "request round mismatch");
   require(decoded.partition_id == message.partition_id,
           "request partition mismatch");
@@ -196,7 +311,8 @@ void roundTripsSolveRoundRequest() {
   require(decoded.alpha_updates.size() == message.alpha_updates.size(),
           "request alpha count mismatch");
   for (size_t i = 0; i < message.alpha_updates.size(); ++i) {
-    requireAlphaUpdateEqual(decoded.alpha_updates[i], message.alpha_updates[i]);
+    requireCompactAlphaUpdateEqual(decoded.alpha_updates[i],
+                                   message.alpha_updates[i]);
   }
 }
 
@@ -224,8 +340,10 @@ void roundTripsSolveRoundBatchRequest() {
                           /*alpha_momentum=*/-1.5f});
 
   const std::vector<mcpd3::PartitionSolveRequest> messages{first, second};
-  const auto decoded = mcpd4::decodeSolveRoundBatchRequest(
-      mcpd4::encodeSolveRoundBatchRequest(messages));
+  const auto encoded = mcpd4::encodeSolveRoundBatchRequest(messages);
+  require(encoded.size() == 96,
+          "batch request should use compact 12-byte alpha updates");
+  const auto decoded = mcpd4::decodeSolveRoundBatchRequest(encoded);
 
   require(decoded.size() == messages.size(),
           "batch request count mismatch");
@@ -243,8 +361,8 @@ void roundTripsSolveRoundBatchRequest() {
                 messages[i].alpha_updates.size(),
             "batch request alpha count mismatch");
     for (size_t j = 0; j < messages[i].alpha_updates.size(); ++j) {
-      requireAlphaUpdateEqual(decoded[i].alpha_updates[j],
-                              messages[i].alpha_updates[j]);
+      requireCompactAlphaUpdateEqual(decoded[i].alpha_updates[j],
+                                     messages[i].alpha_updates[j]);
     }
   }
 }
@@ -269,8 +387,10 @@ void roundTripsSolveRoundResult() {
                               /*local_index=*/2,
                               /*label=*/1});
 
-  const auto decoded = mcpd4::decodeSolveRoundResult(
-      mcpd4::encodeSolveRoundResult(message));
+  const auto encoded = mcpd4::encodeSolveRoundResult(message);
+  require(encoded.size() == 92,
+          "solve result should use compact 8-byte constrained labels");
+  const auto decoded = mcpd4::decodeSolveRoundResult(encoded);
   require(decoded.round_id == message.round_id, "result round mismatch");
   require(decoded.partition_id == message.partition_id,
           "result partition mismatch");
@@ -291,8 +411,8 @@ void roundTripsSolveRoundResult() {
               message.constrained_labels.size(),
           "result label count mismatch");
   for (size_t i = 0; i < message.constrained_labels.size(); ++i) {
-    requireLabelEqual(decoded.constrained_labels[i],
-                      message.constrained_labels[i]);
+    requireCompactLabelEqual(decoded.constrained_labels[i],
+                             message.constrained_labels[i]);
   }
 
   const auto decoded_default_timing =
@@ -340,8 +460,10 @@ void roundTripsSolveRoundBatchResult() {
                               /*label=*/1});
 
   const std::vector<mcpd3::PartitionSolveResult> messages{first, second};
-  const auto decoded = mcpd4::decodeSolveRoundBatchResult(
-      mcpd4::encodeSolveRoundBatchResult(messages));
+  const auto encoded = mcpd4::encodeSolveRoundBatchResult(messages);
+  require(encoded.size() == 152,
+          "batch result should use compact 8-byte constrained labels");
+  const auto decoded = mcpd4::decodeSolveRoundBatchResult(encoded);
   require(decoded.size() == messages.size(), "batch result count mismatch");
   for (size_t i = 0; i < messages.size(); ++i) {
     require(decoded[i].round_id == messages[i].round_id,
@@ -366,8 +488,8 @@ void roundTripsSolveRoundBatchResult() {
                 messages[i].constrained_labels.size(),
             "batch result label count mismatch");
     for (size_t j = 0; j < messages[i].constrained_labels.size(); ++j) {
-      requireLabelEqual(decoded[i].constrained_labels[j],
-                        messages[i].constrained_labels[j]);
+      requireCompactLabelEqual(decoded[i].constrained_labels[j],
+                               messages[i].constrained_labels[j]);
     }
   }
 
@@ -389,12 +511,263 @@ void roundTripsSolveRoundBatchResult() {
           "timed batch worker solve timing mismatch");
 }
 
+void deltaSolveRoundRequestTracksTemporalAlphaState() {
+  mcpd4::TemporalSolveCodecState encoder;
+  mcpd4::TemporalSolveCodecState decoder;
+
+  mcpd3::PartitionSolveRequest first;
+  first.round_id = 1;
+  first.partition_id = 4;
+  first.scale = 1000;
+  first.regularization_strength = 10;
+  first.alpha_updates.push_back(mcpd3::AlphaUpdate{
+      /*constraint_id=*/10, /*alpha=*/100, /*last_alpha=*/0,
+      /*alpha_momentum=*/0});
+  first.alpha_updates.push_back(mcpd3::AlphaUpdate{
+      /*constraint_id=*/11, /*alpha=*/-5, /*last_alpha=*/0,
+      /*alpha_momentum=*/0});
+
+  const auto first_encoded =
+      mcpd4::encodeDeltaSolveRoundRequest(first, &encoder);
+  const auto first_decoded =
+      mcpd4::decodeDeltaSolveRoundRequest(first_encoded, &decoder);
+  require(first_decoded.alpha_updates.size() == 2,
+          "first delta request should fully sync alpha values");
+  requireCompactAlphaUpdateEqual(first_decoded.alpha_updates[0],
+                                 first.alpha_updates[0]);
+  requireCompactAlphaUpdateEqual(first_decoded.alpha_updates[1],
+                                 first.alpha_updates[1]);
+
+  auto unchanged = first;
+  unchanged.round_id = 2;
+  const auto unchanged_encoded =
+      mcpd4::encodeDeltaSolveRoundRequest(unchanged, &encoder);
+  const auto unchanged_decoded =
+      mcpd4::decodeDeltaSolveRoundRequest(unchanged_encoded, &decoder);
+  require(unchanged_decoded.alpha_updates.empty(),
+          "unchanged alpha values should be omitted from delta request");
+  require(unchanged_encoded.size() < first_encoded.size(),
+          "unchanged delta request should be smaller than first sync");
+
+  auto changed = first;
+  changed.round_id = 3;
+  changed.alpha_updates[0].alpha = 103;
+  changed.alpha_updates[1].alpha = -9;
+  const auto changed_encoded =
+      mcpd4::encodeDeltaSolveRoundRequest(changed, &encoder);
+  const auto changed_decoded =
+      mcpd4::decodeDeltaSolveRoundRequest(changed_encoded, &decoder);
+  require(changed_decoded.alpha_updates.size() == 2,
+          "changed alpha values should be transmitted");
+  requireCompactAlphaUpdateEqual(changed_decoded.alpha_updates[0],
+                                 changed.alpha_updates[0]);
+  requireCompactAlphaUpdateEqual(changed_decoded.alpha_updates[1],
+                                 changed.alpha_updates[1]);
+  require(changed_encoded.size() <
+              mcpd4::encodeSolveRoundRequest(changed).size(),
+          "small temporal alpha deltas should beat stateless alpha encoding");
+
+  encoder.resetPartition(first.partition_id);
+  decoder.resetPartition(first.partition_id);
+  auto after_reset = changed;
+  after_reset.round_id = 4;
+  const auto reset_decoded = mcpd4::decodeDeltaSolveRoundRequest(
+      mcpd4::encodeDeltaSolveRoundRequest(after_reset, &encoder), &decoder);
+  require(reset_decoded.alpha_updates.size() == 2,
+          "reset partition state should force a fresh alpha sync");
+  requireCompactAlphaUpdateEqual(reset_decoded.alpha_updates[0],
+                                 after_reset.alpha_updates[0]);
+  requireCompactAlphaUpdateEqual(reset_decoded.alpha_updates[1],
+                                 after_reset.alpha_updates[1]);
+}
+
+void deltaSolveRoundBatchRequestKeepsPartitionStateSeparate() {
+  mcpd4::TemporalSolveCodecState encoder;
+  mcpd4::TemporalSolveCodecState decoder;
+
+  mcpd3::PartitionSolveRequest first;
+  first.round_id = 1;
+  first.partition_id = 0;
+  first.scale = 100;
+  first.alpha_updates.push_back(mcpd3::AlphaUpdate{
+      /*constraint_id=*/7, /*alpha=*/10, /*last_alpha=*/0,
+      /*alpha_momentum=*/0});
+
+  auto second = first;
+  second.partition_id = 1;
+  second.alpha_updates[0].alpha = -10;
+
+  const std::vector<mcpd3::PartitionSolveRequest> batch{first, second};
+  const auto decoded_first = mcpd4::decodeDeltaSolveRoundBatchRequest(
+      mcpd4::encodeDeltaSolveRoundBatchRequest(batch, &encoder), &decoder);
+  require(decoded_first.size() == 2,
+          "delta batch request should preserve request count");
+  require(decoded_first[0].alpha_updates[0].alpha == 10,
+          "first partition alpha should decode from its own state");
+  require(decoded_first[1].alpha_updates[0].alpha == -10,
+          "second partition alpha should decode from its own state");
+
+  auto changed_second = second;
+  changed_second.round_id = 2;
+  changed_second.alpha_updates[0].alpha = -7;
+  const std::vector<mcpd3::PartitionSolveRequest> changed_batch{
+      first, changed_second};
+  const auto changed_encoded =
+      mcpd4::encodeDeltaSolveRoundBatchRequest(changed_batch, &encoder);
+  const auto changed_decoded =
+      mcpd4::decodeDeltaSolveRoundBatchRequest(changed_encoded, &decoder);
+  require(changed_decoded[0].alpha_updates.empty(),
+          "unchanged partition in batch should not resend alpha");
+  require(changed_decoded[1].alpha_updates.size() == 1,
+          "changed partition in batch should send only its alpha delta");
+  require(changed_decoded[1].alpha_updates[0].alpha == -7,
+          "changed partition alpha should reconstruct from its own baseline");
+}
+
+void deltaSolveRoundResultReconstructsFullLabels() {
+  mcpd4::TemporalSolveCodecState encoder;
+  mcpd4::TemporalSolveCodecState decoder;
+
+  mcpd3::PartitionSolveResult first;
+  first.round_id = 10;
+  first.partition_id = 3;
+  first.lower_bound = 99;
+  first.regularization_budget = 7;
+  first.regularization_contribution = 5;
+  first.regularization_anchor_sink_count = 2;
+  first.regularization_active_sink_count = 1;
+  first.constrained_labels.push_back(
+      mcpd3::ConstraintLabel{/*constraint_id=*/20,
+                              /*global_node_id=*/100,
+                              /*local_index=*/0,
+                              /*label=*/0});
+  first.constrained_labels.push_back(
+      mcpd3::ConstraintLabel{/*constraint_id=*/21,
+                              /*global_node_id=*/101,
+                              /*local_index=*/1,
+                              /*label=*/1});
+
+  const auto first_encoded =
+      mcpd4::encodeDeltaSolveRoundResultWithTiming(
+          first, /*worker_solve_wall_us=*/42, &encoder);
+  const auto first_decoded =
+      mcpd4::decodeDeltaTimedSolveRoundResult(first_encoded, &decoder);
+  require(first_decoded.worker_solve_wall_us == 42,
+          "delta result should preserve worker timing");
+  require(first_decoded.result.constrained_labels.size() == 2,
+          "first delta result should fully sync labels");
+  requireCompactLabelEqual(first_decoded.result.constrained_labels[0],
+                           first.constrained_labels[0]);
+  requireCompactLabelEqual(first_decoded.result.constrained_labels[1],
+                           first.constrained_labels[1]);
+
+  auto unchanged = first;
+  unchanged.round_id = 11;
+  unchanged.lower_bound = 100;
+  const auto unchanged_encoded =
+      mcpd4::encodeDeltaSolveRoundResultWithTiming(
+          unchanged, /*worker_solve_wall_us=*/43, &encoder);
+  const auto unchanged_decoded =
+      mcpd4::decodeDeltaTimedSolveRoundResult(unchanged_encoded, &decoder);
+  require(unchanged_decoded.result.constrained_labels.size() == 2,
+          "unchanged label delta should reconstruct full label list");
+  requireCompactLabelEqual(unchanged_decoded.result.constrained_labels[0],
+                           unchanged.constrained_labels[0]);
+  requireCompactLabelEqual(unchanged_decoded.result.constrained_labels[1],
+                           unchanged.constrained_labels[1]);
+  require(unchanged_encoded.size() < first_encoded.size(),
+          "unchanged delta result should be smaller than first sync");
+
+  auto changed = first;
+  changed.round_id = 12;
+  changed.constrained_labels[0].label = 1;
+  const auto changed_decoded = mcpd4::decodeDeltaTimedSolveRoundResult(
+      mcpd4::encodeDeltaSolveRoundResultWithTiming(
+          changed, /*worker_solve_wall_us=*/44, &encoder),
+      &decoder);
+  require(changed_decoded.result.constrained_labels.size() == 2,
+          "changed label delta should reconstruct full label list");
+  require(changed_decoded.result.constrained_labels[0].label == 1,
+          "changed label value should be applied to reconstructed result");
+  require(changed_decoded.result.constrained_labels[1].label == 1,
+          "unchanged label value should remain in reconstructed result");
+
+  auto replaced_id = changed;
+  replaced_id.round_id = 13;
+  replaced_id.constrained_labels[0].constraint_id = 22;
+  replaced_id.constrained_labels[0].label = 0;
+  const auto replaced_decoded = mcpd4::decodeDeltaTimedSolveRoundResult(
+      mcpd4::encodeDeltaSolveRoundResultWithTiming(
+          replaced_id, /*worker_solve_wall_us=*/45, &encoder),
+      &decoder);
+  require(replaced_decoded.result.constrained_labels.size() == 2,
+          "same-size label id replacement should full sync exact label set");
+  require(replaced_decoded.result.constrained_labels[0].constraint_id == 22,
+          "label id replacement should not keep stale first constraint id");
+  require(replaced_decoded.result.constrained_labels[1].constraint_id == 21,
+          "label id replacement should preserve remaining constraint id");
+
+  mcpd4::TemporalSolveCodecState stale_decoder;
+  requireThrows(
+      [&] {
+        (void)mcpd4::decodeDeltaTimedSolveRoundResult(unchanged_encoded,
+                                                      &stale_decoder);
+      },
+      "label deltas should require an earlier full label sync");
+}
+
+void deltaSolveRoundBatchResultShrinksRepeatedLabels() {
+  mcpd4::TemporalSolveCodecState encoder;
+  mcpd4::TemporalSolveCodecState decoder;
+
+  mcpd3::PartitionSolveResult result;
+  result.round_id = 20;
+  result.partition_id = 6;
+  result.lower_bound = 50;
+  for (int i = 0; i < 128; ++i) {
+    result.constrained_labels.push_back(
+        mcpd3::ConstraintLabel{/*constraint_id=*/1000 + i,
+                                /*global_node_id=*/2000 + i,
+                                /*local_index=*/i,
+                                /*label=*/i % 2});
+  }
+
+  const std::vector<mcpd3::PartitionSolveResult> first_batch{result};
+  const auto first_encoded =
+      mcpd4::encodeDeltaSolveRoundBatchResultWithTiming(
+          first_batch, /*worker_solve_wall_us=*/10, &encoder);
+  const auto first_decoded =
+      mcpd4::decodeDeltaTimedSolveRoundBatchResult(first_encoded, &decoder);
+  require(first_decoded.results.size() == 1,
+          "delta batch result should preserve result count");
+  require(first_decoded.results[0].constrained_labels.size() == 128,
+          "first batch result should sync all labels");
+
+  result.round_id = 21;
+  result.lower_bound = 51;
+  const std::vector<mcpd3::PartitionSolveResult> repeated_batch{result};
+  const auto repeated_encoded =
+      mcpd4::encodeDeltaSolveRoundBatchResultWithTiming(
+          repeated_batch, /*worker_solve_wall_us=*/11, &encoder);
+  const auto repeated_decoded =
+      mcpd4::decodeDeltaTimedSolveRoundBatchResult(repeated_encoded,
+                                                   &decoder);
+  require(repeated_decoded.results[0].constrained_labels.size() == 128,
+          "repeated batch delta should reconstruct all labels");
+  require(repeated_encoded.size() * 2 < first_encoded.size(),
+          "repeated label batch should be less than half the first sync size");
+}
+
 void roundTripsScaleObjective() {
   mcpd4::ScaleObjectiveMessage message;
   message.factor = 10;
+  message.saturate_capacity_overflow = true;
   const auto decoded = mcpd4::decodeScaleObjective(
       mcpd4::encodeScaleObjective(message));
   require(decoded.factor == message.factor, "scale objective factor mismatch");
+  require(decoded.saturate_capacity_overflow ==
+              message.saturate_capacity_overflow,
+          "scale objective saturation flag mismatch");
 }
 
 void roundTripsAlphaUpdate() {
@@ -405,12 +778,15 @@ void roundTripsAlphaUpdate() {
                           /*alpha=*/7,
                           /*last_alpha=*/8,
                           /*alpha_momentum=*/2.25f});
-  const auto decoded = mcpd4::decodeAlphaUpdate(
-      mcpd4::encodeAlphaUpdate(message));
+  const auto encoded = mcpd4::encodeAlphaUpdate(message);
+  require(encoded.size() == 32,
+          "standalone alpha message should use compact 12-byte alpha updates");
+  const auto decoded = mcpd4::decodeAlphaUpdate(encoded);
   require(decoded.partition_id == message.partition_id,
           "alpha message partition mismatch");
   require(decoded.alpha_updates.size() == 1, "alpha message count mismatch");
-  requireAlphaUpdateEqual(decoded.alpha_updates[0], message.alpha_updates[0]);
+  requireCompactAlphaUpdateEqual(decoded.alpha_updates[0],
+                                 message.alpha_updates[0]);
 }
 
 void roundTripsStop() {
@@ -478,11 +854,18 @@ int main() {
     frameHeaderIsLittleEndian();
     roundTripsHello();
     roundTripsPartitionPackage();
+    partitionPackageFrameBuffersMatchEncodedPackage();
+    workerLoadPartitionPackageFrameBuffersOmitLocalToGlobal();
+    workerLoadPartitionPackageFrameBuffersCompactDirectedArcCapacities();
     roundTripsReady();
     roundTripsSolveRoundRequest();
     roundTripsSolveRoundBatchRequest();
     roundTripsSolveRoundResult();
     roundTripsSolveRoundBatchResult();
+    deltaSolveRoundRequestTracksTemporalAlphaState();
+    deltaSolveRoundBatchRequestKeepsPartitionStateSeparate();
+    deltaSolveRoundResultReconstructsFullLabels();
+    deltaSolveRoundBatchResultShrinksRepeatedLabels();
     roundTripsScaleObjective();
     roundTripsAlphaUpdate();
     roundTripsStop();

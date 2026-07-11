@@ -1,8 +1,12 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#include <mcpd4/buffer_view.h>
 
 #include <decomp/partition_worker.h>
 
@@ -44,6 +48,7 @@ struct ReadyMessage {
 
 struct ScaleObjectiveMessage {
   std::int64_t factor = 1;
+  bool saturate_capacity_overflow = false;
 };
 
 struct AlphaUpdateMessage {
@@ -74,6 +79,7 @@ struct TimedSolveRoundBatchResult {
 std::vector<std::uint8_t> encodeFrame(MessageType type,
                                       const std::vector<std::uint8_t> &payload);
 Frame decodeFrame(const std::vector<std::uint8_t> &bytes);
+MessageType decodeFrameType(const std::vector<std::uint8_t> &bytes);
 
 std::vector<std::uint8_t> encodeHello(const HelloMessage &message);
 HelloMessage decodeHello(const std::vector<std::uint8_t> &frame);
@@ -82,6 +88,37 @@ std::vector<std::uint8_t> encodePartitionPackage(
     const mcpd3::PartitionPackage &message);
 mcpd3::PartitionPackage decodePartitionPackage(
     const std::vector<std::uint8_t> &frame);
+bool partitionPackageFrameBuffersSupported();
+
+class PartitionPackageFrameBuffers {
+public:
+  enum class Mode {
+    FULL,
+    WORKER_LOAD,
+  };
+
+  explicit PartitionPackageFrameBuffers(
+      const mcpd3::PartitionPackage &message,
+      Mode mode = Mode::FULL);
+
+  std::size_t totalSize() const;
+  std::vector<ByteBufferView> buffers() const;
+
+private:
+  const mcpd3::PartitionPackage *message_ = nullptr;
+  Mode mode_ = Mode::FULL;
+  std::size_t total_size_ = 0;
+  std::array<std::uint8_t, 12> frame_header_{};
+  std::array<std::uint8_t, 8> scalar_header_{};
+  std::array<std::uint8_t, 4> arcs_size_{};
+  std::array<std::uint8_t, 4> arc_capacities_size_{};
+  std::array<std::uint8_t, 4> terminal_capacities_size_{};
+  std::array<std::uint8_t, 4> local_to_global_size_{};
+  std::array<std::uint8_t, 4> constraint_endpoints_size_{};
+  bool use_compact_arc_capacities_ = false;
+  std::vector<int> compact_arc_capacities_;
+  std::vector<std::uint8_t> constraint_endpoint_bytes_;
+};
 
 std::vector<std::uint8_t> encodeReady(const ReadyMessage &message);
 ReadyMessage decodeReady(const std::vector<std::uint8_t> &frame);
