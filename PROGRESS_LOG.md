@@ -1,5 +1,28 @@
 # Progress Log
 
+## 2026-07-11 04:14 PDT
+
+- Confirmed the laptop has substantially more free memory after cleanup:
+  `15Gi` total, `12Gi` available, and no active `mcpd3`/`mcpd4` processes.
+- Ran a fresh local TCP malloc-backed `babyface.n6c10` p4/p5/p6 sweep on the
+  arc-reserve code path, one iteration, directed input, no compression,
+  `objective_scale=1000`:
+  - p4/w4
+    `benchmark_results/local_tcp_arc_reserve_memfree_p4_w4_malloc_babyface_none_20260711_041358`:
+    total `6,855,313us`, read `2,417,210us`, partition `1,043,072us`,
+    setup `1,986,944us`, solve `1,393,395us`;
+  - p5/w5
+    `benchmark_results/local_tcp_arc_reserve_memfree_p5_w5_malloc_babyface_none_20260711_041405`:
+    total `8,849,802us`, read `2,439,000us`, partition `1,095,174us`,
+    setup `2,074,469us`, solve `3,222,825us`;
+  - p6/w6
+    `benchmark_results/local_tcp_arc_reserve_memfree_p6_w6_malloc_babyface_none_20260711_041414`:
+    total `6,714,937us`, read `2,421,733us`, partition `1,129,446us`,
+    setup `2,255,429us`, solve `894,133us`.
+- p6/w6 remains the best local TCP setting among these nearby malloc-backed
+  choices. p4/w4 is close but loses on solve time; p5/w5 is clearly worse on
+  solve time.
+
 ## 2026-07-11 04:10 PDT
 
 - Added mcpd3 arc-vector pre-reservation during dual-decomposition package
