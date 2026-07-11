@@ -15,6 +15,8 @@ constexpr std::size_t kIntVectorHeaderBytes = 4;
 constexpr std::size_t kIntBytes = 4;
 constexpr std::size_t kConstraintEndpointBytes =
     4 + 4 + 4 + 1 + 8 + 8 + 4;
+constexpr std::size_t kCompactConstraintEndpointBytes =
+    4 + 4 + 1 + 8 + 8;
 
 void require(bool condition, const std::string &message) {
   if (!condition) {
@@ -177,6 +179,7 @@ public:
   }
 
   bool empty() const { return offset_ == end_; }
+  std::size_t remaining() const { return end_ - offset_; }
 
   std::uint8_t readU8() {
     requireRemaining(1);
@@ -350,6 +353,15 @@ void writeConstraintEndpoint(Writer *writer,
   writer->writeFloat(binding.alpha_momentum);
 }
 
+void writeCompactConstraintEndpoint(
+    Writer *writer, const mcpd3::ConstraintEndpointBinding &binding) {
+  writer->writeI32(binding.constraint_id);
+  writer->writeI32(binding.local_index);
+  writer->writeBool(binding.is_source);
+  writer->writeI64(binding.alpha);
+  writer->writeI64(binding.last_alpha);
+}
+
 mcpd3::ConstraintEndpointBinding readConstraintEndpoint(Reader *reader) {
   mcpd3::ConstraintEndpointBinding binding;
   binding.constraint_id = reader->readI32();
@@ -360,6 +372,38 @@ mcpd3::ConstraintEndpointBinding readConstraintEndpoint(Reader *reader) {
   binding.last_alpha = checkedIntegerCast<long>(reader->readI64());
   binding.alpha_momentum = reader->readFloat();
   return binding;
+}
+
+std::vector<mcpd3::ConstraintEndpointBinding>
+readConstraintEndpointVector(Reader *reader) {
+  const auto size = reader->readU32();
+  const auto full_bytes =
+      static_cast<std::size_t>(size) * kConstraintEndpointBytes;
+  const auto compact_bytes =
+      static_cast<std::size_t>(size) * kCompactConstraintEndpointBytes;
+  const bool compact = reader->remaining() == compact_bytes;
+  if (!compact && reader->remaining() < full_bytes) {
+    throw std::runtime_error("truncated endpoint payload");
+  }
+
+  std::vector<mcpd3::ConstraintEndpointBinding> endpoints;
+  endpoints.reserve(size);
+  for (std::uint32_t i = 0; i < size; ++i) {
+    if (compact) {
+      mcpd3::ConstraintEndpointBinding binding;
+      binding.constraint_id = reader->readI32();
+      binding.global_node_id = -1;
+      binding.local_index = reader->readI32();
+      binding.is_source = reader->readBool();
+      binding.alpha = checkedIntegerCast<long>(reader->readI64());
+      binding.last_alpha = checkedIntegerCast<long>(reader->readI64());
+      binding.alpha_momentum = 0;
+      endpoints.push_back(binding);
+    } else {
+      endpoints.push_back(readConstraintEndpoint(reader));
+    }
+  }
+  return endpoints;
 }
 
 void writeConstraintLabel(Writer *writer, const mcpd3::ConstraintLabel &label) {
@@ -404,6 +448,10 @@ std::size_t partitionPackageFrameSize(
       mode == PartitionPackageFrameBuffers::Mode::WORKER_LOAD
           ? 0
           : message.local_to_global.size() * kIntBytes;
+  const std::size_t endpoint_bytes =
+      mode == PartitionPackageFrameBuffers::Mode::WORKER_LOAD
+          ? kCompactConstraintEndpointBytes
+          : kConstraintEndpointBytes;
   return kFrameHeaderBytes +
          /*partition_id + local_node_count=*/8 +
          kIntVectorHeaderBytes + message.arcs.size() * kIntBytes +
@@ -412,7 +460,7 @@ std::size_t partitionPackageFrameSize(
          message.terminal_capacities.size() * kIntBytes +
          kIntVectorHeaderBytes + local_to_global_bytes +
          /*constraint endpoint vector header=*/4 +
-         message.constraint_endpoints.size() * kConstraintEndpointBytes;
+         message.constraint_endpoints.size() * endpoint_bytes;
 }
 
 void writeSolveRoundResultPayload(
@@ -533,9 +581,7 @@ mcpd3::PartitionPackage decodePartitionPackage(
   message.arc_capacities = reader.readI32Vector();
   message.terminal_capacities = reader.readI32Vector();
   message.local_to_global = reader.readI32Vector();
-  message.constraint_endpoints =
-      reader.readVector<mcpd3::ConstraintEndpointBinding>(
-          [&] { return readConstraintEndpoint(&reader); });
+  message.constraint_endpoints = readConstraintEndpointVector(&reader);
   requireDone(reader);
   return message;
 }
@@ -569,9 +615,15 @@ PartitionPackageFrameBuffers::PartitionPackageFrameBuffers(
 
   Writer endpoint_writer;
   endpoint_writer.reserve(message.constraint_endpoints.size() *
-                          kConstraintEndpointBytes);
+                          (mode_ == Mode::WORKER_LOAD
+                               ? kCompactConstraintEndpointBytes
+                               : kConstraintEndpointBytes));
   for (const auto &binding : message.constraint_endpoints) {
-    writeConstraintEndpoint(&endpoint_writer, binding);
+    if (mode_ == Mode::WORKER_LOAD) {
+      writeCompactConstraintEndpoint(&endpoint_writer, binding);
+    } else {
+      writeConstraintEndpoint(&endpoint_writer, binding);
+    }
   }
   constraint_endpoint_bytes_ = endpoint_writer.takeBytes();
 }

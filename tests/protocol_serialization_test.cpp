@@ -221,14 +221,20 @@ void workerLoadPartitionPackageFrameBuffersOmitLocalToGlobal() {
   const mcpd4::PartitionPackageFrameBuffers buffers(
       message, mcpd4::PartitionPackageFrameBuffers::Mode::WORKER_LOAD);
   const auto compact = joinBuffers(buffers.buffers());
-  require(compact.size() + message.local_to_global.size() * sizeof(int) ==
-              encoded.size(),
-          "worker-load package should omit local-to-global bytes");
+  const auto expected_savings =
+      message.local_to_global.size() * sizeof(int) +
+      message.constraint_endpoints.size() * (sizeof(int) + sizeof(float));
+  require(compact.size() + expected_savings == encoded.size(),
+          "worker-load package should omit redundant bytes");
   require(buffers.totalSize() == compact.size(),
           "worker-load package buffer size mismatch");
 
   auto expected = message;
   expected.local_to_global.clear();
+  for (auto &endpoint : expected.constraint_endpoints) {
+    endpoint.global_node_id = -1;
+    endpoint.alpha_momentum = 0;
+  }
   const auto decoded = mcpd4::decodePartitionPackage(compact);
   requirePackageEqual(decoded, expected);
 }

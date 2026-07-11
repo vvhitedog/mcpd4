@@ -22,6 +22,8 @@ namespace {
 constexpr std::size_t kProtocolFrameHeaderBytes = 12;
 constexpr std::size_t kConstraintEndpointWireBytes =
     4 + 4 + 4 + 1 + 8 + 8 + 4;
+constexpr std::size_t kCompactConstraintEndpointWireBytes =
+    4 + 4 + 1 + 8 + 8;
 
 bool hostIsLittleEndian() {
   const std::uint16_t value = 1;
@@ -203,8 +205,15 @@ public:
 
   std::vector<mcpd3::ConstraintEndpointBinding> readConstraintEndpoints() {
     const auto size = readU32();
-    const auto byte_count =
+    const auto full_byte_count =
         static_cast<std::uint64_t>(size) * kConstraintEndpointWireBytes;
+    const auto compact_byte_count =
+        static_cast<std::uint64_t>(size) * kCompactConstraintEndpointWireBytes;
+    const bool compact = payload_size_ - offset_ == compact_byte_count;
+    const auto byte_count = compact ? compact_byte_count : full_byte_count;
+    if (!compact && payload_size_ - offset_ < full_byte_count) {
+      throw std::runtime_error("truncated endpoint payload");
+    }
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(byte_count));
     if (!bytes.empty()) {
       readBytes(bytes.data(), bytes.size());
@@ -251,7 +260,7 @@ public:
     for (std::uint32_t i = 0; i < size; ++i) {
       mcpd3::ConstraintEndpointBinding binding;
       binding.constraint_id = read_i32();
-      binding.global_node_id = read_i32();
+      binding.global_node_id = compact ? -1 : read_i32();
       binding.local_index = read_i32();
       const auto side = read_u8();
       if (side != 0 && side != 1) {
@@ -260,7 +269,7 @@ public:
       binding.is_source = side != 0;
       binding.alpha = checkedLongCast(read_i64());
       binding.last_alpha = checkedLongCast(read_i64());
-      binding.alpha_momentum = read_float();
+      binding.alpha_momentum = compact ? 0 : read_float();
       endpoints.push_back(binding);
     }
     if (offset != bytes.size()) {

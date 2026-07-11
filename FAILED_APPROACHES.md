@@ -598,3 +598,12 @@
   `9,425,194us` total versus `8,778,549us` for no-compression in
   `benchmark_results/local_tcp_omit_l2g_filemmap_babyface_p6_w6_none_20260711_024927`.
   Compression alone cost `1,100,580us`.
+
+## 2026-07-11 03:01 PDT
+
+- Do not claim compact endpoint records as a proven localhost wall-time speedup
+  on p6/w6. The change reduced partition-load TX from `532,500,240` to
+  `526,500,240` bytes and preserved outputs, but the measured file-backed run
+  was `8,887,600us` versus `8,778,549us` before endpoint compaction, and the
+  measured malloc run was `8,376,554us` versus `8,290,466us`. Treat it as a
+  transport-size optimization, not a localhost timing win.

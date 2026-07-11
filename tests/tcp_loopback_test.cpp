@@ -260,9 +260,11 @@ void remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp(
 
     const auto load_bytes =
         worker->timingStats().rpc_bytes.partition_load_tx_bytes;
-    require(load_bytes + package.local_to_global.size() * sizeof(int) ==
-                full_frame_size,
-            "remote load should omit local-to-global payload bytes");
+    const auto expected_savings =
+        package.local_to_global.size() * sizeof(int) +
+        package.constraint_endpoints.size() * (sizeof(int) + sizeof(float));
+    require(load_bytes + expected_savings == full_frame_size,
+            "remote load should omit redundant package payload bytes");
     if (compression == mcpd4::TransportCompression::SNAPPY) {
       require(worker->timingStats()
                   .rpc_bytes.tx_compressed_frame_count +

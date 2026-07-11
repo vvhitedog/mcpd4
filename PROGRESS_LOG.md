@@ -2279,3 +2279,44 @@
   - `./build/tcp_loopback_test`;
   - `ctest --test-dir build --output-on-failure`;
   - `ctest --test-dir build/mcpd3-native --output-on-failure`.
+
+## 2026-07-11 03:01 PDT
+
+- Further compacted worker-load package endpoint records. Canonical package
+  serialization remains full-fidelity, but worker-load frames now omit endpoint
+  `global_node_id` and `alpha_momentum`; remote TCP solve results already carry
+  compact labels and the coordinator uses its own constraint metadata. Kept
+  `local_index`, `alpha`, and `last_alpha` because those are worker-side solve
+  inputs. Bumped the runtime protocol version from `6` to `7` so mixed old/new
+  coordinator-worker pairs fail at handshake instead of failing mid-load.
+- Added/updated coverage:
+  - protocol test checks the compact frame byte count and compact endpoint
+    defaults (`global_node_id=-1`, `alpha_momentum=0`);
+  - TCP loopback test checks the larger package-load byte reduction through
+    both uncompressed and Snappy transports.
+- Benchmarked `babyface.n6c10`, p6/w6, one iteration:
+  - file-backed BK mmap + `willneed` + no compression:
+    `benchmark_results/local_tcp_omit_l2g_endpoint_filemmap_babyface_p6_w6_none_20260711_025903`,
+    total `8,887,600us`, setup `3,580,232us`, solve `1,094,004us`,
+    partition-load TX `526,500,240` bytes;
+  - `malloc` speed probe:
+    `benchmark_results/local_tcp_omit_l2g_endpoint_malloc_babyface_p6_w6_none_20260711_025944`,
+    total `8,376,554us`, setup `3,280,384us`, solve `899,287us`,
+    partition-load TX `526,500,240` bytes;
+  - Snappy file-backed:
+    `benchmark_results/local_tcp_omit_l2g_endpoint_snappy_filemmap_babyface_p6_w6_20260711_030035`,
+    total `9,565,564us`, setup `4,158,200us`, solve `1,235,490us`,
+    logical partition-load TX `526,500,240` bytes, total coordinator wire TX
+    `246,629,494` bytes, compression wall `1,069,437us`.
+- Endpoint compaction removes another `6,000,000` logical bytes on p6/w6
+  (`750,000` boundary endpoints times `8` bytes) and preserves the matched
+  one-iteration objective/disagreement (`final_objective_raw=1,970,000`,
+  `final_disagreement_count=134,985`). On localhost this did not produce a
+  clear wall-time speedup, but it is a smaller transport payload and should
+  matter more when network transfer is the bottleneck.
+- Verified:
+  - `cmake --build build -j`;
+  - `./build/protocol_serialization_test`;
+  - `./build/tcp_loopback_test`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`.
