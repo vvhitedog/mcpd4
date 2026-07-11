@@ -80,6 +80,12 @@
   reached iteration `10`, with best raw lower bound `72,358,000` and `70,155`
   disagreements. The p9/w9 start-1000 run completes in about `44.6s`, so
   start `100` is a clear regression despite avoiding the scale-1000 warmup.
+- Do not reduce the p9/w9 start-1000 per-scale cap to `30`. Run
+  `benchmark_results/local_tcp_adhead_n6c10_p9_w9_os2000_start1000_iter30_malloc_20260711_081931`
+  finished in `46.4s` coordinator wall with status `1`, stop_reason `4`, and
+  `11` final disagreements. It also ran `106` total iterations, more than the
+  p9/w9 max-60 baseline's `79`, because the early cap forced work down to
+  scale `1` without recovering agreement.
 
 ## 2026-07-11 07:36 PDT
 
