@@ -549,3 +549,12 @@
   `benchmark_results/local_tcp_sendmsg_package_defaultbk_babyface_p10_w2_none_20260711_020445`
   recovered the per-buffer-send loss while preserving the coordinator memory
   pressure benefit.
+
+## 2026-07-11 02:24 PDT
+
+- Do not claim the mcpd3 boundary-map reserve change as a proven standalone
+  speedup from the p10/w10 local TCP benchmark. The first run improved setup
+  substantially (`7,951,065us`), but the repeat was close to the previous
+  p10/w10 baseline (`9,117,897us` versus `9,250,669us`). Keep the change as
+  allocation hygiene with test coverage, and use the worker-count sweep as the
+  stronger result.

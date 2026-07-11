@@ -2103,3 +2103,52 @@
   - `cmake --build build -j`;
   - `ctest --test-dir build --output-on-failure`;
   - `ctest --test-dir build/mcpd3-native --output-on-failure`.
+
+## 2026-07-11 02:24 PDT
+
+- Ran a file-backed mmap local TCP worker-count sweep on
+  `babyface.n6c10`, p10/no-compression/one-iteration, after the direct package
+  receive optimization:
+  - w2:
+    `benchmark_results/local_tcp_direct_recv_package_defaultbk_babyface_p10_w2_none_20260711_021113`,
+    setup `17,150,205us`, total `23,620,803us`;
+  - w4:
+    `benchmark_results/local_tcp_direct_recv_filemmap_babyface_p10_w4_none_20260711_021806`,
+    setup `12,245,282us`, total `18,651,406us`;
+  - w8:
+    `benchmark_results/local_tcp_direct_recv_filemmap_babyface_p10_w8_none_20260711_021825`,
+    setup `10,906,116us`, total `17,563,935us`;
+  - w10:
+    `benchmark_results/local_tcp_direct_recv_filemmap_babyface_p10_w10_none_20260711_021843`,
+    setup `9,250,669us`, total `16,294,229us`.
+- Current best tested local TCP point on this p10 setup-heavy benchmark is one
+  local worker per partition with file-backed BK mmap. The result is materially
+  better than w2 even though aggregate worker load time rises, because package
+  loading and solver construction overlap across more worker processes.
+- Ran an in-process comparator with matching file-backed BK mmap:
+  - `benchmark_results/inprocess_filemmap_babyface_p10_w10_20260711_022024`,
+    setup `5,843,418us`, total `11,916,924us`;
+  - remaining local TCP setup gap at p10/w10 is roughly `3.4s` on this point
+    (`9.25s - 5.84s`), mostly attributable to local package transfer and
+    worker-process setup/coordination.
+- Added a mcpd3 setup hygiene optimization:
+  - `InProcessPartitionWorker::loadPartition` now reserves
+    `constraint_arc_by_id` to the boundary endpoint count before inserting
+    per-endpoint constraint arcs;
+  - added `inProcessPartitionWorkerLoadsManyBoundaryEndpoints` to cover the
+    many-boundary load path.
+- Boundary-map reserve benchmark repeats on p10/w10/file-backed mmap were
+  noisy:
+  - first run
+    `benchmark_results/local_tcp_reserved_boundary_map_filemmap_babyface_p10_w10_none_20260711_022322`:
+    setup `7,951,065us`, total `14,323,513us`;
+  - repeat
+    `benchmark_results/local_tcp_reserved_boundary_map_repeat_filemmap_babyface_p10_w10_none_20260711_022357`:
+    setup `9,117,897us`, total `15,714,525us`;
+  - keep this as low-risk allocation hygiene, not a standalone proven
+    performance win.
+- Verified:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.
