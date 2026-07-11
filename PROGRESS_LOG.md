@@ -1,5 +1,34 @@
 # Progress Log
 
+## 2026-07-11 04:32 PDT
+
+- Refactored mcpd3 `PartitionWorkerCoordinator` construction to avoid copying
+  each package's boundary endpoint vector into coordinator package storage:
+  - constraints are now built directly from the input package vector before
+    packages are moved to workers;
+  - coordinator package records retain only the partition ids needed during
+    solve rounds;
+  - removed the now-dead coordinator payload drop and empty package scaling
+    loops.
+- Verified:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.
+- Benchmarked `babyface.n6c10`, p6/w6, one iteration, malloc-backed BK storage,
+  no compression:
+  - baseline mmap-reader run
+    `benchmark_results/local_tcp_mmap_reader_p6_w6_malloc_babyface_none_20260711_042215`:
+    total `6,553,760us`, setup `2,221,805us`;
+  - no-endpoint-copy run
+    `benchmark_results/local_tcp_no_endpoint_copy_p6_w6_malloc_babyface_none_20260711_043133`:
+    total `6,619,059us`, setup `2,230,088us`;
+  - no-endpoint-copy repeat
+    `benchmark_results/local_tcp_no_endpoint_copy_repeat_p6_w6_malloc_babyface_none_20260711_043140`:
+    total `6,578,808us`, setup `2,222,026us`.
+- This is not a measurable p6 throughput win, but it removes transient
+  coordinator endpoint-copy memory and simplifies setup state.
+
 ## 2026-07-11 04:28 PDT
 
 - Added mcpd4 TCP loopback coverage for worker-load partition packages whose
