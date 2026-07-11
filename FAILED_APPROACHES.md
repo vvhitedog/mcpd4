@@ -1182,6 +1182,20 @@
     warm iterations were still mostly `8.0s` to `15.4s` with one `24.0s` spike;
   - aggregate worker solve at iteration 16 was `2,027,686,781us`, while worker
     RPC overhead was only `8,781,192us`, so transport is not the bottleneck.
+- Reducing local concurrency to p32/w4 also did not fix the local resident
+  shape:
+  - run:
+    `benchmark_results/large_adhead_local_tcp_p32_w4_os1000_start1000_filemmap_none_20260711_084636`;
+  - status `124` from the same 390s timeout;
+  - reached 17 iterations, only one more than p32/w8 no-advice;
+  - best lower bound remained `379330000` scaled (`379330` unscaled), and the
+    last progress line had `241155` disagreements;
+  - aggregate worker solve at iteration 17 was `1,125,010,125us`, with worker
+    RPC overhead only `7,250,266us`;
+  - memory still filled swap and disk dropped to `19 GiB` free during the run.
+- Worker-count throttling may slightly reduce aggregate worker time, but it
+  does not change the viability conclusion for one-machine p32 local TCP on
+  this hardware.
 - If local large-adhead is revisited, avoid all-resident p32 on this machine.
   The next plausible local-only direction is a true streaming/windowed worker
   policy that keeps the active BK working set below RAM without touching every
