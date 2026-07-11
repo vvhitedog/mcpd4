@@ -41,6 +41,10 @@
     `benchmark_results/local_tcp_early_listen_10iter_repeat_p16_w16_malloc_babyface_none_20260711_051254`:
     total `28,369,133us`, setup `5,185,741us`, solve
     `19,487,864us`, final disagreements `499,015`;
+  - p16/w16 clean-source rebuild validation
+    `benchmark_results/local_tcp_clean_rebuild_10iter_p16_w16_malloc_babyface_none_20260711_051706`:
+    total `27,822,050us`, setup `5,164,564us`, solve
+    `18,954,568us`, final disagreements `499,015`;
   - p18/w18
     `benchmark_results/local_tcp_early_listen_10iter_p18_w18_malloc_babyface_none_20260711_051211`:
     total `31,844,764us`, setup `6,469,179us`, solve
