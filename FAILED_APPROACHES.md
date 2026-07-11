@@ -677,3 +677,19 @@
 - The code was reverted before commit. If terminal sparsity is revisited, it
   needs a lower-overhead worker-side construction path, not just a smaller wire
   representation that expands back into a full vector before BK load.
+
+## 2026-07-11 03:37 PDT
+
+- Do not default localhost p6/w6 local TCP to Snappy even after
+  single-direction capacity compaction. Rebuilt no-compression baseline
+  `benchmark_results/local_tcp_rebuilt_compact_caps_malloc_babyface_p6_w6_none_20260711_033648`
+  took `7,047,881us` total, setup `2,241,004us`, and sent
+  `405,000,744` wire bytes. Snappy reduced wire bytes to `190,318,936`, but
+  remained slower:
+  - `benchmark_results/local_tcp_rebuilt_compact_caps_snappy_malloc_babyface_p6_w6_20260711_033711`:
+    total `7,391,746us`, setup `2,550,101us`, compression `793,746us`;
+  - `benchmark_results/local_tcp_rebuilt_compact_caps_snappy_repeat_malloc_babyface_p6_w6_20260711_033735`:
+    total `7,394,210us`, setup `2,547,665us`, compression `768,422us`.
+- Snappy may still be useful across machines or slower networks, but it is a
+  local-loopback loss at this problem size because compression CPU dominates
+  the saved wire transfer.
