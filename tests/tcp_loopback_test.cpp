@@ -347,11 +347,19 @@ void remoteWorkerLoadPartitionCompactsDirectedArcCapacitiesOverTcp(
     mcpd3::PartitionSolveRequest request;
     request.round_id = 1;
     request.partition_id = package.partition_id;
+    mcpd3::InProcessPartitionWorker reference;
+    reference.loadPartition(package);
+    const auto expected = reference.solveRound(request);
     const auto result = worker->solveRound(request);
+    require(result.lower_bound == expected.lower_bound,
+            "directed compact package load should preserve objective value");
     require(result.constrained_labels.size() == 1,
             "directed compact package load should preserve endpoint labels");
     require(result.constrained_labels[0].constraint_id == 30000,
             "directed compact package load should preserve constraint id");
+    require(result.constrained_labels[0].label ==
+                expected.constrained_labels[0].label,
+            "directed compact package load should preserve endpoint label");
     stopAndJoin(worker.get(), client);
   } catch (...) {
     stopAndJoin(worker.get(), client);

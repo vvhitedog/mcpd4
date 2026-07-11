@@ -693,3 +693,27 @@
 - Snappy may still be useful across machines or slower networks, but it is a
   local-loopback loss at this problem size because compression CPU dominates
   the saved wire transfer.
+
+## 2026-07-11 03:52 PDT
+
+- Do not replace worker-side compact directed arc-capacity expansion with a
+  direct receive-time expansion path in the current local TCP implementation.
+  The goal was to avoid allocating a temporary compact vector before expanding
+  to the full `arc_capacities` vector, but both variants were slower on the
+  matched p6/w6 `babyface.n6c10` one-iteration probe:
+  - chunked receive/expand run
+    `benchmark_results/local_tcp_direct_expand_compact_caps_malloc_babyface_p6_w6_none_20260711_035039`:
+    total `8,010,827us`, setup `3,328,416us`, load RPC aggregate
+    `18,955,468us`;
+  - one-read in-place backward expansion run
+    `benchmark_results/local_tcp_inplace_expand_compact_caps_malloc_babyface_p6_w6_none_20260711_035141`:
+    total `7,989,347us`, setup `3,332,146us`, load RPC aggregate
+    `18,992,711us`;
+  - current scaled-reader baseline
+    `benchmark_results/local_tcp_scaled_directed_reader_repeat_malloc_babyface_p6_w6_none_20260711_034426`:
+    total `6,931,610us`, setup `2,227,187us`, load RPC aggregate
+    `12,276,980us`.
+- Bytes and solver output were unchanged, so the regression is CPU/path
+  overhead rather than transport volume. The implementation code was reverted.
+  A stronger compact directed TCP test was kept to compare remote loaded solves
+  against an in-process worker and cover both signed compact capacity branches.
