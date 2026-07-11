@@ -622,3 +622,22 @@
 - p2 has the smallest partition-load transfer in this sweep, but its solve time
   (`4,773,711us`) dominates. Use p6/w6 as the current local TCP comparison
   point until a larger/more complete convergence benchmark says otherwise.
+
+## 2026-07-11 03:18 PDT
+
+- Do not replace `DualDecomposition::initializeDecomposition` constrained-node
+  partition sets with per-node `std::vector<int>` de-duplication based on the
+  current evidence. The experiment preserved results but did not improve the
+  matched p6/w6 malloc/no-compression `babyface.n6c10` one-iteration probe:
+  - post-reader baseline repeat
+    `benchmark_results/local_tcp_presized_dimacs_repeat_malloc_babyface_p6_w6_none_20260711_031335`:
+    total `7,993,139us`, partition `1,327,133us`, setup `3,260,440us`;
+  - vector boundary-set run
+    `benchmark_results/local_tcp_vector_boundary_sets_malloc_babyface_p6_w6_none_20260711_031732`:
+    total `8,105,027us`, partition `1,388,056us`, setup `3,288,289us`;
+  - vector boundary-set repeat
+    `benchmark_results/local_tcp_vector_boundary_sets_repeat_malloc_babyface_p6_w6_none_20260711_031757`:
+    total `8,076,785us`, partition `1,380,602us`, setup `3,279,833us`.
+- The uncommitted code was reverted. If this area is revisited, first add
+  finer-grained package-build timing so we can see whether boundary map/set
+  maintenance is actually material on larger partition counts.
