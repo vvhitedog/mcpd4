@@ -1877,3 +1877,46 @@
   - `ctest --test-dir build --output-on-failure`;
   - `cmake --build build/no-snappy -j`;
   - `ctest --test-dir build/no-snappy --output-on-failure`.
+
+## 2026-07-11 01:25 PDT
+
+- Started local TCP optimization work in worktree `.worktrees/local-tcp-opt`
+  on branch `local-tcp-opt`; mcpd3 submodule work is on branch
+  `partition-load-parallel`.
+- Baseline observation on `babyface.n6c10`, directed, p10, 2 localhost TCP
+  workers, objective scale `1000`, no RPC compression:
+  - run directory:
+    `benchmark_results/local_tcp_baseline_babyface_p10_w2_none_20260711_011746`;
+  - stopped early after collecting setup and early solve telemetry because it
+    was consuming about 5 GB RSS while swap was full;
+  - sequential package loading produced `timing_coordinator_setup_wall_us =
+    34,548,028`;
+  - each ~55-60 MB partition package load took about `3.3-3.6s`, and package
+    loads were serialized across workers;
+  - early solve telemetry at iteration 50 showed `timing_worker_rpc_overhead`
+    around `11.31s` over `517.87s` worker solve aggregate, so setup/package
+    loading was the first higher-impact target.
+- Implemented mcpd3 commit `e621711`:
+  - `PartitionWorkerCoordinator` now groups assigned packages by worker and
+    loads one group per active worker concurrently;
+  - per-worker package order is still sequential, preserving one in-flight
+    load per worker/socket.
+- Added regression coverage in `partition_worker_test`:
+  - `coordinatorLoadsPartitionsAcrossWorkersConcurrently` uses two sleeping
+    probe workers and asserts constructor load calls overlap across workers.
+- Optimized setup-only comparison on the same graph/config with a one-iteration
+  solve:
+  - run directory:
+    `benchmark_results/local_tcp_parallel_load_babyface_p10_w2_none_20260711_012422`;
+  - `timing_coordinator_setup_wall_us = 19,534,584`;
+  - `timing_load_partition_rpc_us = 38,387,094` remains an aggregate sum across
+    workers, confirming the improvement is overlap rather than faster
+    individual package transfer;
+  - setup wall improvement from the collected baseline is about `43.5%`
+    (`34.55s -> 19.53s`).
+- Verified:
+  - `cmake -S third_party/mcpd3 -B build/mcpd3-native -DCMAKE_BUILD_TYPE=Release`;
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.
