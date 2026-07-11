@@ -1,5 +1,51 @@
 # Progress Log
 
+## 2026-07-11 07:47 PDT
+
+- Revisited partition count and localhost compression after the start `50`
+  schedule win on `babyface.n6c10`.
+- Important control: p1/w1, start `50`, objective scale `1000`, malloc-backed
+  BK, no compression:
+  `benchmark_results/local_tcp_fullschedule_p1_w1_iter60_start50_malloc_babyface_saturate_20260711_073958`
+  reached status `0`, stop_reason `1`, final objective `19448`, final
+  certified lower bound `19448`, final disagreements `0`, total iterations
+  `1`, wall `10,175,077us`, solve `5,401,991us`, worker solve
+  `5,401,628us`, partition-load RPC `1,649,001us`, partition-load TX
+  `384,750,040` bytes.
+- p1/w1 repeat confirmed the control:
+  `benchmark_results/local_tcp_fullschedule_p1_w1_iter60_start50_repeat_malloc_babyface_saturate_20260711_074110`
+  reached the same objective/certificate with wall `10,075,648us`, solve
+  `5,303,974us`, worker solve `5,303,631us`, partition-load RPC
+  `1,638,093us`.
+- p1/w1 with objective scale `1` also returned the same objective/certificate:
+  `benchmark_results/local_tcp_fullschedule_p1_w1_iter60_start50_os1_malloc_babyface_saturate_20260711_074153`
+  reached status `0`, stop_reason `1`, final objective `19448`, final
+  certified lower bound `19448`, total iterations `1`, wall `10,043,781us`,
+  solve `5,442,060us`, worker solve `5,441,702us`, partition-load RPC
+  `1,670,064us`. This is the fastest observed local TCP worker-path control,
+  but it is a single-partition solve, not distributed parallel recovery.
+- True distributed p2/w2 remains the best distributed local TCP setting:
+  start `50`, max `60`, objective scale `1000`, no compression, wall
+  `18.21-18.23s` with exact objective/certificate and zero disagreements.
+- Partition-count controls with the same start `50` schedule were worse:
+  - p3/w3:
+    `benchmark_results/local_tcp_fullschedule_p3_w3_iter60_start50_malloc_babyface_saturate_20260711_073837`,
+    status `1`, stop_reason `4`, final disagreements `2`, wall
+    `39,695,478us`, solve `34,422,665us`;
+  - p4/w4:
+    `benchmark_results/local_tcp_fullschedule_p4_w4_iter60_start50_malloc_babyface_saturate_20260711_074631`,
+    status `1`, stop_reason `4`, final disagreements `64`, promoted objective
+    scale once to `10000`, wall `41,636,468us`, solve `36,405,030us`.
+- Localhost Snappy remains a loss even after the schedule win:
+  - p1/w1 objective scale `1` with Snappy:
+    `benchmark_results/local_tcp_fullschedule_p1_w1_iter60_start50_os1_snappy_malloc_babyface_saturate_20260711_074427`,
+    wire TX dropped to `184,175,674` bytes, but wall rose to `11,295,920us`
+    and partition-load RPC rose to `3,028,873us`;
+  - p2/w2 with Snappy:
+    `benchmark_results/local_tcp_fullschedule_p2_w2_iter60_start50_snappy_malloc_babyface_saturate_20260711_074522`,
+    wire TX dropped to `187,077,725` bytes, but wall rose to `18,962,377us`
+    and partition-load RPC rose to `5,837,053us`.
+
 ## 2026-07-11 07:36 PDT
 
 - Found a much faster local TCP full-schedule setting for `babyface.n6c10`.

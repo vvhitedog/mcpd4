@@ -1,5 +1,35 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 07:47 PDT
+
+- Do not assume more partitions improve the tuned local TCP schedule. With
+  start `50`, objective scale `1000`, malloc-backed BK, and no compression,
+  p3/w3 and p4/w4 are both slower and fail to produce clean agreement:
+  - p3/w3
+    `benchmark_results/local_tcp_fullschedule_p3_w3_iter60_start50_malloc_babyface_saturate_20260711_073837`:
+    `39,695,478us`, stop_reason `4`, final disagreements `2`;
+  - p4/w4
+    `benchmark_results/local_tcp_fullschedule_p4_w4_iter60_start50_malloc_babyface_saturate_20260711_074631`:
+    `41,636,468us`, stop_reason `4`, final disagreements `64`, objective
+    scale promoted to `10000`.
+- Do not enable Snappy for localhost local TCP by default. It cuts wire bytes
+  but increases wall time and partition-load RPC cost:
+  - p1/w1 objective scale `1` no compression:
+    `10,043,781us` wall, `1,670,064us` load RPC;
+  - p1/w1 objective scale `1` Snappy:
+    `11,295,920us` wall, `3,028,873us` load RPC;
+  - p2/w2 start `50` no compression repeat:
+    `18,210,424us` wall, `4,438,282us` load RPC;
+  - p2/w2 start `50` Snappy:
+    `18,962,377us` wall, `5,837,053us` load RPC.
+- Do not lower objective scale to `1` for the p2/w2 distributed start `50`
+  schedule. Run
+  `benchmark_results/local_tcp_fullschedule_p2_w2_iter60_start50_os1_malloc_babyface_saturate_20260711_074313`
+  had not reached the first progress checkpoint after roughly `48s`, while the
+  objective-scale `1000` tuned run finishes cleanly in about `18.2s`; it was
+  stopped early. The p1/w1 no-boundary control can use objective scale `1`,
+  but the distributed alpha-resolution path cannot.
+
 ## 2026-07-11 07:36 PDT
 
 - Do not use the current `MCPD3_PARTITIONER=local` region-grow partitioner for
