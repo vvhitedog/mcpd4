@@ -532,3 +532,20 @@
   saturated `babyface.n6c10` scale-10000 run clipped `11,370` terminal
   capacities during initial scaling, so it is useful for transport/runtime
   performance but not an exact strict-capacity proof.
+
+## 2026-07-11 02:06 PDT
+
+- Do not use one `send()` per partition-package buffer as the scatter/gather
+  implementation. Run
+  `benchmark_results/local_tcp_scatter_package_defaultbk_babyface_p10_w2_none_20260711_020321`
+  was slower than the contiguous move-return copy-drop run on the comparable
+  mmap-backed p10/w2 one-iteration setup point:
+  - per-buffer send: setup `17,758,739us`, total `24,141,107us`;
+  - contiguous move-return copy drop:
+    `benchmark_results/local_tcp_sendrecv_copydrop_defaultbk_babyface_p10_w2_none_20260711_015836`
+    setup `17,300,658us`, total `23,832,448us`.
+- Scatter/gather should use `sendmsg` or another batched write path. The
+  `sendmsg` run
+  `benchmark_results/local_tcp_sendmsg_package_defaultbk_babyface_p10_w2_none_20260711_020445`
+  recovered the per-buffer-send loss while preserving the coordinator memory
+  pressure benefit.

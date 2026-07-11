@@ -213,6 +213,29 @@ void receivesFrameSplitAcrossTcpPackets() {
           "split TCP frame should decode after full receive");
 }
 
+void sendsFrameFromMultipleBuffers() {
+  auto pair = makeConnectedPair();
+  mcpd4::ReadyMessage ready;
+  ready.worker_name = "buffered";
+  const auto frame = mcpd4::encodeReady(ready);
+  const std::vector<mcpd4::ByteBufferView> buffers{
+      mcpd4::ByteBufferView{frame.data(), 3},
+      mcpd4::ByteBufferView{frame.data() + 3, 5},
+      mcpd4::ByteBufferView{frame.data() + 8, frame.size() - 8}};
+
+  mcpd4::FrameTransferStats sent;
+  mcpd4::sendFrameByteBuffers(pair.client, buffers,
+                              mcpd4::TransportCompression::NONE, &sent);
+  const auto received = mcpd4::receiveFrameBytes(pair.server);
+  const auto decoded = mcpd4::decodeReady(received);
+  require(decoded.worker_name == ready.worker_name,
+          "buffered TCP frame should decode after receive");
+  require(sent.logical_bytes == frame.size(),
+          "buffered send should report logical bytes");
+  require(sent.wire_bytes == frame.size(),
+          "buffered send should report wire bytes");
+}
+
 void rejectsOversizedPayloadBeforeReadingBody() {
   auto pair = makeConnectedPair();
   const std::vector<std::uint8_t> payload{1, 2, 3, 4};
@@ -236,6 +259,20 @@ void rejectsOversizedPayloadBeforeWritingBody() {
                               frame.size() - 1);
       },
       "oversized TCP frame should be rejected before send");
+}
+
+void rejectsUnknownMessageTypeOnReceiveWithoutCompression() {
+  auto pair = makeConnectedPair();
+  const std::vector<std::uint8_t> frame{
+      0xe7, 0x03, 0x00, 0x00, // message type 999
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00};
+  sendRawAll(pair.client.get(), frame.data(), frame.size());
+
+  requireThrowsContaining(
+      [&] { (void)mcpd4::receiveFrameBytes(pair.server); },
+      "unknown message type",
+      "receiveFrameBytes should validate uncompressed frame type");
 }
 
 void defaultFrameLimitCoversObservedLargeAdheadP16Package() {
@@ -264,6 +301,28 @@ void rejectsOversizedSnappyLogicalFrameBeforeReadingBody() {
             mcpd4::TransportCompression::SNAPPY);
       },
       "oversized snappy logical frame should be rejected");
+}
+
+void rejectsUnknownMessageTypeOnSnappyReceive() {
+  if (!mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  auto pair = makeConnectedPair();
+  const std::vector<std::uint8_t> frame{
+      0xe7, 0x03, 0x00, 0x00, // message type 999
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00};
+  mcpd4::sendFrameBytes(pair.client, frame,
+                        mcpd4::TransportCompression::SNAPPY);
+
+  requireThrowsContaining(
+      [&] {
+        (void)mcpd4::receiveFrameBytes(
+            pair.server, mcpd4::kDefaultMaxFrameBytes,
+            mcpd4::TransportCompression::SNAPPY);
+      },
+      "unknown message type",
+      "receiveFrameBytes should validate snappy frame type");
 }
 
 void snappyCompressedFrameRoundTrips() {
@@ -716,10 +775,13 @@ void remoteWorkerCoordinatorPromotesObjectiveScale() {
 int main() {
   try {
     receivesFrameSplitAcrossTcpPackets();
+    sendsFrameFromMultipleBuffers();
     rejectsOversizedPayloadBeforeReadingBody();
     rejectsOversizedPayloadBeforeWritingBody();
+    rejectsUnknownMessageTypeOnReceiveWithoutCompression();
     defaultFrameLimitCoversObservedLargeAdheadP16Package();
     rejectsOversizedSnappyLogicalFrameBeforeReadingBody();
+    rejectsUnknownMessageTypeOnSnappyReceive();
     snappyCompressedFrameRoundTrips();
     rejectsInvalidWorkerHello();
     remoteWorkerExposesHandshakeResources();

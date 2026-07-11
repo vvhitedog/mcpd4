@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include <mcpd4/buffer_view.h>
+
 namespace mcpd4 {
 
 enum class TransportCompression {
@@ -59,6 +61,11 @@ TransportCompression parseTransportCompression(const std::string &value);
 
 void sendFrameBytes(
     const SocketHandle &socket, const std::vector<std::uint8_t> &frame,
+    TransportCompression compression = TransportCompression::NONE,
+    FrameTransferStats *stats = nullptr,
+    std::size_t max_frame_bytes = kDefaultMaxFrameBytes);
+void sendFrameByteBuffers(
+    const SocketHandle &socket, const std::vector<ByteBufferView> &buffers,
     TransportCompression compression = TransportCompression::NONE,
     FrameTransferStats *stats = nullptr,
     std::size_t max_frame_bytes = kDefaultMaxFrameBytes);

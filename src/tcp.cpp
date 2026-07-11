@@ -3,16 +3,20 @@
 #include <mcpd4/protocol.h>
 
 #include <arpa/inet.h>
+#include <algorithm>
 #include <chrono>
 #include <cerrno>
 #include <cstring>
+#include <limits>
 #include <netdb.h>
 #include <poll.h>
 #include <stdexcept>
 #include <string>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <unistd.h>
+#include <vector>
 
 #ifdef MCPD4_ENABLE_SNAPPY
 #include <snappy.h>
@@ -47,6 +51,82 @@ void writeAll(int fd, const std::uint8_t *data, std::size_t size) {
     }
     written += static_cast<std::size_t>(n);
   }
+}
+
+std::uint64_t totalBufferSize(const std::vector<ByteBufferView> &buffers) {
+  std::uint64_t total = 0;
+  for (const auto &buffer : buffers) {
+    if (buffer.size > 0 && buffer.data == nullptr) {
+      throw std::runtime_error("buffer has null data");
+    }
+    if (buffer.size >
+        std::numeric_limits<std::uint64_t>::max() - total) {
+      throw std::runtime_error("frame buffer list is too large");
+    }
+    total += static_cast<std::uint64_t>(buffer.size);
+  }
+  return total;
+}
+
+void writeAllBuffers(int fd, const std::vector<ByteBufferView> &buffers) {
+  std::vector<iovec> iovecs;
+  iovecs.reserve(buffers.size());
+  for (const auto &buffer : buffers) {
+    if (buffer.size == 0) {
+      continue;
+    }
+    iovec iov{};
+    iov.iov_base = const_cast<std::uint8_t *>(buffer.data);
+    iov.iov_len = buffer.size;
+    iovecs.push_back(iov);
+  }
+
+  const long sys_iov_max = ::sysconf(_SC_IOV_MAX);
+  const std::size_t iov_max =
+      sys_iov_max > 0 ? static_cast<std::size_t>(sys_iov_max) : 1024;
+  std::size_t index = 0;
+  while (index < iovecs.size()) {
+    const auto count = std::min(iov_max, iovecs.size() - index);
+    msghdr message{};
+    message.msg_iov = iovecs.data() + index;
+    message.msg_iovlen = count;
+    const auto n = ::sendmsg(fd, &message, MSG_NOSIGNAL);
+    if (n < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      throw socketError("socket write failed");
+    }
+    if (n == 0) {
+      throw std::runtime_error("socket closed during write");
+    }
+
+    auto written = static_cast<std::size_t>(n);
+    while (written > 0 && index < iovecs.size()) {
+      if (written >= iovecs[index].iov_len) {
+        written -= iovecs[index].iov_len;
+        ++index;
+      } else {
+        auto *base = static_cast<std::uint8_t *>(iovecs[index].iov_base);
+        iovecs[index].iov_base = base + written;
+        iovecs[index].iov_len -= written;
+        written = 0;
+      }
+    }
+  }
+}
+
+std::vector<std::uint8_t> joinBuffers(
+    const std::vector<ByteBufferView> &buffers, std::uint64_t total_size) {
+  std::vector<std::uint8_t> joined;
+  joined.reserve(static_cast<std::size_t>(total_size));
+  for (const auto &buffer : buffers) {
+    if (buffer.size == 0) {
+      continue;
+    }
+    joined.insert(joined.end(), buffer.data, buffer.data + buffer.size);
+  }
+  return joined;
 }
 
 void readAll(int fd, std::uint8_t *data, std::size_t size) {
@@ -335,6 +415,30 @@ void sendFrameBytes(const SocketHandle &socket,
 #endif
 }
 
+void sendFrameByteBuffers(const SocketHandle &socket,
+                          const std::vector<ByteBufferView> &buffers,
+                          TransportCompression compression,
+                          FrameTransferStats *stats,
+                          std::size_t max_frame_bytes) {
+  if (!socket.valid()) {
+    throw std::runtime_error("cannot write to invalid socket");
+  }
+  const auto total_size = totalBufferSize(buffers);
+  requireFrameWithinLimit(total_size, max_frame_bytes,
+                          "frame payload exceeds maximum size");
+  if (compression != TransportCompression::NONE) {
+    const auto frame = joinBuffers(buffers, total_size);
+    sendFrameBytes(socket, frame, compression, stats, max_frame_bytes);
+    return;
+  }
+  if (stats != nullptr) {
+    *stats = {};
+    stats->logical_bytes = total_size;
+    stats->wire_bytes = total_size;
+  }
+  writeAllBuffers(socket.get(), buffers);
+}
+
 std::vector<std::uint8_t> receiveFrameBytes(
     const SocketHandle &socket, std::size_t max_frame_bytes,
     TransportCompression compression, FrameTransferStats *stats) {
@@ -397,7 +501,7 @@ std::vector<std::uint8_t> receiveFrameBytes(
     } else {
       throw std::runtime_error("unknown compressed transport codec");
     }
-    (void)decodeFrame(frame);
+    (void)decodeFrameType(frame);
     if (stats != nullptr) {
       stats->logical_bytes = logical_size;
       stats->wire_bytes =
@@ -425,7 +529,7 @@ std::vector<std::uint8_t> receiveFrameBytes(
   frame.resize(frame.size() + static_cast<std::size_t>(payload_size));
   readAll(socket.get(), frame.data() + 12,
           static_cast<std::size_t>(payload_size));
-  (void)decodeFrame(frame);
+  (void)decodeFrameType(frame);
   if (stats != nullptr) {
     stats->logical_bytes = static_cast<std::uint64_t>(frame.size());
     stats->wire_bytes = static_cast<std::uint64_t>(frame.size());

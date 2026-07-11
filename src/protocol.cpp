@@ -5,11 +5,16 @@
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 
 namespace mcpd4 {
 namespace {
 
 constexpr std::size_t kFrameHeaderBytes = 12;
+constexpr std::size_t kIntVectorHeaderBytes = 4;
+constexpr std::size_t kIntBytes = 4;
+constexpr std::size_t kConstraintEndpointBytes =
+    4 + 4 + 4 + 1 + 8 + 8 + 4;
 
 void require(bool condition, const std::string &message) {
   if (!condition) {
@@ -35,6 +40,31 @@ bool isKnownMessageType(std::uint32_t value) {
   return false;
 }
 
+bool rawI32VectorsSupported() {
+  const std::uint32_t value = 1;
+  return *reinterpret_cast<const std::uint8_t *>(&value) == 1 &&
+         sizeof(int) == sizeof(std::int32_t);
+}
+
+void writeLittleU32(std::uint8_t *data, std::uint32_t value) {
+  for (int shift = 0; shift < 32; shift += 8) {
+    *data++ = static_cast<std::uint8_t>((value >> shift) & 0xff);
+  }
+}
+
+void writeLittleU64(std::uint8_t *data, std::uint64_t value) {
+  for (int shift = 0; shift < 64; shift += 8) {
+    *data++ = static_cast<std::uint8_t>((value >> shift) & 0xff);
+  }
+}
+
+void writeLittleI32(std::uint8_t *data, int value) {
+  const auto signed_value = static_cast<std::int32_t>(value);
+  std::uint32_t bits = 0;
+  std::memcpy(&bits, &signed_value, sizeof(bits));
+  writeLittleU32(data, bits);
+}
+
 template <typename T> T checkedIntegerCast(std::int64_t value) {
   static_assert(std::is_integral<T>::value, "T must be integral");
   if (value < static_cast<std::int64_t>(std::numeric_limits<T>::min()) ||
@@ -54,6 +84,7 @@ template <typename T> std::uint32_t checkedSize(T size) {
 class Writer {
 public:
   const std::vector<std::uint8_t> &bytes() const { return bytes_; }
+  std::vector<std::uint8_t> takeBytes() { return std::move(bytes_); }
 
   void reserve(std::size_t size) { bytes_.reserve(size); }
 
@@ -367,10 +398,6 @@ mcpd3::PartitionSolveRequest readSolveRoundRequestPayload(Reader *reader) {
 
 std::size_t partitionPackageFrameSize(
     const mcpd3::PartitionPackage &message) {
-  constexpr std::size_t kIntVectorHeaderBytes = 4;
-  constexpr std::size_t kIntBytes = 4;
-  constexpr std::size_t kConstraintEndpointBytes =
-      4 + 4 + 4 + 1 + 8 + 8 + 4;
   return kFrameHeaderBytes +
          /*partition_id + local_node_count=*/8 +
          kIntVectorHeaderBytes + message.arcs.size() * kIntBytes +
@@ -485,7 +512,7 @@ std::vector<std::uint8_t> encodePartitionPackage(
   writer.writeVector<mcpd3::ConstraintEndpointBinding>(
       message.constraint_endpoints,
       [&](const auto &binding) { writeConstraintEndpoint(&writer, binding); });
-  return writer.bytes();
+  return writer.takeBytes();
 }
 
 mcpd3::PartitionPackage decodePartitionPackage(
@@ -505,6 +532,75 @@ mcpd3::PartitionPackage decodePartitionPackage(
           [&] { return readConstraintEndpoint(&reader); });
   requireDone(reader);
   return message;
+}
+
+bool partitionPackageFrameBuffersSupported() {
+  return rawI32VectorsSupported();
+}
+
+PartitionPackageFrameBuffers::PartitionPackageFrameBuffers(
+    const mcpd3::PartitionPackage &message)
+    : message_(&message) {
+  require(partitionPackageFrameBuffersSupported(),
+          "partition package frame buffers require little-endian int32 host");
+  const auto frame_size = partitionPackageFrameSize(message);
+  writeLittleU32(frame_header_.data(),
+                 static_cast<std::uint32_t>(MessageType::PARTITION_PACKAGE));
+  writeLittleU64(frame_header_.data() + 4, frame_size - kFrameHeaderBytes);
+  writeLittleI32(scalar_header_.data(), message.partition_id);
+  writeLittleI32(scalar_header_.data() + 4, message.local_node_count);
+  writeLittleU32(arcs_size_.data(), checkedSize(message.arcs.size()));
+  writeLittleU32(arc_capacities_size_.data(),
+                 checkedSize(message.arc_capacities.size()));
+  writeLittleU32(terminal_capacities_size_.data(),
+                 checkedSize(message.terminal_capacities.size()));
+  writeLittleU32(local_to_global_size_.data(),
+                 checkedSize(message.local_to_global.size()));
+  writeLittleU32(constraint_endpoints_size_.data(),
+                 checkedSize(message.constraint_endpoints.size()));
+
+  Writer endpoint_writer;
+  endpoint_writer.reserve(message.constraint_endpoints.size() *
+                          kConstraintEndpointBytes);
+  for (const auto &binding : message.constraint_endpoints) {
+    writeConstraintEndpoint(&endpoint_writer, binding);
+  }
+  constraint_endpoint_bytes_ = endpoint_writer.takeBytes();
+}
+
+std::size_t PartitionPackageFrameBuffers::totalSize() const {
+  require(message_ != nullptr, "partition package frame buffers are empty");
+  return partitionPackageFrameSize(*message_);
+}
+
+std::vector<ByteBufferView> PartitionPackageFrameBuffers::buffers() const {
+  require(message_ != nullptr, "partition package frame buffers are empty");
+  const auto int_vector = [](const std::vector<int> &values) {
+    return ByteBufferView{
+        reinterpret_cast<const std::uint8_t *>(values.data()),
+        values.size() * sizeof(std::int32_t)};
+  };
+  std::vector<ByteBufferView> views;
+  views.reserve(12);
+  views.push_back(ByteBufferView{frame_header_.data(), frame_header_.size()});
+  views.push_back(
+      ByteBufferView{scalar_header_.data(), scalar_header_.size()});
+  views.push_back(ByteBufferView{arcs_size_.data(), arcs_size_.size()});
+  views.push_back(int_vector(message_->arcs));
+  views.push_back(ByteBufferView{arc_capacities_size_.data(),
+                                 arc_capacities_size_.size()});
+  views.push_back(int_vector(message_->arc_capacities));
+  views.push_back(ByteBufferView{terminal_capacities_size_.data(),
+                                 terminal_capacities_size_.size()});
+  views.push_back(int_vector(message_->terminal_capacities));
+  views.push_back(ByteBufferView{local_to_global_size_.data(),
+                                 local_to_global_size_.size()});
+  views.push_back(int_vector(message_->local_to_global));
+  views.push_back(ByteBufferView{constraint_endpoints_size_.data(),
+                                 constraint_endpoints_size_.size()});
+  views.push_back(ByteBufferView{constraint_endpoint_bytes_.data(),
+                                 constraint_endpoint_bytes_.size()});
+  return views;
 }
 
 std::vector<std::uint8_t> encodeReady(const ReadyMessage &message) {

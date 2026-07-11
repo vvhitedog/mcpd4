@@ -101,6 +101,18 @@ void requirePackageEqual(const mcpd3::PartitionPackage &lhs,
   }
 }
 
+std::vector<std::uint8_t> joinBuffers(
+    const std::vector<mcpd4::ByteBufferView> &buffers) {
+  std::vector<std::uint8_t> joined;
+  for (const auto &buffer : buffers) {
+    if (buffer.size == 0) {
+      continue;
+    }
+    joined.insert(joined.end(), buffer.data, buffer.data + buffer.size);
+  }
+  return joined;
+}
+
 mcpd3::PartitionPackage makePackage() {
   mcpd3::PartitionPackage package;
   package.partition_id = 7;
@@ -185,6 +197,19 @@ void roundTripsPartitionPackage() {
           "partition package wire size should remain unchanged");
   const auto decoded = mcpd4::decodePartitionPackage(encoded);
   requirePackageEqual(decoded, message);
+}
+
+void partitionPackageFrameBuffersMatchEncodedPackage() {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  const auto message = makePackage();
+  const auto encoded = mcpd4::encodePartitionPackage(message);
+  const mcpd4::PartitionPackageFrameBuffers buffers(message);
+  require(buffers.totalSize() == encoded.size(),
+          "partition package buffer size mismatch");
+  require(joinBuffers(buffers.buffers()) == encoded,
+          "partition package buffer wire bytes mismatch");
 }
 
 void roundTripsReady() {
@@ -768,6 +793,7 @@ int main() {
     frameHeaderIsLittleEndian();
     roundTripsHello();
     roundTripsPartitionPackage();
+    partitionPackageFrameBuffersMatchEncodedPackage();
     roundTripsReady();
     roundTripsSolveRoundRequest();
     roundTripsSolveRoundBatchRequest();

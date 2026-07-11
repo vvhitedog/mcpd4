@@ -1,8 +1,12 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#include <mcpd4/buffer_view.h>
 
 #include <decomp/partition_worker.h>
 
@@ -84,6 +88,27 @@ std::vector<std::uint8_t> encodePartitionPackage(
     const mcpd3::PartitionPackage &message);
 mcpd3::PartitionPackage decodePartitionPackage(
     const std::vector<std::uint8_t> &frame);
+bool partitionPackageFrameBuffersSupported();
+
+class PartitionPackageFrameBuffers {
+public:
+  explicit PartitionPackageFrameBuffers(
+      const mcpd3::PartitionPackage &message);
+
+  std::size_t totalSize() const;
+  std::vector<ByteBufferView> buffers() const;
+
+private:
+  const mcpd3::PartitionPackage *message_ = nullptr;
+  std::array<std::uint8_t, 12> frame_header_{};
+  std::array<std::uint8_t, 8> scalar_header_{};
+  std::array<std::uint8_t, 4> arcs_size_{};
+  std::array<std::uint8_t, 4> arc_capacities_size_{};
+  std::array<std::uint8_t, 4> terminal_capacities_size_{};
+  std::array<std::uint8_t, 4> local_to_global_size_{};
+  std::array<std::uint8_t, 4> constraint_endpoints_size_{};
+  std::vector<std::uint8_t> constraint_endpoint_bytes_;
+};
 
 std::vector<std::uint8_t> encodeReady(const ReadyMessage &message);
 ReadyMessage decodeReady(const std::vector<std::uint8_t> &frame);

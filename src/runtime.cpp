@@ -256,12 +256,26 @@ void TcpPartitionWorker::loadPartition(
   std::uint64_t frame_logical_bytes = 0;
   FrameTransferStats transfer;
   try {
-    const auto frame = encodePartitionPackage(package);
-    frame_logical_bytes = static_cast<std::uint64_t>(frame.size());
-    std::cerr << "mcpd4_load_partition_begin worker "
-              << hello_.worker_name << " " << package_summary
-              << " frame_logical_bytes " << frame_logical_bytes << "\n";
-    sendFrameBytes(socket_, frame, compression_, &transfer);
+    const bool use_buffered_send =
+        compression_ == TransportCompression::NONE &&
+        partitionPackageFrameBuffersSupported();
+    if (use_buffered_send) {
+      PartitionPackageFrameBuffers frame_buffers(package);
+      frame_logical_bytes =
+          static_cast<std::uint64_t>(frame_buffers.totalSize());
+      std::cerr << "mcpd4_load_partition_begin worker "
+                << hello_.worker_name << " " << package_summary
+                << " frame_logical_bytes " << frame_logical_bytes << "\n";
+      sendFrameByteBuffers(socket_, frame_buffers.buffers(), compression_,
+                           &transfer);
+    } else {
+      const auto frame = encodePartitionPackage(package);
+      frame_logical_bytes = static_cast<std::uint64_t>(frame.size());
+      std::cerr << "mcpd4_load_partition_begin worker "
+                << hello_.worker_name << " " << package_summary
+                << " frame_logical_bytes " << frame_logical_bytes << "\n";
+      sendFrameBytes(socket_, frame, compression_, &transfer);
+    }
     recordFrameSent(&timing_stats_.rpc_bytes, MessageType::PARTITION_PACKAGE,
                     transfer);
     (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes,
