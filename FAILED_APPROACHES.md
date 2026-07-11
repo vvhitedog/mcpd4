@@ -1,5 +1,32 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 07:36 PDT
+
+- Do not use the current `MCPD3_PARTITIONER=local` region-grow partitioner for
+  this `babyface.n6c10` p2/w2 local TCP target. A one-iteration probe,
+  `benchmark_results/local_tcp_partitioner_local_p2_w2_iter1_pass0_malloc_babyface_saturate_20260711_071901`,
+  reduced boundary endpoints from `125,000` to `103,469`, but the full
+  schedule probe
+  `benchmark_results/local_tcp_partitioner_local_p2_w2_iter23_pass0_malloc_babyface_saturate_20260711_071957`
+  was already worse than the basic-partitioner baseline by total iteration
+  `20`: aggregate solve RPC `272,450,865us` versus `192,078,882us` for the
+  basic p2/w2 start `10000` run. It was stopped early.
+- Do not lower this schedule all the way to start `10` under the current
+  regularization budget. Run
+  `benchmark_results/local_tcp_fullschedule_p2_w2_iter23_start10_malloc_babyface_saturate_20260711_072755`
+  emitted `regularization budget 507200 is not below limit 1000`, promoted the
+  objective scale, and had already spent `94,434,400us` aggregate solve RPC by
+  total iteration `10`; it was stopped early.
+- Do not use start `50` with max `23` iterations per scale as the final tuned
+  setting. Run
+  `benchmark_results/local_tcp_fullschedule_p2_w2_iter23_start50_malloc_babyface_saturate_20260711_072953`
+  was fast at `18,295,812us`, but ended with status `2`, stop_reason `3`, and
+  `22` final disagreements. Raising the cap to `60` fixes agreement and keeps
+  the wall time essentially unchanged.
+- Nearby clean starts `25`, `40`, `75`, `100`, and `1000` are all slower than
+  start `50` max `60` on this benchmark. They are useful controls, not the
+  current target.
+
 ## 2026-07-11 07:16 PDT
 
 - Do not lower the p2/w2 local TCP full-schedule cap to `21` for

@@ -1,5 +1,47 @@
 # Progress Log
 
+## 2026-07-11 07:36 PDT
+
+- Found a much faster local TCP full-schedule setting for `babyface.n6c10`.
+  Settings unless noted: p2/w2, `MCPD3_PARTITIONER=basic`, malloc-backed BK
+  storage, no RPC compression, `--saturate-capacity-overflow`, objective scale
+  `1000`.
+- Best new result: schedule start `50`, max `60` iterations per scale:
+  `benchmark_results/local_tcp_fullschedule_p2_w2_iter60_start50_malloc_babyface_saturate_20260711_073059`
+  reached status `0`, stop_reason `1`, final objective `19448`, final
+  certified lower bound `19448`, final disagreements `0`, no objective-scale
+  promotions, no capacity saturations, no regularization contribution, total
+  iterations `42`, wall `18,227,136us`, setup `2,272,005us`, solve
+  `12,764,679us`, aggregate worker solve `16,213,830us`, worker RPC overhead
+  `510,540us`, partition-load RPC `4,389,356us`, solve request TX `891,818`
+  bytes, solve result RX `1,704,714` bytes.
+- Repeat confirmed the result:
+  `benchmark_results/local_tcp_fullschedule_p2_w2_iter60_start50_repeat_malloc_babyface_saturate_20260711_073525`
+  reached status `0`, stop_reason `1`, final disagreements `0`, total
+  iterations `42`, wall `18,210,424us`, solve `12,752,740us`, aggregate
+  worker solve `16,200,406us`.
+- Neighboring schedule probes:
+  - start `1000`, max `23`, levels `4`:
+    `benchmark_results/local_tcp_fullschedule_p2_w2_iter23_start1000_malloc_babyface_saturate_20260711_072440`,
+    clean agreement in `55` iterations and `51,483,692us` wall;
+  - start `100`, max `23`, levels `3`:
+    `benchmark_results/local_tcp_fullschedule_p2_w2_iter23_start100_malloc_babyface_saturate_20260711_072651`,
+    clean agreement in `24` iterations and `20,271,280us` wall;
+  - start `25`, max `80`, levels `3`:
+    `benchmark_results/local_tcp_fullschedule_p2_w2_iter80_start25_malloc_babyface_saturate_20260711_073212`,
+    clean agreement in `65` iterations and `20,684,631us` wall;
+  - start `40`, max `80`, levels `3`:
+    `benchmark_results/local_tcp_fullschedule_p2_w2_iter80_start40_malloc_babyface_saturate_20260711_073424`,
+    clean agreement in `47` iterations and `19,283,708us` wall;
+  - start `75`, max `60`, levels `3`:
+    `benchmark_results/local_tcp_fullschedule_p2_w2_iter60_start75_malloc_babyface_saturate_20260711_073317`,
+    clean agreement in `50` iterations and `20,342,619us` wall.
+- Conclusion: for this local TCP benchmark, the old start `10000` schedule was
+  doing unnecessary expensive warmup work. Starting at `50` finds the same
+  objective/certificate and agreement with roughly a `10.6x` wall-time
+  reduction versus the previous best p2/w2 max `23` start `10000` run
+  (`193,613,915us`).
+
 ## 2026-07-11 07:16 PDT
 
 - Tightened the memory-resident local TCP full-schedule cap sweep for
