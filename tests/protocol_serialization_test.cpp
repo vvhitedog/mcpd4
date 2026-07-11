@@ -177,8 +177,10 @@ void roundTripsHello() {
 
 void roundTripsPartitionPackage() {
   const auto message = makePackage();
-  const auto decoded = mcpd4::decodePartitionPackage(
-      mcpd4::encodePartitionPackage(message));
+  const auto encoded = mcpd4::encodePartitionPackage(message);
+  require(encoded.size() == 162,
+          "partition package wire size should remain unchanged");
+  const auto decoded = mcpd4::decodePartitionPackage(encoded);
   requirePackageEqual(decoded, message);
 }
 

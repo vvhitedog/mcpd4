@@ -1914,6 +1914,44 @@
     individual package transfer;
   - setup wall improvement from the collected baseline is about `43.5%`
     (`34.55s -> 19.53s`).
+- Added mcpd4 protocol fast path for partition packages:
+  - pre-reserve the final package frame size;
+  - encode/decode large `int` vectors in bulk on little-endian 32-bit-int
+    hosts while preserving the existing wire format;
+  - added a fixed package wire-size assertion to
+    `protocol_serialization_test`.
+- Bulk-encoding benchmark, same p10/w2/file-mmap/no-compression setup:
+  - run directory:
+    `benchmark_results/local_tcp_parallel_bulk_babyface_p10_w2_none_20260711_012809`;
+  - `timing_coordinator_setup_wall_us = 18,017,156`;
+  - `timing_load_partition_rpc_us = 35,146,645`;
+  - additional setup wall improvement after parallel loading: about `7.8%`
+    (`19.53s -> 18.02s`).
+- Local TCP configuration sweep on the same graph/config with worker
+  `--bk-storage malloc` and no compression:
+  - p10/w2:
+    `benchmark_results/local_tcp_parallel_bulk_malloc_babyface_p10_w2_none_20260711_012938`,
+    setup `16,163,886us`, total `21,853,028us`;
+  - p10/w4:
+    `benchmark_results/local_tcp_parallel_bulk_malloc_babyface_p10_w4_none_20260711_013018`,
+    setup `12,028,587us`, total `17,758,103us`;
+  - p10/w8:
+    `benchmark_results/local_tcp_parallel_bulk_malloc_babyface_p10_w8_none_20260711_013050`,
+    setup `10,868,068us`, total `16,577,284us`;
+  - p10/w10:
+    `benchmark_results/local_tcp_parallel_bulk_malloc_babyface_p10_w10_none_20260711_013120`,
+    setup `8,085,850us`, total `13,860,731us`;
+  - for this one-iteration setup-heavy benchmark, one local worker per
+    partition was best among the tested local TCP points.
+- No-TCP in-process comparators after the same code changes:
+  - p10/w2:
+    `benchmark_results/inprocess_parallel_bulk_babyface_p10_w2_20260711_012845`,
+    setup `9,607,807us`, total `14,912,483us`;
+  - p10/w10:
+    `benchmark_results/inprocess_parallel_bulk_babyface_p10_w10_20260711_013142`,
+    setup `3,764,435us`, total `9,232,235us`;
+  - remaining local TCP overhead for p10/w10 is about `4.32s` in setup
+    (`8.09s - 3.76s`) on this run.
 - Verified:
   - `cmake -S third_party/mcpd3 -B build/mcpd3-native -DCMAKE_BUILD_TYPE=Release`;
   - `cmake --build build/mcpd3-native -j`;
