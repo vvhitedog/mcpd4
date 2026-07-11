@@ -1,5 +1,40 @@
 # Progress Log
 
+## 2026-07-11 04:10 PDT
+
+- Added mcpd3 arc-vector pre-reservation during dual-decomposition package
+  construction:
+  - after partition labels are computed, mcpd3 now counts how many original
+    arcs each subproblem will own;
+  - each `MinCutSubGraph` reserves exact endpoint/capacity vector capacity
+    before distributing arcs;
+  - this avoids repeated large vector reallocations while preserving package
+    contents and wire format.
+- Added mcpd3 coverage for a many-arc package-only export path that validates
+  exported packages and loads/solves them through `PartitionWorkerCoordinator`.
+- Benchmarked `babyface.n6c10`, p6/w6, one iteration, malloc-backed BK storage,
+  no compression:
+  - previous current baseline
+    `benchmark_results/local_tcp_after_timing_revert_p6_w6_malloc_babyface_none_20260711_040230`:
+    total `6,910,844us`, read `2,439,633us`, partition `1,343,227us`,
+    setup `2,212,085us`, solve `902,907us`;
+  - arc-reserve run
+    `benchmark_results/local_tcp_arc_reserve_p6_w6_malloc_babyface_none_20260711_041007`:
+    total `6,736,326us`, read `2,456,462us`, partition `1,149,368us`,
+    setup `2,214,534us`, solve `903,222us`;
+  - arc-reserve repeat
+    `benchmark_results/local_tcp_arc_reserve_repeat_p6_w6_malloc_babyface_none_20260711_041024`:
+    total `6,732,454us`, read `2,441,456us`, partition `1,157,074us`,
+    setup `2,212,578us`, solve `907,623us`.
+- Output and transport size were unchanged:
+  `final_objective_raw=1,970,000`, `final_disagreement_count=134,985`,
+  partition-load TX `405,000,240` bytes.
+- Verified:
+  - `cmake --build build/mcpd3-native -j`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`;
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.
+
 ## 2026-07-11 03:44 PDT
 
 - Added a scaled directed DIMACS reader in mcpd3 so directed inputs can apply
