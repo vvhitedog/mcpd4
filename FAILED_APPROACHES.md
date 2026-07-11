@@ -654,3 +654,26 @@
   `8,116,278us` total.
 - The winning version is the signed single-direction format that compacts an
   arc when at most one direction has nonzero capacity.
+
+## 2026-07-11 03:34 PDT
+
+- Do not use sparse terminal-capacity worker-load payloads in the current local
+  TCP path. The experiment encoded mostly-zero terminal vectors as
+  `(local_index, capacity)` pairs and reduced p6/w6 `babyface.n6c10`
+  partition-load bytes from `405,000,240` to `383,341,200`, but it made setup
+  substantially slower:
+  - baseline after single-direction capacity compaction:
+    `benchmark_results/local_tcp_compact_single_dir_caps_cached_malloc_babyface_p6_w6_none_20260711_032828`,
+    total `7,090,183us`, setup `2,250,509us`, load RPC aggregate
+    `12,318,888us`;
+  - sparse terminal run:
+    `benchmark_results/local_tcp_sparse_terminals_malloc_babyface_p6_w6_none_20260711_033351`,
+    total `8,195,761us`, setup `3,344,169us`, load RPC aggregate
+    `18,880,272us`;
+  - sparse terminal repeat:
+    `benchmark_results/local_tcp_sparse_terminals_repeat_malloc_babyface_p6_w6_none_20260711_033419`,
+    total `8,139,662us`, setup `3,321,798us`, load RPC aggregate
+    `18,838,163us`.
+- The code was reverted before commit. If terminal sparsity is revisited, it
+  needs a lower-overhead worker-side construction path, not just a smaller wire
+  representation that expands back into a full vector before BK load.
