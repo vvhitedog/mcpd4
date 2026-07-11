@@ -1246,3 +1246,25 @@
   BK/solver footprint is over the physical-memory limit here. The practical
   p32/w8 local streaming cache on this machine remains about `1 GiB` per worker
   unless worker count, partition count, or host memory changes.
+
+## 2026-07-11 14:05 PDT
+
+- Do not spend full local p16/w8 or p18/w8 large `adhead.n26c100` streaming
+  solve time on this 15 GiB laptop without more RAM, lower worker count, or a
+  different scheduling policy.
+- Footprint probes:
+  - `benchmark_results/large_adhead_footprint_p16_p20_p28_20260711_094100`;
+  - `benchmark_results/large_adhead_footprint_p18_p19_20260711_095800`.
+- Relevant estimates:
+  - p16: max loaded solver `1876951040` bytes, worst eight active loaded
+    solvers `14294450176` bytes;
+  - p18: max loaded solver `1681048668` bytes, worst eight active loaded
+    solvers `12727007936` bytes;
+  - p19: max loaded solver `1598487420` bytes, worst eight active loaded
+    solvers `12065980792` bytes;
+  - p20: max loaded solver `1524181848` bytes, worst eight active loaded
+    solvers `11471857240` bytes.
+- p19 did complete the 390s fixed-window probe and gave the best lower-bound
+  progress so far, but live monitoring showed it running with swap effectively
+  full. p18 and p16 are too close to the host memory limit to be good next
+  bets for local p*/w8 streaming.

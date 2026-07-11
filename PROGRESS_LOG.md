@@ -3351,3 +3351,38 @@
   problem by itself, but it removes a major self-inflicted cache-thrash path
   and gets the streaming path to the same best lower bound observed in earlier
   p32 local large-adhead probes under the 390s window.
+
+## 2026-07-11 14:05 PDT
+
+- Continued large `adhead.n26c100` local out-of-core streaming tuning after the
+  resident-first worker change. These runs used the in-process benchmark to
+  isolate worker streaming and partition-count behavior before paying local TCP
+  process overhead.
+- Fixed-window comparison, all with p*/w8, `objective_scale=1000`, schedule
+  start `1000`, four schedule levels, `--streaming-cache-bytes 1000000000`,
+  and the same 390s timeout:
+  - p32 baseline before resident-first:
+    `benchmark_results/large_adhead_inprocess_stream_p32_w8_cache1g_os1000_start1000_20260711_085651`,
+    10 iterations, best scaled lower bound `272113000`, last disagreements
+    `222421`;
+  - p32 resident-first:
+    `benchmark_results/large_adhead_inprocess_stream_resfirst_p32_w8_cache1g_os1000_start1000_20260711_090915`,
+    17 iterations, best scaled lower bound `379330000`, last disagreements
+    `241155`;
+  - p24 resident-first:
+    `benchmark_results/large_adhead_inprocess_stream_resfirst_p24_w8_cache1g_os1000_start1000_20260711_093200`,
+    21 iterations, best scaled lower bound `508783000`, last disagreements
+    `176494`;
+  - p20 resident-first:
+    `benchmark_results/large_adhead_inprocess_stream_resfirst_p20_w8_cache1g_os1000_start1000_20260711_094600`,
+    21 iterations, best scaled lower bound `577106000`, last disagreements
+    `123948`;
+  - p19 resident-first:
+    `benchmark_results/large_adhead_inprocess_stream_resfirst_p19_w8_cache1g_os1000_start1000_20260711_100100`,
+    22 iterations, best scaled lower bound `597321000`, last disagreements
+    `61074`.
+- Interpretation: the best current local streaming point is p19/w8 for this
+  15 GiB laptop, with about `2.20x` better best-lower-bound progress than the
+  original p32 streaming baseline in the same wall-time window. It is tight on
+  memory, so p20/w8 is the safer fallback if repeatability matters more than
+  the last few percent of progress.
