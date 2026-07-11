@@ -512,7 +512,8 @@ void TcpPartitionWorker::loadPartition(
         compression_ == TransportCompression::NONE &&
         partitionPackageFrameBuffersSupported();
     if (use_buffered_send) {
-      PartitionPackageFrameBuffers frame_buffers(package);
+      PartitionPackageFrameBuffers frame_buffers(
+          package, PartitionPackageFrameBuffers::Mode::WORKER_LOAD);
       frame_logical_bytes =
           static_cast<std::uint64_t>(frame_buffers.totalSize());
       std::cerr << "mcpd4_load_partition_begin worker "

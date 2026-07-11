@@ -92,14 +92,21 @@ bool partitionPackageFrameBuffersSupported();
 
 class PartitionPackageFrameBuffers {
 public:
+  enum class Mode {
+    FULL,
+    WORKER_LOAD,
+  };
+
   explicit PartitionPackageFrameBuffers(
-      const mcpd3::PartitionPackage &message);
+      const mcpd3::PartitionPackage &message,
+      Mode mode = Mode::FULL);
 
   std::size_t totalSize() const;
   std::vector<ByteBufferView> buffers() const;
 
 private:
   const mcpd3::PartitionPackage *message_ = nullptr;
+  Mode mode_ = Mode::FULL;
   std::array<std::uint8_t, 12> frame_header_{};
   std::array<std::uint8_t, 8> scalar_header_{};
   std::array<std::uint8_t, 4> arcs_size_{};

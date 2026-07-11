@@ -212,6 +212,27 @@ void partitionPackageFrameBuffersMatchEncodedPackage() {
           "partition package buffer wire bytes mismatch");
 }
 
+void workerLoadPartitionPackageFrameBuffersOmitLocalToGlobal() {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  const auto message = makePackage();
+  const auto encoded = mcpd4::encodePartitionPackage(message);
+  const mcpd4::PartitionPackageFrameBuffers buffers(
+      message, mcpd4::PartitionPackageFrameBuffers::Mode::WORKER_LOAD);
+  const auto compact = joinBuffers(buffers.buffers());
+  require(compact.size() + message.local_to_global.size() * sizeof(int) ==
+              encoded.size(),
+          "worker-load package should omit local-to-global bytes");
+  require(buffers.totalSize() == compact.size(),
+          "worker-load package buffer size mismatch");
+
+  auto expected = message;
+  expected.local_to_global.clear();
+  const auto decoded = mcpd4::decodePartitionPackage(compact);
+  requirePackageEqual(decoded, expected);
+}
+
 void roundTripsReady() {
   mcpd4::ReadyMessage message;
   message.worker_name = "worker-ready";
@@ -794,6 +815,7 @@ int main() {
     roundTripsHello();
     roundTripsPartitionPackage();
     partitionPackageFrameBuffersMatchEncodedPackage();
+    workerLoadPartitionPackageFrameBuffersOmitLocalToGlobal();
     roundTripsReady();
     roundTripsSolveRoundRequest();
     roundTripsSolveRoundBatchRequest();

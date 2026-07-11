@@ -2236,3 +2236,39 @@
   - this beats the file-backed p6/w6 repeats on the smaller benchmark, but
     remains a memory-heavy speed probe rather than the recommended large or
     out-of-core default.
+
+## 2026-07-11 02:50 PDT
+
+- Added a compact worker-load package mode for the no-compression TCP fast
+  path. Canonical `encodePartitionPackage` remains unchanged, but
+  `TcpPartitionWorker::loadPartition` now omits `local_to_global` from the
+  scatter/gather worker-load frame because remote workers do not use that field
+  for solver construction or label reporting.
+- Added coverage:
+  - protocol test verifies the compact worker-load frame decodes as the same
+    package with `local_to_global` empty and has exactly the expected byte
+    reduction;
+  - TCP loopback test verifies remote load telemetry omits
+    `local_to_global` bytes and the loaded worker can still solve and return
+    boundary labels.
+- Benchmarked `babyface.n6c10`, p6/w6, one iteration, no compression:
+  - file-backed BK mmap + `willneed`:
+    `benchmark_results/local_tcp_omit_l2g_filemmap_babyface_p6_w6_none_20260711_024927`,
+    total `8,778,549us`, setup `3,606,458us`, solve `1,058,663us`,
+    partition-load TX `532,500,240` bytes;
+  - matched prior file-backed p6/w6 runs transmitted `554,250,240` partition
+    bytes and took `8,868,286us` and `9,077,283us`;
+  - `malloc` speed probe:
+    `benchmark_results/local_tcp_omit_l2g_malloc_babyface_p6_w6_none_20260711_025013`,
+    total `8,290,466us`, setup `3,254,290us`, solve `907,569us`,
+    partition-load TX `532,500,240` bytes.
+- The optimization removes `21,750,000` bytes from this p6/w6 package load.
+  Wall-time improvement is modest on this setup, but it is a strictly smaller
+  local TCP transfer and keeps results unchanged (`final_objective_raw`
+  `1,970,000`, `final_disagreement_count` `134,985` in all matched p6 runs).
+- Verified:
+  - `cmake --build build -j`;
+  - `./build/protocol_serialization_test`;
+  - `./build/tcp_loopback_test`;
+  - `ctest --test-dir build --output-on-failure`;
+  - `ctest --test-dir build/mcpd3-native --output-on-failure`.

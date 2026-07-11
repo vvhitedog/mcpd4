@@ -236,6 +236,51 @@ void sendsFrameFromMultipleBuffers() {
           "buffered send should report wire bytes");
 }
 
+void remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp() {
+  if (!mcpd4::partitionPackageFrameBuffersSupported()) {
+    return;
+  }
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker =
+      startRemoteWorker(&listener, &client, "compact-package-worker");
+  try {
+    constexpr int kBoundaryLabelCount = 128;
+    const auto package = makeManyBoundaryLabelsPackage(
+        /*partition_id=*/5, kBoundaryLabelCount);
+    const auto full_frame_size =
+        mcpd4::encodePartitionPackage(package).size();
+    worker->loadPartition(package);
+
+    const auto load_bytes =
+        worker->timingStats().rpc_bytes.partition_load_tx_bytes;
+    require(load_bytes + package.local_to_global.size() * sizeof(int) ==
+                full_frame_size,
+            "remote load should omit local-to-global payload bytes");
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = package.partition_id;
+    const auto result = worker->solveRound(request);
+    require(result.constrained_labels.size() ==
+                static_cast<size_t>(kBoundaryLabelCount),
+            "compact package load should preserve boundary labels");
+    bool saw_first_constraint_id = false;
+    for (const auto &label : result.constrained_labels) {
+      if (label.constraint_id == 20000) {
+        saw_first_constraint_id = true;
+        break;
+      }
+    }
+    require(saw_first_constraint_id,
+            "compact package load should preserve endpoint constraint ids");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
 void rejectsOversizedPayloadBeforeReadingBody() {
   auto pair = makeConnectedPair();
   const std::vector<std::uint8_t> payload{1, 2, 3, 4};
@@ -776,6 +821,7 @@ int main() {
   try {
     receivesFrameSplitAcrossTcpPackets();
     sendsFrameFromMultipleBuffers();
+    remoteWorkerLoadPartitionOmitsLocalToGlobalOverTcp();
     rejectsOversizedPayloadBeforeReadingBody();
     rejectsOversizedPayloadBeforeWritingBody();
     rejectsUnknownMessageTypeOnReceiveWithoutCompression();

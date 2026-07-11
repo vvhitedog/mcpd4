@@ -397,14 +397,20 @@ mcpd3::PartitionSolveRequest readSolveRoundRequestPayload(Reader *reader) {
 }
 
 std::size_t partitionPackageFrameSize(
-    const mcpd3::PartitionPackage &message) {
+    const mcpd3::PartitionPackage &message,
+    PartitionPackageFrameBuffers::Mode mode =
+        PartitionPackageFrameBuffers::Mode::FULL) {
+  const std::size_t local_to_global_bytes =
+      mode == PartitionPackageFrameBuffers::Mode::WORKER_LOAD
+          ? 0
+          : message.local_to_global.size() * kIntBytes;
   return kFrameHeaderBytes +
          /*partition_id + local_node_count=*/8 +
          kIntVectorHeaderBytes + message.arcs.size() * kIntBytes +
          kIntVectorHeaderBytes + message.arc_capacities.size() * kIntBytes +
          kIntVectorHeaderBytes +
          message.terminal_capacities.size() * kIntBytes +
-         kIntVectorHeaderBytes + message.local_to_global.size() * kIntBytes +
+         kIntVectorHeaderBytes + local_to_global_bytes +
          /*constraint endpoint vector header=*/4 +
          message.constraint_endpoints.size() * kConstraintEndpointBytes;
 }
@@ -539,11 +545,11 @@ bool partitionPackageFrameBuffersSupported() {
 }
 
 PartitionPackageFrameBuffers::PartitionPackageFrameBuffers(
-    const mcpd3::PartitionPackage &message)
-    : message_(&message) {
+    const mcpd3::PartitionPackage &message, Mode mode)
+    : message_(&message), mode_(mode) {
   require(partitionPackageFrameBuffersSupported(),
           "partition package frame buffers require little-endian int32 host");
-  const auto frame_size = partitionPackageFrameSize(message);
+  const auto frame_size = partitionPackageFrameSize(message, mode_);
   writeLittleU32(frame_header_.data(),
                  static_cast<std::uint32_t>(MessageType::PARTITION_PACKAGE));
   writeLittleU64(frame_header_.data() + 4, frame_size - kFrameHeaderBytes);
@@ -555,7 +561,9 @@ PartitionPackageFrameBuffers::PartitionPackageFrameBuffers(
   writeLittleU32(terminal_capacities_size_.data(),
                  checkedSize(message.terminal_capacities.size()));
   writeLittleU32(local_to_global_size_.data(),
-                 checkedSize(message.local_to_global.size()));
+                 mode_ == Mode::WORKER_LOAD
+                     ? 0
+                     : checkedSize(message.local_to_global.size()));
   writeLittleU32(constraint_endpoints_size_.data(),
                  checkedSize(message.constraint_endpoints.size()));
 
@@ -570,7 +578,7 @@ PartitionPackageFrameBuffers::PartitionPackageFrameBuffers(
 
 std::size_t PartitionPackageFrameBuffers::totalSize() const {
   require(message_ != nullptr, "partition package frame buffers are empty");
-  return partitionPackageFrameSize(*message_);
+  return partitionPackageFrameSize(*message_, mode_);
 }
 
 std::vector<ByteBufferView> PartitionPackageFrameBuffers::buffers() const {
@@ -595,7 +603,11 @@ std::vector<ByteBufferView> PartitionPackageFrameBuffers::buffers() const {
   views.push_back(int_vector(message_->terminal_capacities));
   views.push_back(ByteBufferView{local_to_global_size_.data(),
                                  local_to_global_size_.size()});
-  views.push_back(int_vector(message_->local_to_global));
+  if (mode_ == Mode::WORKER_LOAD) {
+    views.push_back(ByteBufferView{nullptr, 0});
+  } else {
+    views.push_back(int_vector(message_->local_to_global));
+  }
   views.push_back(ByteBufferView{constraint_endpoints_size_.data(),
                                  constraint_endpoints_size_.size()});
   views.push_back(ByteBufferView{constraint_endpoint_bytes_.data(),
