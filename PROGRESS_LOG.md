@@ -2229,3 +2229,10 @@
   p6/w6, repeatable around `8.9s-9.1s` coordinator wall. Higher p/w counts
   reduce some solve time but lose more to package/load contention; lower p/w
   counts reduce load cost but lose solve parallelism.
+- Ran a matched p6/w6 `malloc` worker-storage probe now that RAM was available:
+  - `benchmark_results/local_tcp_malloc_after_memfree_babyface_p6_w6_none_20260711_024358`;
+  - coordinator total `8,420,003us`, setup `3,269,665us`, solve
+    `917,688us`, aggregate partition-load RPC `18,638,094us`;
+  - this beats the file-backed p6/w6 repeats on the smaller benchmark, but
+    remains a memory-heavy speed probe rather than the recommended large or
+    out-of-core default.
