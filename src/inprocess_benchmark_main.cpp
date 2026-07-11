@@ -216,6 +216,16 @@ void scaleGraph(mcpd3::MinCutGraph *graph, long factor, bool saturate) {
 std::vector<mcpd3::PartitionPackage>
 makePartitionPackages(int partition_count, mcpd3::MinCutGraph graph,
                       long objective_scale) {
+  if (partition_count == 1) {
+    mcpd3::PartitionPackage package;
+    package.partition_id = 0;
+    package.local_node_count = graph.nnode;
+    package.arcs = std::move(graph.arcs);
+    package.arc_capacities = std::move(graph.arc_capacities);
+    package.terminal_capacities = std::move(graph.terminal_capacities);
+    return {std::move(package)};
+  }
+
   mcpd3::DualDecompositionOptions package_options;
   package_options.track_primal_upper_bound = false;
   package_options.verbose = false;

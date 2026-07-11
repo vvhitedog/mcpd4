@@ -3188,3 +3188,34 @@
   - `./build/tcp_loopback_test`;
   - `ctest --test-dir build --output-on-failure`;
   - `ctest --test-dir build/mcpd3-native --output-on-failure`.
+
+## 2026-07-11 07:53 PDT
+
+- Added a direct single-partition package path for the coordinator and
+  in-process benchmark. When `partition_count == 1`, the code now moves the
+  full graph directly into one `PartitionPackage` instead of invoking the dual
+  decomposition partition package builder and materializing a redundant
+  `local_to_global` vector.
+- Added process integration coverage for the direct path. The test uses
+  `objective_scale=7` and checks that the p1 distributed solve matches the
+  in-process reference, preserves that objective scale, finishes in one solve
+  round, and logs `local_to_global_count 0` plus
+  `constraint_endpoint_count 0`.
+- Verified:
+  - `./build/process_integration_test ./build/mcpd4_coordinator ./build/mcpd4_worker ./build/mcpd4_discovery ./build/mcpd4_status tests/fixtures`;
+  - `ctest --test-dir build --output-on-failure`.
+- Benchmarked the p1/w1 local TCP `babyface.n6c10` control with malloc BK
+  storage, no compression, `objective_scale=1`, and capacity saturation:
+  - `benchmark_results/local_tcp_direct_p1_w1_iter60_start50_os1_malloc_babyface_saturate_20260711_075330`;
+  - final objective/certified LB `19448`, disagreements `0`, one iteration;
+  - total wall `9,267,786us`, setup `1,625,505us`, partition wall `254,128us`,
+    solve `5,285,440us`, load RPC `1,593,049us`;
+  - coordinator package log confirms `local_to_global_count 0` and
+    `constraint_endpoint_count 0`.
+- Compared with the previous p1/w1 control
+  `benchmark_results/local_tcp_fullschedule_p1_w1_iter60_start50_os1_malloc_babyface_saturate_20260711_074153`
+  (`10,043,781us` total, `1,670,064us` load RPC), this saves about `0.78s`
+  total wall time while preserving the exact result. Package wire bytes remain
+  `384,750,040` because the worker-load protocol already omitted
+  `local_to_global` on the wire; the win is avoiding coordinator-side
+  partition construction work.

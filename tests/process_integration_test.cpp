@@ -601,6 +601,36 @@ void fixtureProcessMatchesInProcessReference(
   requireEqual(distributed_run.summary, reference, config.name);
 }
 
+void singlePartitionProcessUsesDirectPackage(
+    const std::string &coordinator_bin, const std::string &worker_bin,
+    const std::string &fixture_dir) {
+  const CaseConfig config{/*name=*/"single_partition_direct",
+                          /*fixture=*/"hand_bottleneck.max",
+                          /*worker_count=*/1,
+                          /*partition_count=*/1,
+                          /*max_iterations=*/5,
+                          /*schedule_levels=*/1,
+                          /*schedule_start=*/50,
+                          /*objective_scale=*/7};
+  const auto reference = runInProcessReference(fixture_dir, config);
+  const auto distributed_run =
+      runDistributedProcess(coordinator_bin, worker_bin, fixture_dir, config,
+                            {"--progress-every", "1"});
+  requireEqual(distributed_run.summary, reference, config.name);
+  require(distributed_run.output.find("local_to_global_count 0") !=
+              std::string::npos,
+          "single-partition package should not materialize local_to_global\n" +
+              distributed_run.output);
+  require(distributed_run.output.find("constraint_endpoint_count 0") !=
+              std::string::npos,
+          "single-partition package should not have boundary constraints\n" +
+              distributed_run.output);
+  require(distributed_run.summary.total_iterations == 1,
+          "single-partition solve should finish after one round");
+  require(distributed_run.summary.objective_scale == config.objective_scale,
+          "single-partition direct package should preserve objective scale");
+}
+
 void directedScaledReaderProcessMatchesReference(
     const std::string &coordinator_bin, const std::string &worker_bin,
     const std::string &fixture_dir) {
@@ -1433,6 +1463,8 @@ int main(int argc, char **argv) {
                    /*fixture=*/"random_small.max",
                    /*worker_count=*/2,
                    /*partition_count=*/3});
+    singlePartitionProcessUsesDirectPackage(coordinator_bin, worker_bin,
+                                            fixture_dir);
     directedScaledReaderProcessMatchesReference(coordinator_bin, worker_bin,
                                                 fixture_dir);
     coordinatorAcceptTimeoutIsExposed(coordinator_bin, fixture_dir);
