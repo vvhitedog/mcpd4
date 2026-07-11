@@ -1,5 +1,57 @@
 # Progress Log
 
+## 2026-07-11 06:28 PDT
+
+- Used the newly freed memory to run malloc-backed full local TCP schedule
+  probes on `babyface.n6c10` with saturation enabled for objective-scale
+  promotion. Settings unless noted: no compression, schedule start `10000`,
+  five schedule levels, objective scale `1000`,
+  `--saturate-capacity-overflow`.
+- Key result: p15/w15 remains the best short single-scale point, but it is not
+  the best full primal-recovery point. Lower partition counts reduce boundary
+  disagreement enough to matter more than single-iteration throughput.
+- Full-schedule results:
+  - p15/w15, max `40`:
+    `benchmark_results/local_tcp_fullschedule_p15_w15_iter40_malloc_babyface_saturate_20260711_055159`,
+    status `2`, stop_reason `3`, final disagreements `482`, promotions `2`,
+    objective scale `100000`, total iterations `339`, wall
+    `317,670,112us`;
+  - p15/w15, max `60`:
+    `benchmark_results/local_tcp_fullschedule_p15_w15_iter60_malloc_babyface_saturate_20260711_055749`,
+    status `2`, stop_reason `3`, final disagreements `125`, promotions `2`,
+    objective scale `100000`, total iterations `433`, wall
+    `357,928,457us`;
+  - p15/w15, max `80`:
+    `benchmark_results/local_tcp_fullschedule_p15_w15_iter80_malloc_babyface_saturate_20260711_060417`,
+    status `1`, stop_reason `4`, final disagreements `213`, promotions `2`,
+    objective scale `100000`, total iterations `451`, wall
+    `359,631,211us`;
+  - p6/w6, max `60`:
+    `benchmark_results/local_tcp_fullschedule_p6_w6_iter60_malloc_babyface_saturate_20260711_061046`,
+    status `2`, stop_reason `3`, final disagreements `40`, promotions `1`,
+    objective scale `10000`, total iterations `328`, wall `224,366,623us`;
+  - p6/w6, max `80`:
+    `benchmark_results/local_tcp_fullschedule_p6_w6_iter80_malloc_babyface_saturate_20260711_061454`,
+    status `1`, stop_reason `4`, final disagreements `191`, promotions `1`,
+    objective scale `10000`, total iterations `304`, wall `228,433,826us`;
+  - p4/w4, max `60`:
+    `benchmark_results/local_tcp_fullschedule_p4_w4_iter60_malloc_babyface_saturate_20260711_062351`,
+    status `2`, stop_reason `3`, final disagreements `93`, promotions `1`,
+    objective scale `10000`, total iterations `311`, wall `232,498,630us`;
+  - p3/w3, max `60`:
+    `benchmark_results/local_tcp_fullschedule_p3_w3_iter60_malloc_babyface_saturate_20260711_061859`,
+    status `0`, stop_reason `2`, final disagreements `0`, promotions `1`,
+    objective scale `10000`, total iterations `228`, wall `277,151,276us`,
+    setup `2,084,914us`, solve `271,865,261us`, aggregate worker solve
+    `441,009,847us`, worker RPC overhead `5,180,907us`, partition-load RPC
+    `5,891,642us`, solve request TX `33,813,864` bytes, solve result RX
+    `30,323,574` bytes.
+- Conclusion: the best observed valid local TCP full solve is now p3/w3
+  max-60 at `277.2s` wall. p6/w6 and p4/w4 are faster but do not produce a
+  primal agreement certificate under these settings. More p15 iterations are
+  not enough; p15 reaches a small-disagreement tail and then either hits the
+  iteration cap or no-lower-bound-improvement stop.
+
 ## 2026-07-11 05:50 PDT
 
 - Ran full local TCP schedule probes for the current best single-scale point

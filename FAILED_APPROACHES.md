@@ -1,5 +1,27 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 06:28 PDT
+
+- Do not pick full-schedule local TCP parameters from the short single-scale
+  benchmark alone. The p15/w15 point was best for the 10-iteration probe, but
+  it did not reach agreement in full schedule even with larger caps:
+  - max `40`: final disagreements `482`, wall `317,670,112us`;
+  - max `60`: final disagreements `125`, wall `357,928,457us`;
+  - max `80`: final disagreements `213`, stop_reason `4`
+    (`NO_LOWER_BOUND_IMPROVEMENT`), wall `359,631,211us`.
+- p6/w6 and p4/w4 are tempting because they are faster than the clean p3/w3
+  solve, but under the tested settings they still leave boundary
+  disagreements:
+  - p6/w6 max `60`: `40` disagreements, `224,366,623us`;
+  - p6/w6 max `80`: `191` disagreements, stop_reason `4`,
+    `228,433,826us`;
+  - p4/w4 max `60`: `93` disagreements, `232,498,630us`.
+- Current clean full-schedule local TCP point is p3/w3 max `60`, not p15, p6,
+  or p4:
+  `benchmark_results/local_tcp_fullschedule_p3_w3_iter60_malloc_babyface_saturate_20260711_061859`
+  reached status `0`, stop_reason `2`, and final disagreements `0` in
+  `277,151,276us`.
+
 ## 2026-07-11 05:50 PDT
 
 - Do not treat the p15/w15 full schedule with max `20` iterations per scale as
