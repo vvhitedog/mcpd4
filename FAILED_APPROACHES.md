@@ -1,5 +1,28 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 04:59 PDT
+
+- Do not switch the normal local TCP benchmark build to ad hoc
+  `-march=native` flags as currently attempted.
+- `build-nativeopt` with Snappy enabled failed to compile Snappy after CMake
+  detected AVX paths; `snappy.cc` referenced `__m256i` without the required
+  intrinsic type being available in that translation unit.
+- `build-nativeopt-nosnappy` compiled with
+  `-DMCPD4_ENABLE_SNAPPY=OFF -DCMAKE_CXX_FLAGS_RELEASE='-O3 -DNDEBUG -march=native'`,
+  but it regressed the current p3/w3 local TCP benchmark:
+  - normal Release p3 repeats are around `6,389,020us` to `6,438,462us`;
+  - native/no-Snappy
+    `benchmark_results/local_tcp_native_nosnappy_p3_w3_malloc_babyface_none_20260711_045919`:
+    total `7,672,341us`, setup `3,136,764us`, aggregate partition-load RPC
+    `9,137,059us`;
+  - native/no-Snappy repeat
+    `benchmark_results/local_tcp_native_nosnappy_p3_w3_malloc_babyface_none_20260711_045927`:
+    total `7,683,460us`, setup `3,144,745us`, aggregate partition-load RPC
+    `9,150,974us`.
+- Interpretation: any build-profile work needs a more controlled CMake option
+  and a Snappy-compatible configuration. The quick native/no-Snappy profile is
+  slower for the current localhost transfer workload.
+
 ## 2026-07-11 04:43 PDT
 
 - Do not reduce the local TCP worker count below the partition count for the
