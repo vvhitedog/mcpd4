@@ -1812,7 +1812,8 @@ int main(int argc, char **argv) {
     mcpd4::SocketHandle discovery_socket;
     const auto setup_transport = [&] {
       status_state.beginSegment("transport_setup", "transport_setup");
-      listener = mcpd4::listenTcp(config.bind_host, config.port);
+      listener = mcpd4::listenTcp(config.bind_host, config.port,
+                                  std::max(16, config.worker_count));
       std::cout << "listening " << config.bind_host << ":"
                 << mcpd4::localPort(listener) << "\n";
       std::cout.flush();

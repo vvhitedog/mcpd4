@@ -1,5 +1,31 @@
 # Progress Log
 
+## 2026-07-11 05:40 PDT
+
+- Increased the coordinator TCP listen backlog from the default `16` to
+  `max(16, configured_worker_count)`. This matters for local runs with more
+  than 16 workers, where all workers can connect while the coordinator is still
+  reading/partitioning after the early-listen change.
+- Verified:
+  - `cmake --build build -j`;
+  - `ctest --test-dir build --output-on-failure`.
+- Benchmarked high-worker-count local TCP runs after the backlog fix:
+  - p17/w17
+    `benchmark_results/local_tcp_backlog_worker_count_10iter_p17_w17_malloc_babyface_none_20260711_053820`:
+    total `29,037,329us`, setup `5,429,100us`, solve `19,841,111us`;
+    previous p17/w17 was total `30,475,038us`, setup `6,077,330us`;
+  - p18/w18
+    `benchmark_results/local_tcp_backlog_worker_count_10iter_p18_w18_malloc_babyface_none_20260711_053933`:
+    total `30,636,137us`, setup `5,715,576us`, solve `21,134,055us`;
+    previous p18/w18 was total `31,844,764us`, setup `6,469,179us`;
+  - p20/w20
+    `benchmark_results/local_tcp_backlog_worker_count_10iter_p20_w20_malloc_babyface_none_20260711_053850`:
+    total `31,438,987us`, setup `7,110,401us`, solve `20,426,273us`;
+    previous p20/w20 was total `31,504,549us`, setup `7,108,028us`.
+- Conclusion: keep the backlog fix. It does not change the current best
+  p15/w15 point, but it removes an artificial listener bottleneck for runs with
+  more than 16 workers and improves p17/p18 materially.
+
 ## 2026-07-11 05:29 PDT
 
 - Refined the 10-iteration local TCP partition/worker count around the p16
