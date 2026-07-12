@@ -1,5 +1,28 @@
 # Progress Log
 
+## 2026-07-11 19:18:28 PDT
+
+- Optimized the shared mcpd3 `PartitionWorkerCoordinator`, used by mcpd4:
+  - replaced per-round worker `std::async` fanout with a persistent
+    `ThreadPool<void>`;
+  - added explicit task exception capture/rethrow so worker failures are still
+    reported at the round that triggered them;
+  - cached static package-to-worker grouping and compact-ID lookup tables for
+    worker, package, and constraint IDs.
+- Verified no state drift:
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `ctest --test-dir build --output-on-failure`;
+  - phase repo `ctest --test-dir build-mcpd4 --output-on-failure`.
+- Phase 64x64 seed-1 diagnosis:
+  - direct phase `mcpd3` backend is a whole-graph mincut backend, not native
+    partitioned DD;
+  - new phase `mcpd3-n` backend showed native partitioned DD at `14323.5 ms`;
+  - mcpd4 after package/pool fixes was `21078.8 ms`;
+  - all rows had objective `9383`, 22 optimizer iterations, and `optimal=1`.
+- Interpretation: no evidence of mcpd4 algorithm/state divergence here. The
+  remaining small-problem gap is distributed worker request/result and boundary
+  label bookkeeping overhead.
+
 ## 2026-07-11 18:52 PDT
 
 - Continued the `mcpd3-n` versus mcpd4 runtime diagnosis using only local
