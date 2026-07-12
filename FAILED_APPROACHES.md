@@ -540,3 +540,8 @@
   removed on 2026-07-11. Do not restore their public options or trackers when
   developing the next regularization scheme; preserve only the validated
   original `scaled-epsilon` behavior.
+- Do not assume dense global PU unaries regularize every local copy of a
+  boundary node. Correct DD decomposition counts each unary once, on the home
+  partition, so clone-only ties still require the validated boundary
+  regularizer. Generic flow reuse with internal epsilon disabled remains
+  experimental and is not the default.

@@ -2062,3 +2062,18 @@
 - Verified the cleanup with all mcpd3 and mcpd4 tests:
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure` (`1/1`);
   - `ctest --test-dir build --output-on-failure` (`4/4`).
+
+## 2026-07-11 22:57 PDT
+
+- Added generic monotone flow/label/alpha warm-start snapshots to the mcpd3
+  submodule for use by PU quantum continuation. The API contains no PU-specific
+  objective logic and rejects topology changes, capacity decreases, malformed
+  partition state, malformed constraint state, and internally regularized
+  flows.
+- Confirmed and regression-tested that a terminal on a duplicated boundary
+  node is assigned exactly once to the node's home partition; other local
+  clones receive zero terminal capacity plus their DD alpha terms.
+- The phase library now owns dense-unary quantum scheduling and only passes
+  ordinary constructed mincut graphs plus a generic objective-magnitude hint
+  to mcpd3-native. mcpd4 support remains deferred until the native experiment
+  is mature.
