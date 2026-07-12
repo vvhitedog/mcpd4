@@ -1,5 +1,16 @@
 # Failed Approaches And Taboos
 
+## 2026-07-12
+
+- Do not treat graph coloring alone as a Gauss-Seidel acceleration for MCPD's
+  fixed-step alpha subgradient update. The tested exact-state partition-pair
+  schedule was neutral on p2 and failed to converge on the 64x64 p4 PU case.
+  The referenced smooth MCF method solves its GS block update; it does not
+  merely reorder first-order steps.
+- Do not leave `last_alpha` at its pre-update value after an immediate colored
+  endpoint re-solve. A later scale-start solve will consume the alpha delta a
+  second time and produce a misleading apparent improvement.
+
 ## 2026-07-11 18:52 PDT
 
 - Do not use the phase library direct-cut backend named `mcpd3` to explain

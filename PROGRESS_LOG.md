@@ -1,5 +1,15 @@
 # Progress Log
 
+## 2026-07-12 03:24 PDT
+
+- Prototyped and tested native-only colored Gauss-Seidel DD scheduling in the
+  mcpd3 submodule. Partition-pair constraint blocks were edge-colored into
+  conflict-free matching phases; each phase updated alphas and immediately
+  re-solved both endpoint partitions.
+- The 64x64 p2 PU benchmark was effectively unchanged, while corrected p4 runs
+  failed to reach agreement under both plain and momentum alpha updates. The
+  implementation was removed completely; only this result and its taboo remain.
+
 ## 2026-07-11 19:18:28 PDT
 
 - Optimized the shared mcpd3 `PartitionWorkerCoordinator`, used by mcpd4:
