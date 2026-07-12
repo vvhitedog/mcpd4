@@ -1,5 +1,68 @@
 # Progress Log
 
+## 2026-07-11 18:52 PDT
+
+- Continued the `mcpd3-n` versus mcpd4 runtime diagnosis using only local
+  native DD and coordinated DD comparators.
+- Added a stronger mcpd3 submodule parity test:
+  - `partitionWorkerCoordinatorMatchesDualDecompositionRegularizedRounds`;
+  - drives a multi-partition fixture through native
+    `mcpd3::DualDecomposition` and `PartitionWorkerCoordinator` one round at a
+    time;
+  - compares raw objective, certified lower bound, regularized objective,
+    disagreement count/norm, regularization budget/contribution, full local
+    labels, and every constraint's `alpha`, `last_alpha`, and
+    `alpha_momentum`;
+  - exercises both momentum off/on and step sizes above and inside the
+    scaled-epsilon regularization window (`1000`, `100`, `10`, `1`).
+- UB checks:
+  - native DD Valgrind on `tests/fixtures/random_small.max`: `0` errors,
+    all heap blocks freed;
+  - mcpd4 in-process coordinator Valgrind on the same fixture: `0` errors,
+    all heap blocks freed;
+  - process/TCP coordinator plus two worker processes under Valgrind on the
+    same fixture: coordinator and both workers reported `0` errors and all
+    heap blocks freed.
+- Aligned adhead.n6c10 p10 objective-scale-1000 timings:
+  - native DD:
+    `benchmark_results/adhead-mcpd3-native-dd-p10-os1000-exhaustreg-20260711-183532.out`,
+    wall `123.00s`, total `122.470s`, construct `31.226s`, solve
+    `83.768s`, inner partition-solve `82.186s`;
+  - mcpd4 in-process:
+    `benchmark_results/adhead-mcpd4-inprocess-w1-p10-os1000-exhaustreg-20260711-183752.out`,
+    wall `126.66s`, total `126.090s`, partition+setup `32.311s`, solve
+    `86.887s`;
+  - mcpd4 local TCP, two worker processes:
+    `benchmark_results/adhead-mcpd4-localtcp-w2-p10-os1000-20260711-184853`,
+    wall `149.83s`, total `149.730s`, partition+setup `45.087s`, solve
+    `97.191s`.
+- All three aligned adhead runs matched algorithmic state:
+  - certified lower bound raw `48372380`;
+  - regularized objective raw `48373110`;
+  - total DD iterations `108`;
+  - final disagreement count `0`;
+  - regularization budget/contribution `730/110`;
+  - objective-scale promotions `0`.
+- Local TCP overhead evidence:
+  - partition package load transmitted `1,357,119,888` logical bytes over
+    loopback and took `41.561s` aggregate load RPC wall time;
+  - solve RPC sent `23.046 MB` of requests and received `24.878 MB` of
+    results;
+  - aggregate worker-reported solve time was `142.415s` across the two
+    workers, with critical worker solve time `85.068s`;
+  - aggregate solve RPC overhead was `8.346s`;
+  - worker assignment was balanced by count but not by solve cost:
+    worker 1 partitions `0,2,6,8,9` solved in `57.346s`, worker 2 partitions
+    `1,3,4,5,7` solved in `85.068s`.
+- Current attribution:
+  - no evidence of alpha/regularization algorithm drift in the local-DD versus
+    coordinator core;
+  - no Valgrind evidence of UB on small native, in-process coordinator, or
+    process/TCP runs;
+  - the remaining adhead p10 gap is measured coordinator/worker execution
+    overhead: package serialization/load/setup, per-round TCP RPC overhead,
+    and static load imbalance.
+
 ## 2026-07-11 18:40 PDT
 
 - Corrected the native mcpd3 comparator terminology: `mcpd3-n` refers to the

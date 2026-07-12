@@ -1,5 +1,19 @@
 # Failed Approaches And Taboos
 
+## 2026-07-11 18:52 PDT
+
+- Do not use the phase library direct-cut backend named `mcpd3` to explain
+  `mcpd3-n` versus mcpd4 distributed runtime. For this diagnosis,
+  `mcpd3-n` means native `mcpd3::DualDecomposition` with DD partitioning.
+  Valid comparators are native DD, in-process coordinated DD, and process/TCP
+  coordinated DD with matched partition count, objective scale, schedule, and
+  regularization settings.
+- Do not use the old killed
+  `adhead-native-monolith-p10-os1000-20260702` output as a completed native-DD
+  baseline. It was SIGTERM'd and produced no final result. The current aligned
+  native-DD adhead baseline is
+  `benchmark_results/adhead-mcpd3-native-dd-p10-os1000-exhaustreg-20260711-183532.out`.
+
 ## 2026-07-03 02:28 PDT
 
 - Do not use a BK mmap directory on a memory-backed filesystem. Paths under
