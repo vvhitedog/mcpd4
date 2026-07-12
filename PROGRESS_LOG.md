@@ -1989,3 +1989,35 @@
   - `ctest --test-dir build --output-on-failure`;
   - `cmake --build build/no-snappy -j`;
   - `ctest --test-dir build/no-snappy --output-on-failure`.
+
+## 2026-07-11 19:39 PDT
+
+- Added native/coordinator timing attribution for the `mcpd3-n` versus mcpd4
+  performance investigation:
+  - native `DualDecomposition` now reports total lagrange-update wall time
+    alongside inner partition-solve wall time;
+  - `PartitionWorkerCoordinator` now returns per-solve timing counters for
+    round count, solve-partitions wall time, alpha-update preparation,
+    request construction, worker dispatch, worker batch execution, round-term
+    gathering, and constraint updates;
+  - `mcpd4_inprocess_benchmark` prints these counters and accounted versus
+    unaccounted solve wall time.
+- Re-ran aligned `adhead.n6c10` p10 objective-scale-1000 benchmarks with the
+  basic partitioner. Native DD and mcpd4 in-process both converged in 108
+  iterations with zero disagreements, certified lower bound raw `48372380`,
+  regularized objective raw `48373110`, regularization budget `730`, and
+  regularization contribution `110`.
+- Runtime attribution for that run:
+  - native solve wall `81.593 s`, partition-solve wall `79.963 s`,
+    lagrange-update wall `1.630 s`;
+  - mcpd4 in-process solve wall `83.636 s`, solve-partitions wall `82.110 s`,
+    alpha-update preparation `0.266 s`, constraint update `1.525 s`;
+  - local TCP matched the same result but took `156.58 s` wall, with about
+    `41.6 s` spent loading partitions over TCP and about `7.2 s` of solve-RPC
+    overhead above worker solve time.
+- Current conclusion: no algorithmic/state difference was observed between
+  native DD and mcpd4 for these aligned runs; the remaining difference is
+  worker/coordinator interface and transport overhead.
+- Verified:
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `ctest --test-dir build --output-on-failure`.

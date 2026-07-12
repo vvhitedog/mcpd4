@@ -520,6 +520,33 @@ void printFinal(const Timing &timing,
   std::cout << "timing_coordinator_setup_wall_us "
             << timing.coordinator_setup_wall_us << "\n";
   std::cout << "timing_solve_wall_us " << timing.solve_wall_us << "\n";
+  std::cout << "timing_coordinator_round_count "
+            << result.timing.round_count << "\n";
+  std::cout << "timing_coordinator_solve_partitions_wall_us "
+            << result.timing.solve_partitions_wall_us << "\n";
+  std::cout << "timing_coordinator_prepare_alpha_updates_us "
+            << result.timing.prepare_alpha_updates_us << "\n";
+  std::cout << "timing_coordinator_build_requests_us "
+            << result.timing.build_requests_us << "\n";
+  std::cout << "timing_coordinator_dispatch_workers_wall_us "
+            << result.timing.dispatch_workers_wall_us << "\n";
+  std::cout << "timing_coordinator_worker_batch_wall_us "
+            << result.timing.worker_batch_wall_us << "\n";
+  std::cout << "timing_coordinator_gather_round_terms_us "
+            << result.timing.gather_round_terms_us << "\n";
+  std::cout << "timing_coordinator_update_constraints_us "
+            << result.timing.update_constraints_from_labels_us << "\n";
+  const std::uint64_t accounted_coordinator_us =
+      result.timing.solve_partitions_wall_us +
+      result.timing.gather_round_terms_us +
+      result.timing.update_constraints_from_labels_us;
+  std::cout << "timing_coordinator_accounted_wall_us "
+            << accounted_coordinator_us << "\n";
+  std::cout << "timing_coordinator_unaccounted_wall_us "
+            << (timing.solve_wall_us > accounted_coordinator_us
+                    ? timing.solve_wall_us - accounted_coordinator_us
+                    : 0)
+            << "\n";
   std::cout << "memory_peak_observed_rss_kb " << peak_rss_kb << "\n";
 }
 
