@@ -46,6 +46,8 @@ struct Config {
   int progress_every = 0;
   std::string streaming_dir;
   std::uint64_t streaming_cache_bytes = 0;
+  bool exhaust_scale_iterations = false;
+  bool exhaust_regularized_scale_iterations = true;
   bool directed = false;
   bool saturate_capacity_overflow = false;
   bool streaming_workers = false;
@@ -108,6 +110,8 @@ Config parseArgs(int argc, char **argv) {
         "[--stop-after read|scale|partition|setup] "
         "[--streaming-workers] [--streaming-dir DIR] "
         "[--streaming-cache-bytes N] "
+        "[--exhaust-scale-iterations] "
+        "[--no-exhaust-regularized-scale-iterations] "
         "[--saturate-capacity-overflow]");
   }
   config.dimacs_path = argv[1];
@@ -144,6 +148,12 @@ Config parseArgs(int argc, char **argv) {
     } else if (arg == "--streaming-cache-bytes") {
       config.streaming_cache_bytes =
           parsePositiveU64(requireValue(arg), arg);
+    } else if (arg == "--exhaust-scale-iterations") {
+      config.exhaust_scale_iterations = true;
+    } else if (arg == "--exhaust-regularized-scale-iterations") {
+      config.exhaust_regularized_scale_iterations = true;
+    } else if (arg == "--no-exhaust-regularized-scale-iterations") {
+      config.exhaust_regularized_scale_iterations = false;
     } else if (arg == "--directed") {
       config.directed = true;
     } else if (arg == "--saturate-capacity-overflow" ||
@@ -590,6 +600,9 @@ int main(int argc, char **argv) {
     solve_options.num_optimization_scales = config.schedule_levels;
     solve_options.initial_step_size = config.schedule_start;
     solve_options.objective_scale = config.objective_scale;
+    solve_options.exhaust_scale_iterations = config.exhaust_scale_iterations;
+    solve_options.exhaust_regularized_scale_iterations =
+        config.exhaust_regularized_scale_iterations;
     solve_options.saturate_capacity_overflow =
         config.saturate_capacity_overflow;
     solve_options.progress_report_interval =

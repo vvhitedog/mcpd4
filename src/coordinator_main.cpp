@@ -74,6 +74,8 @@ struct Config {
   std::string telemetry_csv_prefix;
   mcpd4::TransportCompression rpc_compression =
       mcpd4::TransportCompression::NONE;
+  bool exhaust_scale_iterations = false;
+  bool exhaust_regularized_scale_iterations = true;
   bool saturate_capacity_overflow = false;
   bool directed = false;
 };
@@ -1218,6 +1220,8 @@ void usage(const char *argv0) {
       << "       [--status-file PATH]\n"
       << "       [--telemetry-csv-prefix PATH]\n"
       << "       [--rpc-compression none|snappy]\n"
+      << "       [--exhaust-scale-iterations]\n"
+      << "       [--no-exhaust-regularized-scale-iterations]\n"
       << "       [--saturate-capacity-overflow]\n"
       << "       [--directed]\n";
 }
@@ -1276,6 +1280,12 @@ Config parseArgs(int argc, char **argv) {
     } else if (arg == "--rpc-compression") {
       config.rpc_compression =
           mcpd4::parseTransportCompression(require_value(arg));
+    } else if (arg == "--exhaust-scale-iterations") {
+      config.exhaust_scale_iterations = true;
+    } else if (arg == "--exhaust-regularized-scale-iterations") {
+      config.exhaust_regularized_scale_iterations = true;
+    } else if (arg == "--no-exhaust-regularized-scale-iterations") {
+      config.exhaust_regularized_scale_iterations = false;
     } else if (arg == "--saturate-capacity-overflow" ||
                arg == "--truncate-capacity-overflow") {
       config.saturate_capacity_overflow = true;
@@ -1927,6 +1937,9 @@ int main(int argc, char **argv) {
     solve_options.num_optimization_scales = config.schedule_levels;
     solve_options.initial_step_size = config.schedule_start;
     solve_options.objective_scale = config.objective_scale;
+    solve_options.exhaust_scale_iterations = config.exhaust_scale_iterations;
+    solve_options.exhaust_regularized_scale_iterations =
+        config.exhaust_regularized_scale_iterations;
     solve_options.saturate_capacity_overflow =
         config.saturate_capacity_overflow;
     solve_options.progress_report_interval =
