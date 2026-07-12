@@ -527,3 +527,16 @@
   Partition-only probes increased boundary endpoint counts from p32's
   `4,194,304` to `5,275,972` and `6,291,456`, respectively, with no partition
   wall-time improvement.
+- Do not expose experimental `cycle-epsilon` through mcpd4 yet. In the phase
+  in-process mcpd4 path it produced a zero-disagreement coordinator result but
+  inconsistent duplicate node labels during final label materialization. Keep
+  the experiment on mcpd3 native DD until the distributed label/recovery path is
+  debugged separately.
+- Do not treat disagreement-plateau activation as sufficient to recover the
+  64x64 seed-1 phase PU stuck state. The mcpd3 native-DD experiment activates
+  regularization at the expected plateau, but source-only epsilon still leaves
+  6 final disagreements for strengths `10`, `100`, and `1000`.
+- The `cycle-epsilon` and `disagreement-plateau-epsilon` implementations were
+  removed on 2026-07-11. Do not restore their public options or trackers when
+  developing the next regularization scheme; preserve only the validated
+  original `scaled-epsilon` behavior.

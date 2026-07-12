@@ -2021,3 +2021,44 @@
 - Verified:
   - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
   - `ctest --test-dir build --output-on-failure`.
+
+## 2026-07-11 21:30 PDT
+
+- Added the shared core enum/support for opt-in `cycle-epsilon`
+  regularization, but left it unexposed in the mcpd4 coordinator CLI/parser for
+  now. The active productized experiment is mcpd3 native DD only.
+- Rebuilt and verified the distributed repo after disabling the mcpd4 public
+  entry point:
+  - `cmake --build build -j$(nproc)`;
+  - `ctest --test-dir build --output-on-failure`.
+
+## 2026-07-11 22:08 PDT
+
+- Added mcpd3 native-DD-only support for an opt-in
+  `disagreement-plateau-epsilon` regularization scheme. It activates
+  configured epsilon regularization within a scale after the disagreement count
+  has failed to decrease for `disagreement_patience` iterations, then resets
+  the lower-bound patience clock so the regularized scale gets a full patience
+  window.
+- Tightened the paired-label alternation tracker so cycle recognition happens
+  only at full windows (`5, 10, 15, ...` flips for threshold `5`) rather than
+  every subsequent flip after the first threshold crossing.
+- Kept the new plateau scheme out of the mcpd4 public CLI path; this remains a
+  native DD experiment while phase benchmarks compare trigger behavior.
+- Verified:
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure`;
+  - `ctest --test-dir build --output-on-failure`.
+
+## 2026-07-11 22:21 PDT
+
+- Removed the experimental `cycle-epsilon` and
+  `disagreement-plateau-epsilon` implementations, options, diagnostics, and
+  tests from mcpd3/mcpd4 after the phase-unwrapping benchmarks showed they were
+  dead ends. The validated original `scaled-epsilon` scheme remains unchanged
+  and is again the sole epsilon-regularization implementation.
+- Retained the historical experiment and failure notes so future work does not
+  repeat these approaches. A more selective regularization design will be
+  developed separately.
+- Verified the cleanup with all mcpd3 and mcpd4 tests:
+  - `ctest --test-dir third_party/mcpd3/build --output-on-failure` (`1/1`);
+  - `ctest --test-dir build --output-on-failure` (`4/4`).
