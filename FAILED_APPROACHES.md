@@ -2,6 +2,14 @@
 
 ## 2026-07-12
 
+- A fresh Debug/ASan+UBSan build of the monolithic mcpd3
+  `partition_worker_test` is not currently a usable verification gate. The
+  normal build passes, but Debug aborts in the pre-existing test sequence at
+  BK `Graph::add_node(0)`, and the sanitizer build exits earlier with
+  `objective scale promotion overflow`; neither emitted a sanitizer finding.
+  This appears to be an existing build-mode-sensitive test issue and should be
+  isolated separately rather than attributed to reference-guided decoding.
+
 - Do not treat graph coloring alone as a Gauss-Seidel acceleration for MCPD's
   fixed-step alpha subgradient update. The tested exact-state partition-pair
   schedule was neutral on p2 and failed to converge on the 64x64 p4 PU case.

@@ -1,5 +1,18 @@
 # Progress Log
 
+## 2026-07-12 15:09 PDT
+
+- Added native mcpd3 reference-guided exact local mincut selection for the
+  phase-unwrapping preconditioner experiment. The full mode minimizes Hamming
+  distance over the residual mincut lattice; the cheap mode uses the exact
+  reference only when it is itself a current local optimum.
+- Added configurable reference-check cadence and aggregate counters for checks,
+  direct hits, closure solves, and decoder time. The feature remains native
+  mcpd3-only and does not change mcpd4 transport or worker behavior.
+- Exhaustive random graph tests preserve local mincut objectives. On 64x64 p2
+  phase fixtures, the cheap oracle mode every five local solves reduced
+  conditioned native-DD wall time by 5.9-8.0% across three seeds.
+
 ## 2026-07-12 03:24 PDT
 
 - Prototyped and tested native-only colored Gauss-Seidel DD scheduling in the
