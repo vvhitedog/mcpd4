@@ -1,5 +1,31 @@
 # Progress Log
 
+## 2026-07-11 18:40 PDT
+
+- Corrected the native mcpd3 comparator terminology: `mcpd3-n` refers to the
+  native `mcpd3::DualDecomposition` benchmark, not the phase direct-cut backend
+  and not the mcpd4 in-process worker/coordinator benchmark.
+- Added native benchmark flags for low-scale exhaustion so native DD can be run
+  with the same schedule defaults as mcpd4:
+  - `--exhaust-scale-iterations`;
+  - `--exhaust-regularized-scale-iterations`;
+  - `--no-exhaust-regularized-scale-iterations`.
+- Ran an aligned adhead.n6c10 p10 objective-scale-1000 benchmark:
+  - native DD Release:
+    `benchmark_results/adhead-mcpd3-native-dd-p10-os1000-exhaustreg-20260711-183532.out`;
+    wall `123.00s`, total `122.470s`, solve `83.768s`, inner solve
+    `82.186s`, certified raw `48372380`, regularized raw `48373110`,
+    iterations `108`, disagreements `0`;
+  - mcpd4 in-process Release:
+    `benchmark_results/adhead-mcpd4-inprocess-w1-p10-os1000-exhaustreg-20260711-183752.out`;
+    wall `126.66s`, total `126.090s`, solve `86.887s`, certified raw
+    `48372380`, regularized raw `48373110`, iterations `108`,
+    disagreements `0`.
+- Interpretation: after aligning build type and schedule, mcpd4 in-process is
+  about `3.6s` slower than native DD on this run, not the previously suspected
+  large gap. The earlier native output was an empty killed run and should not be
+  used as a completed baseline.
+
 ## 2026-07-03 02:51 PDT
 
 - Completed a full distributed large-adhead resident run across this laptop plus

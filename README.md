@@ -91,11 +91,11 @@ The current suite includes protocol serialization, TCP loopback, worker error
 handling, objective-scale promotion, optional Snappy transport coverage, and
 localhost process integration tests.
 
-## Native mcpd3 Comparator
+## Native mcpd3 DD Comparator
 
 mcpd4 also includes `mcpd4_inprocess_benchmark`, but that intentionally uses
-the product worker-coordinator abstraction. For a native mcpd3 monolith
-baseline, configure the solver submodule independently:
+the product worker-coordinator abstraction. For a native mcpd3 dual
+decomposition baseline, configure the solver submodule independently:
 
 ```bash
 cmake -S third_party/mcpd3 -B build/mcpd3-native -DCMAKE_BUILD_TYPE=Release
@@ -112,13 +112,15 @@ build/mcpd3-native/mcpd3_native_monolith_benchmark /data/adhead.n6c10.max \
   --objective-scale 1000 \
   --schedule-start 10000 \
   --schedule-levels 5 \
-  --max-iterations 10000
+  --max-iterations 10000 \
+  --exhaust-regularized-scale-iterations
 ```
 
-This path constructs `mcpd3::DualDecomposition` directly and disables
-partition-package export by default. Use it to measure the best native local
-solver separately from distributed RPC, worker assignment, and wire-format
-choices.
+Despite the historical binary name, this path is the native
+`mcpd3::DualDecomposition` benchmark. It disables partition-package export by
+default and does not use the mcpd4 coordinator/worker abstraction. When
+comparing against mcpd4 defaults, pass
+`--exhaust-regularized-scale-iterations` so the low-scale schedule matches.
 
 ## Out-Of-Core Worker Storage
 
