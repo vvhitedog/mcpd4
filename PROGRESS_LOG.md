@@ -1,5 +1,16 @@
 # Progress Log
 
+## 2026-07-13 15:47 PDT - Ratio-aware mcpd3 flow dependency
+
+- Advanced the mcpd3 submodule to `2b52bc0`, which adds checked rational
+  scaling for persistent local flow across proportional capacity changes.
+- The mcpd3 32/64/128/GMP test matrix passes at this revision (8/8 tests).
+- Rebuilt every mcpd4 target and passed all four transport/integration tests
+  in 32/64/128/GMP modes (16/16 tests).
+- This is a shared solver capability only. The current distributed PU adapter
+  does not retain quantum workspaces across calls, so mcpd4 transport and
+  runtime behavior are unchanged by this pointer update.
+
 ## 2026-07-12 15:09 PDT
 
 - Added native mcpd3 reference-guided exact local mincut selection for the
