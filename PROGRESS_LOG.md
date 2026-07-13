@@ -2133,3 +2133,9 @@
   and GMP modes.
 - Corrected the user-facing MVP limits to describe the selectable precision
   modes instead of the obsolete fixed 32-bit capacity path.
+
+## 2026-07-13 13:02 PDT - Checked mcpd3 backend integration
+
+- Advanced the mcpd3 backend to the checked precision-arithmetic revision.
+- Rebuilt every mcpd4 target and passed all four CTest tests in 32-, 64-,
+  128-bit, and GMP modes: 16/16 mode/test combinations.
