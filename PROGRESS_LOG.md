@@ -2100,3 +2100,20 @@
   ordinary constructed mincut graphs plus a generic objective-magnitude hint
   to mcpd3-native. mcpd4 support remains deferred until the native experiment
   is mature.
+
+## 2026-07-12 23:34:36 PDT
+
+- Fixed non-power-of-ten optimization schedules in both native
+  `DualDecomposition` and `PartitionWorkerCoordinator`. A positive schedule
+  now reaches a unit step before terminating; the default balanced start now
+  runs `690 -> 69 -> 6 -> 1` instead of stopping after step 6.
+- Added a coordinator regression that exercises every transition and verifies
+  that the unit scale runs exactly once even when more scale slots are
+  configured.
+- Reproduced the issue with the 16x16 seed-1, radius-8 Ishikawa cut. The old
+  schedule remained at 16 disagreements for 500,000 final-scale iterations.
+  The fixed schedule reached agreement after 863 total DD iterations and
+  returned bounded objective 576, matching BK. The mcpd4 path returned the
+  same objective.
+- Verified all mcpd3 (`1/1`), mcpd4 (`4/4`), and phase worktree (`7/7`) CTest
+  targets.

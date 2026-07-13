@@ -564,3 +564,8 @@
   partition, so clone-only ties still require the validated boundary
   regularizer. Generic flow reuse with internal epsilon disabled remains
   experimental and is not the default.
+- Do not add patience to a stalled DD scale before confirming that the schedule
+  reaches unit step. The old balanced `690 -> 69 -> 6` schedule left the
+  multipliers on a coarse lattice: a radius-8 Ishikawa cut made no progress in
+  500,000 step-6 iterations and retained 16 disagreements. Clamping the next
+  positive scale to 1 solved it in 863 total iterations with default patience.
