@@ -61,18 +61,18 @@ struct CaseConfig {
 struct SolveSummary {
   long status = -1;
   long stop_reason = -1;
-  long final_objective_raw = 0;
-  long final_certified_lower_bound_raw = 0;
-  long final_regularized_objective_raw = 0;
-  long best_lower_bound_raw = 0;
-  long best_certified_lower_bound_raw = 0;
-  long best_regularized_objective_raw = 0;
+  mcpd3::Objective final_objective_raw = 0;
+  mcpd3::Objective final_certified_lower_bound_raw = 0;
+  mcpd3::Objective final_regularized_objective_raw = 0;
+  mcpd3::Objective best_lower_bound_raw = 0;
+  mcpd3::Objective best_certified_lower_bound_raw = 0;
+  mcpd3::Objective best_regularized_objective_raw = 0;
   long objective_scale = 1;
   long objective_scale_promotions = 0;
   long total_iterations = 0;
   long final_disagreement_count = 0;
-  long final_regularization_budget = 0;
-  long final_regularization_contribution = 0;
+  mcpd3::Objective final_regularization_budget = 0;
+  mcpd3::Objective final_regularization_contribution = 0;
   long final_regularization_anchor_sink_count = 0;
   long final_regularization_active_sink_count = 0;
 };
@@ -281,24 +281,15 @@ std::string readTextFile(const std::string &path) {
   return out.str();
 }
 
-int checkedScaleInt(int value, long factor) {
-  const long scaled = static_cast<long>(value) * factor;
-  if (scaled > std::numeric_limits<int>::max() ||
-      scaled < std::numeric_limits<int>::min()) {
-    throw std::overflow_error("test objective scale exceeds int range");
-  }
-  return static_cast<int>(scaled);
-}
-
 void scaleGraph(mcpd3::MinCutGraph *graph, long factor) {
   if (factor == 1) {
     return;
   }
   for (auto &capacity : graph->arc_capacities) {
-    capacity = checkedScaleInt(capacity, factor);
+    capacity = mcpd3::checked_scale_capacity(capacity, factor);
   }
   for (auto &capacity : graph->terminal_capacities) {
-    capacity = checkedScaleInt(capacity, factor);
+    capacity = mcpd3::checked_scale_capacity(capacity, factor);
   }
 }
 
@@ -373,6 +364,16 @@ long parseLongField(const std::map<std::string, std::string> &fields,
   return std::stol(iter->second);
 }
 
+mcpd3::Objective parseObjectiveField(
+    const std::map<std::string, std::string> &fields,
+    const std::string &key) {
+  const auto iter = fields.find(key);
+  if (iter == fields.end()) {
+    throw std::runtime_error("missing coordinator output field: " + key);
+  }
+  return mcpd3::parse_objective(iter->second);
+}
+
 SolveSummary parseCoordinatorOutput(const std::string &output) {
   const std::vector<std::string> keys{
       "status",
@@ -418,17 +419,18 @@ SolveSummary parseCoordinatorOutput(const std::string &output) {
   SolveSummary summary;
   summary.status = parseLongField(fields, "status");
   summary.stop_reason = parseLongField(fields, "stop_reason");
-  summary.final_objective_raw = parseLongField(fields, "final_objective_raw");
+  summary.final_objective_raw =
+      parseObjectiveField(fields, "final_objective_raw");
   summary.final_certified_lower_bound_raw =
-      parseLongField(fields, "final_certified_lower_bound_raw");
+      parseObjectiveField(fields, "final_certified_lower_bound_raw");
   summary.final_regularized_objective_raw =
-      parseLongField(fields, "final_regularized_objective_raw");
+      parseObjectiveField(fields, "final_regularized_objective_raw");
   summary.best_lower_bound_raw =
-      parseLongField(fields, "best_lower_bound_raw");
+      parseObjectiveField(fields, "best_lower_bound_raw");
   summary.best_certified_lower_bound_raw =
-      parseLongField(fields, "best_certified_lower_bound_raw");
+      parseObjectiveField(fields, "best_certified_lower_bound_raw");
   summary.best_regularized_objective_raw =
-      parseLongField(fields, "best_regularized_objective_raw");
+      parseObjectiveField(fields, "best_regularized_objective_raw");
   summary.objective_scale = parseLongField(fields, "objective_scale");
   summary.objective_scale_promotions =
       parseLongField(fields, "objective_scale_promotions");
@@ -436,9 +438,9 @@ SolveSummary parseCoordinatorOutput(const std::string &output) {
   summary.final_disagreement_count =
       parseLongField(fields, "final_disagreement_count");
   summary.final_regularization_budget =
-      parseLongField(fields, "final_regularization_budget");
+      parseObjectiveField(fields, "final_regularization_budget");
   summary.final_regularization_contribution =
-      parseLongField(fields, "final_regularization_contribution");
+      parseObjectiveField(fields, "final_regularization_contribution");
   summary.final_regularization_anchor_sink_count =
       parseLongField(fields, "final_regularization_anchor_sink_count");
   summary.final_regularization_active_sink_count =
@@ -529,10 +531,12 @@ DistributedRun runDistributedProcess(const std::string &coordinator_bin,
 void requireEqual(const SolveSummary &distributed,
                   const SolveSummary &reference,
                   const std::string &case_name) {
-  auto check = [&](long lhs, long rhs, const std::string &field) {
+  auto check = [&](const auto &lhs, const auto &rhs,
+                   const std::string &field) {
     require(lhs == rhs, case_name + " mismatch for " + field +
-                         ": distributed=" + std::to_string(lhs) +
-                         " reference=" + std::to_string(rhs));
+                         ": distributed=" +
+                         mcpd3::integer_to_string(lhs) + " reference=" +
+                         mcpd3::integer_to_string(rhs));
   };
 
   check(distributed.status, reference.status, "status");
@@ -669,6 +673,9 @@ void coordinatorDurableStatusSurvivesFailure(
 void capacityOverflowSaturationIsOptIn(const std::string &coordinator_bin,
                                        const std::string &worker_bin,
                                        const std::string &fixture_dir) {
+  if (mcpd3::capacity_storage_bits() != 32) {
+    return;
+  }
   const auto port = reservePort();
   auto rejected = spawnProcess({coordinator_bin,
                                 fixture_dir + "/overflow_saturate.max",
@@ -685,9 +692,9 @@ void capacityOverflowSaturationIsOptIn(const std::string &coordinator_bin,
   const int rejected_exit = waitForExit(&rejected, 5s);
   require(rejected_exit != 0,
           "capacity overflow should fail in strict mode");
-  require(rejected.output.find("objective scale exceeds int range") !=
+  require(rejected.output.find("capacity multiplication overflow") !=
               std::string::npos,
-          "strict overflow should explain int range failure\n" +
+          "strict overflow should explain configured capacity failure\n" +
               rejected.output);
 
   const auto saturated = runDistributedProcess(

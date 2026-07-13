@@ -60,6 +60,11 @@ std::uint64_t elapsedUs(std::chrono::steady_clock::time_point start) {
           .count());
 }
 
+template <typename Integer>
+std::string integerString(const Integer &value) {
+  return mcpd3::integer_to_string(value);
+}
+
 MemorySnapshot memorySnapshot() {
   MemorySnapshot snapshot;
   mcpd3::process_mem_usage(snapshot.vm_kb, snapshot.rss_kb);
@@ -194,32 +199,15 @@ bool shouldStopAfter(const Config &config, const std::string &phase) {
   return config.stop_after == phase;
 }
 
-int scaleIntCapacity(int value, long factor, bool saturate) {
-  const long scaled = static_cast<long>(value) * factor;
-  if (scaled > std::numeric_limits<int>::max()) {
-    if (saturate) {
-      return std::numeric_limits<int>::max();
-    }
-    throw std::overflow_error("objective scale exceeds int range");
-  }
-  if (scaled < std::numeric_limits<int>::min()) {
-    if (saturate) {
-      return std::numeric_limits<int>::min();
-    }
-    throw std::overflow_error("objective scale exceeds int range");
-  }
-  return static_cast<int>(scaled);
-}
-
 void scaleGraph(mcpd3::MinCutGraph *graph, long factor, bool saturate) {
   if (factor == 1) {
     return;
   }
   for (auto &capacity : graph->arc_capacities) {
-    capacity = scaleIntCapacity(capacity, factor, saturate);
+    capacity = mcpd3::checked_scale_capacity(capacity, factor, saturate);
   }
   for (auto &capacity : graph->terminal_capacities) {
-    capacity = scaleIntCapacity(capacity, factor, saturate);
+    capacity = mcpd3::checked_scale_capacity(capacity, factor, saturate);
   }
 }
 
@@ -459,19 +447,25 @@ void printProgress(const mcpd3::PartitionWorkerProgressRecord &record) {
   std::cout << "progress total_iteration " << record.total_iteration
             << " schedule_scale " << record.scale
             << " iteration " << record.iteration << " lower_bound "
-            << record.lower_bound << " best_lower_bound "
-            << record.best_lower_bound << " certified_lower_bound "
-            << record.certified_lower_bound << " best_certified_lower_bound "
-            << record.best_certified_lower_bound << " regularized_objective "
-            << record.regularized_objective << " best_regularized_objective "
-            << record.best_regularized_objective << " disagreement_count "
+            << integerString(record.lower_bound) << " best_lower_bound "
+            << integerString(record.best_lower_bound)
+            << " certified_lower_bound "
+            << integerString(record.certified_lower_bound)
+            << " best_certified_lower_bound "
+            << integerString(record.best_certified_lower_bound)
+            << " regularized_objective "
+            << integerString(record.regularized_objective)
+            << " best_regularized_objective "
+            << integerString(record.best_regularized_objective)
+            << " disagreement_count "
             << record.disagreement_count << " schedule_step "
             << record.step_size << " effective_schedule_step "
             << record.effective_step_size << " regularization_strength "
-            << record.regularization_strength << " regularization_budget "
-            << record.regularization_budget
+            << integerString(record.regularization_strength)
+            << " regularization_budget "
+            << integerString(record.regularization_budget)
             << " regularization_contribution "
-            << record.regularization_contribution
+            << integerString(record.regularization_contribution)
             << " regularization_anchor_sink_count "
             << record.regularization_anchor_sink_count
             << " regularization_active_sink_count "
@@ -486,15 +480,16 @@ void printFinal(const Timing &timing,
   std::cout << "status " << static_cast<int>(result.status) << "\n";
   std::cout << "stop_reason " << static_cast<int>(result.stop_reason) << "\n";
   std::cout << "final_objective " << result.final_objective << "\n";
-  std::cout << "final_objective_raw " << result.final_objective_raw << "\n";
+  std::cout << "final_objective_raw "
+            << integerString(result.final_objective_raw) << "\n";
   std::cout << "final_certified_lower_bound "
             << result.final_certified_lower_bound << "\n";
   std::cout << "final_certified_lower_bound_raw "
-            << result.final_certified_lower_bound_raw << "\n";
+            << integerString(result.final_certified_lower_bound_raw) << "\n";
   std::cout << "final_regularized_objective "
             << result.final_regularized_objective << "\n";
   std::cout << "final_regularized_objective_raw "
-            << result.final_regularized_objective_raw << "\n";
+            << integerString(result.final_regularized_objective_raw) << "\n";
   std::cout << "objective_scale " << result.scale << "\n";
   std::cout << "objective_scale_promotions "
             << result.objective_scale_promotion_count << "\n";
@@ -502,9 +497,9 @@ void printFinal(const Timing &timing,
   std::cout << "final_disagreement_count "
             << result.final_disagreement_count << "\n";
   std::cout << "final_regularization_budget "
-            << result.final_regularization_budget << "\n";
+            << integerString(result.final_regularization_budget) << "\n";
   std::cout << "final_regularization_contribution "
-            << result.final_regularization_contribution << "\n";
+            << integerString(result.final_regularization_contribution) << "\n";
   std::cout << "final_regularization_anchor_sink_count "
             << result.final_regularization_anchor_sink_count << "\n";
   std::cout << "final_regularization_active_sink_count "

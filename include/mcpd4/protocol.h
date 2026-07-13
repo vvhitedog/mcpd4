@@ -8,6 +8,25 @@
 
 namespace mcpd4 {
 
+enum class CapacityMode : std::uint32_t {
+  BITS_32 = 1,
+  BITS_64 = 2,
+  BITS_128 = 3,
+  GMP = 4,
+};
+
+inline constexpr CapacityMode configuredCapacityMode() {
+#if defined(MCPD_CAPACITY_MODE_32)
+  return CapacityMode::BITS_32;
+#elif defined(MCPD_CAPACITY_MODE_64)
+  return CapacityMode::BITS_64;
+#elif defined(MCPD_CAPACITY_MODE_128)
+  return CapacityMode::BITS_128;
+#else
+  return CapacityMode::GMP;
+#endif
+}
+
 enum class MessageType : std::uint32_t {
   HELLO = 1,
   PARTITION_PACKAGE = 2,
@@ -29,6 +48,7 @@ struct Frame {
 
 struct HelloMessage {
   std::uint32_t protocol_version = 0;
+  CapacityMode capacity_mode = configuredCapacityMode();
   std::string worker_name;
   std::uint32_t cpu_count = 0;
   std::uint64_t ram_gb = 0;

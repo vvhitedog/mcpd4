@@ -10,7 +10,7 @@
 namespace mcpd4 {
 
 struct TemporalPartitionState {
-  std::unordered_map<int, long> alpha_by_constraint;
+  std::unordered_map<int, mcpd3::Capacity> alpha_by_constraint;
   std::unordered_map<int, int> label_by_constraint;
   std::vector<int> label_order;
   bool labels_initialized = false;

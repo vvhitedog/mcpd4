@@ -52,6 +52,11 @@ std::uint64_t elapsedUs(std::chrono::steady_clock::time_point start) {
           .count());
 }
 
+template <typename Integer>
+std::string integerString(const Integer &value) {
+  return mcpd3::integer_to_string(value);
+}
+
 struct Config {
   std::string dimacs_path;
   std::string bind_host = "127.0.0.1";
@@ -305,17 +310,18 @@ public:
     iterations_ << record.total_iteration << "," << record.scale << ","
                 << record.iteration << "," << record.max_iteration << ","
                 << iteration_wall_us << "," << solve_elapsed_us << ","
-                << record.lower_bound << "," << record.best_lower_bound
-                << "," << record.certified_lower_bound << ","
-                << record.best_certified_lower_bound << ","
-                << record.regularized_objective << ","
-                << record.best_regularized_objective << ","
+                << integerString(record.lower_bound) << ","
+                << integerString(record.best_lower_bound) << ","
+                << integerString(record.certified_lower_bound) << ","
+                << integerString(record.best_certified_lower_bound) << ","
+                << integerString(record.regularized_objective) << ","
+                << integerString(record.best_regularized_objective) << ","
                 << record.disagreement_count << ","
                 << csvDouble(record.disagreement_norm_sq) << ","
                 << record.step_size << "," << record.effective_step_size
-                << "," << record.regularization_strength << ","
-                << record.regularization_budget << ","
-                << record.regularization_contribution << ","
+                << "," << integerString(record.regularization_strength) << ","
+                << integerString(record.regularization_budget) << ","
+                << integerString(record.regularization_contribution) << ","
                 << record.regularization_anchor_sink_count << ","
                 << record.regularization_active_sink_count << ","
                 << record.iterations_since_improvement << "\n";
@@ -351,22 +357,22 @@ public:
                 std::to_string(static_cast<int>(result.stop_reason)),
                 "Final coordinator stop reason enum value.");
     insertFinal("final_objective_raw",
-                std::to_string(result.final_objective_raw),
+                integerString(result.final_objective_raw),
                 "Final unscaled objective in raw integer units.");
     insertFinal("final_certified_lower_bound_raw",
-                std::to_string(result.final_certified_lower_bound_raw),
+                integerString(result.final_certified_lower_bound_raw),
                 "Final certified lower bound in raw integer units.");
     insertFinal("final_regularized_objective_raw",
-                std::to_string(result.final_regularized_objective_raw),
+                integerString(result.final_regularized_objective_raw),
                 "Final regularized objective in raw integer units.");
     insertFinal("best_lower_bound_raw",
-                std::to_string(result.best_lower_bound_raw),
+                integerString(result.best_lower_bound_raw),
                 "Best raw lower bound observed.");
     insertFinal("best_certified_lower_bound_raw",
-                std::to_string(result.best_certified_lower_bound_raw),
+                integerString(result.best_certified_lower_bound_raw),
                 "Best certified lower bound observed in raw integer units.");
     insertFinal("best_regularized_objective_raw",
-                std::to_string(result.best_regularized_objective_raw),
+                integerString(result.best_regularized_objective_raw),
                 "Best regularized objective observed in raw integer units.");
     insertFinal("objective_scale", std::to_string(result.scale),
                 "Final objective scale after any promotions.");
@@ -379,10 +385,10 @@ public:
                 std::to_string(result.final_disagreement_count),
                 "Boundary disagreement count at termination.");
     insertFinal("final_regularization_budget",
-                std::to_string(result.final_regularization_budget),
+                integerString(result.final_regularization_budget),
                 "Final active regularization budget in raw integer units.");
     insertFinal("final_regularization_contribution",
-                std::to_string(result.final_regularization_contribution),
+                integerString(result.final_regularization_contribution),
                 "Final regularization contribution in raw integer units.");
     insertFinal("final_regularization_anchor_sink_count",
                 std::to_string(
@@ -688,16 +694,16 @@ struct CoordinatorStatusState {
   long total_iteration = 0;
   long schedule_scale = 0;
   long schedule_step = 0;
-  long lower_bound = 0;
-  long best_lower_bound = 0;
-  long certified_lower_bound = 0;
-  long best_certified_lower_bound = 0;
-  long regularized_objective = 0;
-  long best_regularized_objective = 0;
+  mcpd3::Objective lower_bound = 0;
+  mcpd3::Objective best_lower_bound = 0;
+  mcpd3::Objective certified_lower_bound = 0;
+  mcpd3::Objective best_certified_lower_bound = 0;
+  mcpd3::Objective regularized_objective = 0;
+  mcpd3::Objective best_regularized_objective = 0;
   long disagreement_count = 0;
-  long regularization_strength = 0;
-  long regularization_budget = 0;
-  long regularization_contribution = 0;
+  mcpd3::Capacity regularization_strength = 0;
+  mcpd3::Objective regularization_budget = 0;
+  mcpd3::Objective regularization_contribution = 0;
   long regularization_anchor_sink_count = 0;
   long regularization_active_sink_count = 0;
   long assigned_partition_count = 0;
@@ -983,16 +989,19 @@ private:
         << " total_iteration " << total_iteration
         << " schedule_scale " << schedule_scale
         << " schedule_step " << schedule_step
-        << " lower_bound " << lower_bound
-        << " best_lower_bound " << best_lower_bound
-        << " certified_lower_bound " << certified_lower_bound
-        << " best_certified_lower_bound " << best_certified_lower_bound
-        << " regularized_objective " << regularized_objective
-        << " best_regularized_objective " << best_regularized_objective
+        << " lower_bound " << integerString(lower_bound)
+        << " best_lower_bound " << integerString(best_lower_bound)
+        << " certified_lower_bound " << integerString(certified_lower_bound)
+        << " best_certified_lower_bound "
+        << integerString(best_certified_lower_bound)
+        << " regularized_objective " << integerString(regularized_objective)
+        << " best_regularized_objective "
+        << integerString(best_regularized_objective)
         << " disagreement_count " << disagreement_count
-        << " regularization_strength " << regularization_strength
-        << " regularization_budget " << regularization_budget
-        << " regularization_contribution " << regularization_contribution
+        << " regularization_strength " << integerString(regularization_strength)
+        << " regularization_budget " << integerString(regularization_budget)
+        << " regularization_contribution "
+        << integerString(regularization_contribution)
         << " regularization_anchor_sink_count "
         << regularization_anchor_sink_count
         << " regularization_active_sink_count "
@@ -1307,34 +1316,18 @@ Config parseArgs(int argc, char **argv) {
   return config;
 }
 
-bool wouldOverflowIntScale(int value, long factor) {
-  if (value > 0 &&
-      value > std::numeric_limits<int>::max() / factor) {
-    return true;
-  }
-  if (value < 0 &&
-      value < std::numeric_limits<int>::min() / factor) {
-    return true;
-  }
-  return false;
-}
-
-int scaleIntCapacity(int value, long factor, bool saturate_overflow,
-                     long *saturation_count) {
-  if (wouldOverflowIntScale(value, factor)) {
+mcpd3::Capacity scaleCapacity(const mcpd3::Capacity &value, long factor,
+                              bool saturate_overflow,
+                              long *saturation_count) {
+  try {
+    return mcpd3::checked_scale_capacity(value, factor);
+  } catch (const std::overflow_error &) {
     if (!saturate_overflow) {
-      throw std::overflow_error("objective scale exceeds int range");
+      throw;
     }
     ++(*saturation_count);
-    return value < 0 ? std::numeric_limits<int>::min()
-                     : std::numeric_limits<int>::max();
+    return mcpd3::checked_scale_capacity(value, factor, true);
   }
-  const long scaled = static_cast<long>(value) * factor;
-  if (scaled > std::numeric_limits<int>::max() ||
-      scaled < std::numeric_limits<int>::min()) {
-    throw std::overflow_error("objective scale exceeds int range");
-  }
-  return static_cast<int>(scaled);
 }
 
 void scaleGraph(mcpd3::MinCutGraph *graph, long factor,
@@ -1344,13 +1337,13 @@ void scaleGraph(mcpd3::MinCutGraph *graph, long factor,
     return;
   }
   for (auto &capacity : graph->arc_capacities) {
-    capacity = scaleIntCapacity(capacity, factor, saturate_capacity_overflow,
-                                &stats->arc_saturation_count);
+    capacity = scaleCapacity(capacity, factor, saturate_capacity_overflow,
+                             &stats->arc_saturation_count);
   }
   for (auto &capacity : graph->terminal_capacities) {
     capacity =
-        scaleIntCapacity(capacity, factor, saturate_capacity_overflow,
-                         &stats->terminal_saturation_count);
+        scaleCapacity(capacity, factor, saturate_capacity_overflow,
+                      &stats->terminal_saturation_count);
   }
 }
 
@@ -1680,24 +1673,26 @@ void printProgress(
             << " total_iteration " << record.total_iteration
             << " schedule_scale " << record.scale
             << " iteration " << record.iteration
-            << " lower_bound " << record.lower_bound
-            << " best_lower_bound " << record.best_lower_bound
+            << " lower_bound " << integerString(record.lower_bound)
+            << " best_lower_bound " << integerString(record.best_lower_bound)
             << " certified_lower_bound "
-            << record.certified_lower_bound
+            << integerString(record.certified_lower_bound)
             << " best_certified_lower_bound "
-            << record.best_certified_lower_bound
-            << " regularized_objective " << record.regularized_objective
+            << integerString(record.best_certified_lower_bound)
+            << " regularized_objective "
+            << integerString(record.regularized_objective)
             << " best_regularized_objective "
-            << record.best_regularized_objective
+            << integerString(record.best_regularized_objective)
             << " disagreement_count " << record.disagreement_count
             << " disagreement_norm_sq " << record.disagreement_norm_sq
             << " schedule_step " << record.step_size
             << " effective_schedule_step " << record.effective_step_size
             << " regularization_strength "
-            << record.regularization_strength
-            << " regularization_budget " << record.regularization_budget
+            << integerString(record.regularization_strength)
+            << " regularization_budget "
+            << integerString(record.regularization_budget)
             << " regularization_contribution "
-            << record.regularization_contribution
+            << integerString(record.regularization_contribution)
             << " regularization_anchor_sink_count "
             << record.regularization_anchor_sink_count
             << " regularization_active_sink_count "
@@ -1853,7 +1848,8 @@ int main(int argc, char **argv) {
           << "warning: saturated "
           << objective_scale_stats.arc_saturation_count +
                  objective_scale_stats.terminal_saturation_count
-          << " capacities while scaling; results use clipped int capacities\n";
+          << " capacities while scaling; results use clipped configured "
+             "capacities\n";
     }
 
     const auto partition_start = std::chrono::steady_clock::now();
@@ -1985,25 +1981,27 @@ int main(int argc, char **argv) {
     std::cout << "status " << static_cast<int>(result.status) << "\n";
     std::cout << "stop_reason " << static_cast<int>(result.stop_reason) << "\n";
     std::cout << "final_objective " << result.final_objective << "\n";
-    std::cout << "final_objective_raw " << result.final_objective_raw << "\n";
+    std::cout << "final_objective_raw "
+              << integerString(result.final_objective_raw) << "\n";
     std::cout << "final_certified_lower_bound "
               << result.final_certified_lower_bound << "\n";
     std::cout << "final_certified_lower_bound_raw "
-              << result.final_certified_lower_bound_raw << "\n";
+              << integerString(result.final_certified_lower_bound_raw) << "\n";
     std::cout << "final_regularized_objective "
               << result.final_regularized_objective << "\n";
     std::cout << "final_regularized_objective_raw "
-              << result.final_regularized_objective_raw << "\n";
+              << integerString(result.final_regularized_objective_raw) << "\n";
     std::cout << "best_lower_bound " << result.best_lower_bound << "\n";
-    std::cout << "best_lower_bound_raw " << result.best_lower_bound_raw << "\n";
+    std::cout << "best_lower_bound_raw "
+              << integerString(result.best_lower_bound_raw) << "\n";
     std::cout << "best_certified_lower_bound "
               << result.best_certified_lower_bound << "\n";
     std::cout << "best_certified_lower_bound_raw "
-              << result.best_certified_lower_bound_raw << "\n";
+              << integerString(result.best_certified_lower_bound_raw) << "\n";
     std::cout << "best_regularized_objective "
               << result.best_regularized_objective << "\n";
     std::cout << "best_regularized_objective_raw "
-              << result.best_regularized_objective_raw << "\n";
+              << integerString(result.best_regularized_objective_raw) << "\n";
     std::cout << "objective_scale " << result.scale << "\n";
     std::cout << "objective_scale_promotions "
               << result.objective_scale_promotion_count << "\n";
@@ -2011,9 +2009,9 @@ int main(int argc, char **argv) {
     std::cout << "final_disagreement_count "
               << result.final_disagreement_count << "\n";
     std::cout << "final_regularization_budget "
-              << result.final_regularization_budget << "\n";
+              << integerString(result.final_regularization_budget) << "\n";
     std::cout << "final_regularization_contribution "
-              << result.final_regularization_contribution << "\n";
+              << integerString(result.final_regularization_contribution) << "\n";
     std::cout << "final_regularization_anchor_sink_count "
               << result.final_regularization_anchor_sink_count << "\n";
     std::cout << "final_regularization_active_sink_count "

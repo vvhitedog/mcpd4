@@ -529,6 +529,18 @@
   scale `10000`, but that run may clip promoted capacities. Use it only as
   explicit compatibility mode, not as the exact local baseline.
 
+## 2026-07-13 - Capacity precision transport constraints
+
+- Do not mix protocol-v6 binaries or different `MCPD_CAPACITY_MODE` builds in
+  one run. Protocol v7 changes integer payload encoding and rejects capacity
+  mode mismatches during `HELLO`.
+- Do not return temporal alpha deltas in `Capacity`: subtracting the minimum
+  from the maximum needs one extra bit. Encode the difference as `Objective`
+  and range-check only after reconstruction.
+- Do not restore int32/int64 casts in partition packages, solve results,
+  telemetry, or status snapshots. Those casts silently passed the 32-bit build
+  while narrowing wider modes.
+
 ## 2026-07-02 00:17 PDT
 
 - Do not run large-adhead distributed package generation through solver-backed

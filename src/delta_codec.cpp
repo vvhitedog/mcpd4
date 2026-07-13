@@ -1,4 +1,5 @@
 #include <mcpd4/delta_codec.h>
+#include <mcpd4/integer_codec.h>
 
 #include <cstddef>
 #include <cstring>
@@ -12,7 +13,7 @@ namespace {
 
 struct EncodedAlphaUpdate {
   int constraint_id = -1;
-  std::int64_t value = 0;
+  mcpd3::Objective value = 0;
 };
 
 struct EncodedConstraintLabel {
@@ -40,37 +41,6 @@ template <typename T> std::uint32_t checkedSize(T size) {
     throw std::runtime_error("container is too large to serialize");
   }
   return static_cast<std::uint32_t>(size);
-}
-
-std::int64_t checkedLongDifference(long lhs, long rhs) {
-  const auto diff = static_cast<__int128>(lhs) - static_cast<__int128>(rhs);
-  if (diff < static_cast<__int128>(std::numeric_limits<std::int64_t>::min()) ||
-      diff > static_cast<__int128>(std::numeric_limits<std::int64_t>::max())) {
-    throw std::overflow_error("temporal alpha delta overflow");
-  }
-  return static_cast<std::int64_t>(diff);
-}
-
-long checkedLongSum(long lhs, std::int64_t rhs) {
-  const auto sum = static_cast<__int128>(lhs) + static_cast<__int128>(rhs);
-  if (sum < static_cast<__int128>(std::numeric_limits<long>::min()) ||
-      sum > static_cast<__int128>(std::numeric_limits<long>::max())) {
-    throw std::overflow_error("temporal alpha reconstruction overflow");
-  }
-  return static_cast<long>(sum);
-}
-
-std::uint64_t zigZagEncode(std::int64_t value) {
-  return (static_cast<std::uint64_t>(value) << 1) ^
-         static_cast<std::uint64_t>(-(value < 0));
-}
-
-std::int64_t zigZagDecode(std::uint64_t value) {
-  const auto decoded =
-      (value >> 1) ^ static_cast<std::uint64_t>(-(value & 1));
-  std::int64_t result = 0;
-  std::memcpy(&result, &decoded, sizeof(result));
-  return result;
 }
 
 class Writer {
@@ -106,15 +76,9 @@ public:
 
   void writeBool(bool value) { writeU8(value ? 1 : 0); }
 
-  void writeVarU64(std::uint64_t value) {
-    while (value >= 0x80) {
-      writeU8(static_cast<std::uint8_t>((value & 0x7f) | 0x80));
-      value >>= 7;
-    }
-    writeU8(static_cast<std::uint8_t>(value));
+  template <typename Integer> void writeInteger(const Integer &value) {
+    integer_codec::appendSigned(&bytes_, value);
   }
-
-  void writeVarI64(std::int64_t value) { writeVarU64(zigZagEncode(value)); }
 
   template <typename T, typename Fn>
   void writeVector(const std::vector<T> &values, Fn write_one) {
@@ -177,22 +141,15 @@ public:
     return value != 0;
   }
 
-  std::uint64_t readVarU64() {
-    std::uint64_t value = 0;
-    for (int i = 0; i < 10; ++i) {
-      const auto byte = readU8();
-      if (i == 9 && (byte & 0x7e) != 0) {
-        throw std::runtime_error("varint value is too large");
-      }
-      value |= static_cast<std::uint64_t>(byte & 0x7f) << (7 * i);
-      if ((byte & 0x80) == 0) {
-        return value;
-      }
-    }
-    throw std::runtime_error("varint value is too long");
+  mcpd3::Capacity readCapacity() {
+    return integer_codec::capacityFromCppInt(
+        integer_codec::readSigned(bytes_, &offset_));
   }
 
-  std::int64_t readVarI64() { return zigZagDecode(readVarU64()); }
+  mcpd3::Objective readObjective() {
+    return integer_codec::objectiveFromCppInt(
+        integer_codec::readSigned(bytes_, &offset_));
+  }
 
   template <typename T, typename Fn> std::vector<T> readVector(Fn read_one) {
     const auto size = readU32();
@@ -233,13 +190,13 @@ TemporalSolveCodecState *requireState(TemporalSolveCodecState *state) {
 
 void writeEncodedAlpha(Writer *writer, const EncodedAlphaUpdate &update) {
   writer->writeI32(update.constraint_id);
-  writer->writeVarI64(update.value);
+  writer->writeInteger(update.value);
 }
 
 EncodedAlphaUpdate readEncodedAlpha(Reader *reader) {
   EncodedAlphaUpdate update;
   update.constraint_id = reader->readI32();
-  update.value = reader->readVarI64();
+  update.value = reader->readObjective();
   return update;
 }
 
@@ -260,8 +217,11 @@ std::vector<EncodedAlphaUpdate> encodeAlphaUpdatesForPartition(
     wire_update.constraint_id = update.constraint_id;
     wire_update.value =
         find_iter == partition_state.alpha_by_constraint.end()
-            ? checkedIntegerCast<std::int64_t>(update.alpha)
-            : checkedLongDifference(update.alpha, find_iter->second);
+            ? mcpd3::widen_capacity(update.alpha)
+            : mcpd3::checked_subtract(
+                  mcpd3::widen_capacity(update.alpha),
+                  mcpd3::widen_capacity(find_iter->second),
+                  "temporal alpha delta overflow");
     partition_state.alpha_by_constraint[update.constraint_id] = update.alpha;
     encoded.push_back(wire_update);
   }
@@ -277,10 +237,14 @@ std::vector<mcpd3::AlphaUpdate> decodeAlphaUpdatesForPartition(
   for (const auto &wire_update : encoded) {
     auto find_iter =
         partition_state.alpha_by_constraint.find(wire_update.constraint_id);
-    const long alpha =
+    const mcpd3::Objective widened_alpha =
         find_iter == partition_state.alpha_by_constraint.end()
-            ? checkedIntegerCast<long>(wire_update.value)
-            : checkedLongSum(find_iter->second, wire_update.value);
+            ? wire_update.value
+            : mcpd3::checked_add(
+                  mcpd3::widen_capacity(find_iter->second), wire_update.value,
+                  "temporal alpha reconstruction overflow");
+    const mcpd3::Capacity alpha =
+        mcpd3::narrow_objective_to_capacity(widened_alpha);
     partition_state.alpha_by_constraint[wire_update.constraint_id] = alpha;
     updates.push_back(mcpd3::AlphaUpdate{
         /*constraint_id=*/wire_update.constraint_id,
@@ -297,7 +261,7 @@ void writeSolveRoundRequestPayload(
   writer->writeI64(message.round_id);
   writer->writeI32(message.partition_id);
   writer->writeI64(message.scale);
-  writer->writeI32(message.regularization_strength);
+  writer->writeInteger(message.regularization_strength);
   writer->writeBool(message.return_full_labels);
   const auto encoded = encodeAlphaUpdatesForPartition(message, state);
   writer->writeVector<EncodedAlphaUpdate>(
@@ -310,7 +274,7 @@ mcpd3::PartitionSolveRequest readSolveRoundRequestPayload(
   message.round_id = checkedIntegerCast<long>(reader->readI64());
   message.partition_id = reader->readI32();
   message.scale = checkedIntegerCast<long>(reader->readI64());
-  message.regularization_strength = reader->readI32();
+  message.regularization_strength = reader->readCapacity();
   message.return_full_labels = reader->readBool();
   const auto encoded = reader->readVector<EncodedAlphaUpdate>(
       [&] { return readEncodedAlpha(reader); });
@@ -459,9 +423,9 @@ void writeSolveRoundResultPayload(
     TemporalSolveCodecState *state) {
   writer->writeI64(message.round_id);
   writer->writeI32(message.partition_id);
-  writer->writeI64(message.lower_bound);
-  writer->writeI64(message.regularization_budget);
-  writer->writeI64(message.regularization_contribution);
+  writer->writeInteger(message.lower_bound);
+  writer->writeInteger(message.regularization_budget);
+  writer->writeInteger(message.regularization_contribution);
   writer->writeI64(message.regularization_anchor_sink_count);
   writer->writeI64(message.regularization_active_sink_count);
   bool full_sync = false;
@@ -479,10 +443,9 @@ mcpd3::PartitionSolveResult readSolveRoundResultPayload(
   mcpd3::PartitionSolveResult message;
   message.round_id = checkedIntegerCast<long>(reader->readI64());
   message.partition_id = reader->readI32();
-  message.lower_bound = checkedIntegerCast<long>(reader->readI64());
-  message.regularization_budget = checkedIntegerCast<long>(reader->readI64());
-  message.regularization_contribution =
-      checkedIntegerCast<long>(reader->readI64());
+  message.lower_bound = reader->readObjective();
+  message.regularization_budget = reader->readObjective();
+  message.regularization_contribution = reader->readObjective();
   message.regularization_anchor_sink_count =
       checkedIntegerCast<long>(reader->readI64());
   message.regularization_active_sink_count =

@@ -2117,3 +2117,17 @@
   same objective.
 - Verified all mcpd3 (`1/1`), mcpd4 (`4/4`), and phase worktree (`7/7`) CTest
   targets.
+
+## 2026-07-13 11:54 PDT - Build-time capacity precision in mcpd4
+
+- Added shared `MCPD_CAPACITY_MODE=32|64|128|gmp` configuration from mcpd3.
+- Bumped the RPC protocol to v7, advertised precision in worker `HELLO`, and
+  reject coordinator/worker precision mismatches before partition transfer.
+- Replaced fixed int32/int64 capacity and objective payloads with canonical
+  signed arbitrary-width varints. Temporal alpha deltas use the widened
+  objective type so extreme sign changes remain representable.
+- Removed int-specific graph scaling and objective telemetry narrowing.
+- Added configured-extreme stateless, temporal-delta, malformed-wire, and TCP
+  remote-solve tests. GMP tests exercise values above 521 bits.
+- Built all mcpd4 targets and passed all four CTest tests in 32-, 64-, 128-bit,
+  and GMP modes.

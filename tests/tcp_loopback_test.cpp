@@ -317,6 +317,24 @@ void rejectsInvalidWorkerHello() {
   client.join();
 }
 
+void rejectsMismatchedWorkerCapacityMode() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  const auto port = mcpd4::localPort(listener);
+  std::thread client([&] {
+    auto socket = mcpd4::connectTcp("127.0.0.1", port);
+    auto hello = makeHello("wrong-capacity-mode");
+    hello.capacity_mode =
+        mcpd4::configuredCapacityMode() == mcpd4::CapacityMode::BITS_32
+            ? mcpd4::CapacityMode::BITS_64
+            : mcpd4::CapacityMode::BITS_32;
+    mcpd4::sendFrameBytes(socket, mcpd4::encodeHello(hello));
+  });
+  requireThrows(
+      [&] { (void)mcpd4::acceptTcpPartitionWorker(&listener, 2s); },
+      "coordinator should reject a worker built for another capacity mode");
+  client.join();
+}
+
 void remoteWorkerExposesHandshakeResources() {
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   const auto port = mcpd4::localPort(listener);
@@ -444,7 +462,38 @@ void remoteWorkerScalesLoadedObjective() {
   }
 }
 
+void remoteWorkerSolvesConfiguredPrecisionExtreme() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(&listener, &client, "extreme-worker");
+  try {
+    const mcpd3::Capacity capacity = mcpd3::capacity_test_extreme_value();
+    mcpd3::PartitionPackage package;
+    package.partition_id = 0;
+    package.local_node_count = 2;
+    package.arcs = {0, 1};
+    package.arc_capacities = {capacity, 0};
+    package.terminal_capacities = {capacity, -capacity};
+    package.local_to_global = {5, 6};
+    worker->loadPartition(package);
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = 0;
+    const auto result = worker->solveRound(request);
+    require(result.lower_bound == mcpd3::widen_capacity(capacity),
+            "remote solve must preserve the configured precision extreme");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
 void remoteWorkerSaturatesScaleObjectiveOverflow() {
+#if defined(MCPD_CAPACITY_MODE_GMP)
+  return;
+#else
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
   auto worker = startRemoteWorker(&listener, &client, "scale-saturate-worker");
@@ -453,7 +502,7 @@ void remoteWorkerSaturatesScaleObjectiveOverflow() {
     package.partition_id = 0;
     package.local_node_count = 1;
     package.terminal_capacities = {
-        std::numeric_limits<int>::max() / 2 + 1};
+        std::numeric_limits<mcpd3::Capacity>::max() / 2 + 1};
     package.local_to_global = {5};
     worker->loadPartition(package);
 
@@ -469,6 +518,7 @@ void remoteWorkerSaturatesScaleObjectiveOverflow() {
     stopAndJoin(worker.get(), client);
     throw;
   }
+#endif
 }
 
 void remoteWorkerSolvesExplicitBatch() {
@@ -729,10 +779,12 @@ int main() {
     rejectsOversizedSnappyLogicalFrameBeforeReadingBody();
     snappyCompressedFrameRoundTrips();
     rejectsInvalidWorkerHello();
+    rejectsMismatchedWorkerCapacityMode();
     remoteWorkerExposesHandshakeResources();
     remoteWorkerReportsErrorsAsExceptions();
     loadPartitionDisconnectReportsWorkerAndPartitionContext();
     remoteWorkerScalesLoadedObjective();
+    remoteWorkerSolvesConfiguredPrecisionExtreme();
     remoteWorkerSaturatesScaleObjectiveOverflow();
     remoteWorkerSolvesExplicitBatch();
     remoteWorkerDeltaEncodingReducesRepeatedSolveBytes();

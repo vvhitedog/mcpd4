@@ -9,6 +9,10 @@ include(CTest)
 
 find_package(Threads REQUIRED)
 
+include(third_party/mcpd3/cmake/McpdCapacity.cmake)
+mcpd_configure_capacity(mcpd3_capacity_config
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mcpd3)
+
 option(MCPD4_ENABLE_SNAPPY "Build Snappy transport compression support" ON)
 if (MCPD4_ENABLE_SNAPPY)
   if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/snappy/CMakeLists.txt")
@@ -29,6 +33,7 @@ add_library(mcpd4_protocol
 target_include_directories(mcpd4_protocol PUBLIC
   include
   third_party/mcpd3)
+target_link_libraries(mcpd4_protocol PUBLIC mcpd3_capacity_config)
 
 add_library(mcpd4_runtime
   src/discovery.cpp
@@ -81,6 +86,7 @@ if (BUILD_TESTING)
   target_include_directories(distributed_partition_worker_smoke_test PRIVATE
     third_party/mcpd3)
   target_link_libraries(distributed_partition_worker_smoke_test PRIVATE
+    mcpd3_capacity_config
     Threads::Threads)
   add_test(NAME distributed_partition_worker_smoke_test
     COMMAND distributed_partition_worker_smoke_test)

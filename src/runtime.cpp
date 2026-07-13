@@ -24,6 +24,9 @@ void validateHello(const HelloMessage &hello) {
   if (hello.protocol_version != kProtocolVersion) {
     throw std::runtime_error("unsupported worker protocol version");
   }
+  if (hello.capacity_mode != configuredCapacityMode()) {
+    throw std::runtime_error("worker capacity precision does not match coordinator");
+  }
   if (!hello.little_endian) {
     throw std::runtime_error("worker must use little-endian protocol encoding");
   }
@@ -418,6 +421,7 @@ TcpPartitionWorkerStatusSnapshot TcpPartitionWorker::statusSnapshot() const {
 HelloMessage makeDefaultHello(const std::string &worker_name) {
   HelloMessage hello;
   hello.protocol_version = kProtocolVersion;
+  hello.capacity_mode = configuredCapacityMode();
   hello.worker_name = worker_name.empty() ? "mcpd4-worker" : worker_name;
   hello.cpu_count = hostCpuCount();
   hello.ram_gb = hostRamGb();

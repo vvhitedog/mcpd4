@@ -31,6 +31,8 @@ planning details live in [AGENT_HANDOFF.md](AGENT_HANDOFF.md), progress is in
 - CMake 3.16 or newer.
 - C++17 compiler.
 - `git` with submodule support.
+- Boost.Multiprecision headers (required in every capacity mode).
+- GMP C and C++ development libraries when building arbitrary precision.
 - `python3` only for the local benchmark helper script.
 
 The current runtime is IPv4 TCP. It can optionally compress RPC frames with
@@ -86,6 +88,33 @@ Run the product test suite:
 ```bash
 ctest --test-dir build --output-on-failure
 ```
+
+### Capacity Precision
+
+`MCPD_CAPACITY_MODE` selects capacity precision for the complete coordinator,
+worker, protocol, and embedded mcpd3 build. The default remains `32`.
+
+```bash
+cmake -S . -B build-64 -DMCPD_CAPACITY_MODE=64
+cmake -S . -B build-128 -DMCPD_CAPACITY_MODE=128
+cmake -S . -B build-gmp -DMCPD_CAPACITY_MODE=gmp
+```
+
+Supported values are `32`, `64`, `128`, and `gmp`. The corresponding exact
+objective accumulator is wider than the capacity type in every bounded mode;
+GMP uses arbitrary precision for both. Set `BOOST_ROOT` or `GMP_ROOT` if those
+development files are installed outside standard system paths.
+
+Every coordinator and worker in a distributed run must be built with the same
+capacity mode. Protocol v7 advertises the mode in `HELLO` and rejects a
+mismatch before loading partitions. Capacity and objective fields use a
+canonical signed arbitrary-width wire encoding, so the protocol does not
+narrow 128-bit or GMP values.
+
+GMP-backed BK graph storage uses constructed heap arrays because GMP objects
+cannot be raw-copied or mmap-backed. Fixed-width modes retain the existing BK
+mmap options. Use 64- or 128-bit mode when fixed-width file-backed graph
+storage is required.
 
 The current suite includes protocol serialization, TCP loopback, worker error
 handling, objective-scale promotion, optional Snappy transport coverage, and

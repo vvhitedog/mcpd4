@@ -1,4 +1,5 @@
 #include <mcpd4/protocol.h>
+#include <mcpd4/integer_codec.h>
 
 #include <cstddef>
 #include <cstring>
@@ -30,6 +31,17 @@ bool isKnownMessageType(std::uint32_t value) {
   case MessageType::ERROR:
   case MessageType::SOLVE_ROUND_BATCH_REQUEST:
   case MessageType::SOLVE_ROUND_BATCH_RESULT:
+    return true;
+  }
+  return false;
+}
+
+bool isKnownCapacityMode(std::uint32_t value) {
+  switch (static_cast<CapacityMode>(value)) {
+  case CapacityMode::BITS_32:
+  case CapacityMode::BITS_64:
+  case CapacityMode::BITS_128:
+  case CapacityMode::GMP:
     return true;
   }
   return false;
@@ -80,6 +92,10 @@ public:
     std::uint64_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
     writeU64(bits);
+  }
+
+  template <typename Integer> void writeInteger(const Integer &value) {
+    integer_codec::appendSigned(&bytes_, value);
   }
 
   void writeBool(bool value) { writeU8(value ? 1 : 0); }
@@ -152,6 +168,16 @@ public:
     return value;
   }
 
+  mcpd3::Capacity readCapacity() {
+    return integer_codec::capacityFromCppInt(
+        integer_codec::readSigned(bytes_, &offset_));
+  }
+
+  mcpd3::Objective readObjective() {
+    return integer_codec::objectiveFromCppInt(
+        integer_codec::readSigned(bytes_, &offset_));
+  }
+
   bool readBool() {
     const auto value = readU8();
     require(value == 0 || value == 1, "invalid boolean value");
@@ -210,13 +236,13 @@ Frame decodeExpectedFrame(const std::vector<std::uint8_t> &frame,
 
 void writeAlphaUpdate(Writer *writer, const mcpd3::AlphaUpdate &update) {
   writer->writeI32(update.constraint_id);
-  writer->writeI64(update.alpha);
+  writer->writeInteger(update.alpha);
 }
 
 mcpd3::AlphaUpdate readAlphaUpdate(Reader *reader) {
   mcpd3::AlphaUpdate update;
   update.constraint_id = reader->readI32();
-  update.alpha = checkedIntegerCast<long>(reader->readI64());
+  update.alpha = reader->readCapacity();
   return update;
 }
 
@@ -226,8 +252,8 @@ void writeConstraintEndpoint(Writer *writer,
   writer->writeI32(binding.global_node_id);
   writer->writeI32(binding.local_index);
   writer->writeBool(binding.is_source);
-  writer->writeI64(binding.alpha);
-  writer->writeI64(binding.last_alpha);
+  writer->writeInteger(binding.alpha);
+  writer->writeInteger(binding.last_alpha);
   writer->writeFloat(binding.alpha_momentum);
 }
 
@@ -237,8 +263,8 @@ mcpd3::ConstraintEndpointBinding readConstraintEndpoint(Reader *reader) {
   binding.global_node_id = reader->readI32();
   binding.local_index = reader->readI32();
   binding.is_source = reader->readBool();
-  binding.alpha = checkedIntegerCast<long>(reader->readI64());
-  binding.last_alpha = checkedIntegerCast<long>(reader->readI64());
+  binding.alpha = reader->readCapacity();
+  binding.last_alpha = reader->readCapacity();
   binding.alpha_momentum = reader->readFloat();
   return binding;
 }
@@ -274,7 +300,7 @@ void writeSolveRoundRequestPayload(
   writer->writeI64(message.round_id);
   writer->writeI32(message.partition_id);
   writer->writeI64(message.scale);
-  writer->writeI32(message.regularization_strength);
+  writer->writeInteger(message.regularization_strength);
   writer->writeBool(message.return_full_labels);
   writer->writeVector<mcpd3::AlphaUpdate>(
       message.alpha_updates,
@@ -286,7 +312,7 @@ mcpd3::PartitionSolveRequest readSolveRoundRequestPayload(Reader *reader) {
   message.round_id = checkedIntegerCast<long>(reader->readI64());
   message.partition_id = reader->readI32();
   message.scale = checkedIntegerCast<long>(reader->readI64());
-  message.regularization_strength = reader->readI32();
+  message.regularization_strength = reader->readCapacity();
   message.return_full_labels = reader->readBool();
   message.alpha_updates = reader->readVector<mcpd3::AlphaUpdate>(
       [&] { return readAlphaUpdate(reader); });
@@ -297,9 +323,9 @@ void writeSolveRoundResultPayload(
     Writer *writer, const mcpd3::PartitionSolveResult &message) {
   writer->writeI64(message.round_id);
   writer->writeI32(message.partition_id);
-  writer->writeI64(message.lower_bound);
-  writer->writeI64(message.regularization_budget);
-  writer->writeI64(message.regularization_contribution);
+  writer->writeInteger(message.lower_bound);
+  writer->writeInteger(message.regularization_budget);
+  writer->writeInteger(message.regularization_contribution);
   writer->writeI64(message.regularization_anchor_sink_count);
   writer->writeI64(message.regularization_active_sink_count);
   writer->writeVector<mcpd3::ConstraintLabel>(
@@ -314,10 +340,9 @@ mcpd3::PartitionSolveResult readSolveRoundResultPayload(Reader *reader) {
   mcpd3::PartitionSolveResult message;
   message.round_id = checkedIntegerCast<long>(reader->readI64());
   message.partition_id = reader->readI32();
-  message.lower_bound = checkedIntegerCast<long>(reader->readI64());
-  message.regularization_budget = checkedIntegerCast<long>(reader->readI64());
-  message.regularization_contribution =
-      checkedIntegerCast<long>(reader->readI64());
+  message.lower_bound = reader->readObjective();
+  message.regularization_budget = reader->readObjective();
+  message.regularization_contribution = reader->readObjective();
   message.regularization_anchor_sink_count =
       checkedIntegerCast<long>(reader->readI64());
   message.regularization_active_sink_count =
@@ -363,6 +388,7 @@ Frame decodeFrame(const std::vector<std::uint8_t> &bytes) {
 std::vector<std::uint8_t> encodeHello(const HelloMessage &message) {
   Writer writer;
   writer.writeU32(message.protocol_version);
+  writer.writeU32(static_cast<std::uint32_t>(message.capacity_mode));
   writer.writeString(message.worker_name);
   writer.writeU32(message.cpu_count);
   writer.writeU64(message.ram_gb);
@@ -378,6 +404,9 @@ HelloMessage decodeHello(const std::vector<std::uint8_t> &frame) {
   Reader reader(decoded.payload);
   HelloMessage message;
   message.protocol_version = reader.readU32();
+  const auto capacity_mode = reader.readU32();
+  require(isKnownCapacityMode(capacity_mode), "unknown capacity mode");
+  message.capacity_mode = static_cast<CapacityMode>(capacity_mode);
   message.worker_name = reader.readString();
   message.cpu_count = reader.readU32();
   message.ram_gb = reader.readU64();
@@ -396,10 +425,12 @@ std::vector<std::uint8_t> encodePartitionPackage(
   writer.writeI32(message.local_node_count);
   writer.writeVector<int>(message.arcs,
                           [&](int value) { writer.writeI32(value); });
-  writer.writeVector<int>(message.arc_capacities,
-                          [&](int value) { writer.writeI32(value); });
-  writer.writeVector<int>(message.terminal_capacities,
-                          [&](int value) { writer.writeI32(value); });
+  writer.writeVector<mcpd3::Capacity>(
+      message.arc_capacities,
+      [&](const auto &value) { writer.writeInteger(value); });
+  writer.writeVector<mcpd3::Capacity>(
+      message.terminal_capacities,
+      [&](const auto &value) { writer.writeInteger(value); });
   writer.writeVector<int>(message.local_to_global,
                           [&](int value) { writer.writeI32(value); });
   writer.writeVector<mcpd3::ConstraintEndpointBinding>(
@@ -416,10 +447,10 @@ mcpd3::PartitionPackage decodePartitionPackage(
   message.partition_id = reader.readI32();
   message.local_node_count = reader.readI32();
   message.arcs = reader.readVector<int>([&] { return reader.readI32(); });
-  message.arc_capacities =
-      reader.readVector<int>([&] { return reader.readI32(); });
-  message.terminal_capacities =
-      reader.readVector<int>([&] { return reader.readI32(); });
+  message.arc_capacities = reader.readVector<mcpd3::Capacity>(
+      [&] { return reader.readCapacity(); });
+  message.terminal_capacities = reader.readVector<mcpd3::Capacity>(
+      [&] { return reader.readCapacity(); });
   message.local_to_global =
       reader.readVector<int>([&] { return reader.readI32(); });
   message.constraint_endpoints =
