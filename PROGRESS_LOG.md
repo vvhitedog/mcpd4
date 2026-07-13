@@ -2131,3 +2131,5 @@
   remote-solve tests. GMP tests exercise values above 521 bits.
 - Built all mcpd4 targets and passed all four CTest tests in 32-, 64-, 128-bit,
   and GMP modes.
+- Corrected the user-facing MVP limits to describe the selectable precision
+  modes instead of the obsolete fixed 32-bit capacity path.

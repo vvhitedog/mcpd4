@@ -878,5 +878,5 @@ Practical starting points:
 - No authentication/encryption on the TCP protocol.
 - Coordinator and workers use blocking RPCs, though active workers are
   dispatched concurrently.
-- The current capacity storage path is 32-bit for graph capacities; scaling can
-  overflow without care.
+- Capacity precision is selected per build. The default is signed 32-bit;
+  64-bit, 128-bit, and GMP modes are available when scaling needs more range.
