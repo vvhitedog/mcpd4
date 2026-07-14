@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <decomp/partition_worker.h>
+#include <mcpd4/linear_worker.h>
 
 namespace mcpd4 {
 
@@ -39,6 +40,18 @@ enum class MessageType : std::uint32_t {
   ERROR = 9,
   SOLVE_ROUND_BATCH_REQUEST = 10,
   SOLVE_ROUND_BATCH_RESULT = 11,
+  LINEAR_STRUCTURE = 12,
+  LINEAR_SYSTEM_VALUES = 13,
+  LINEAR_INITIALIZE_REQUEST = 14,
+  LINEAR_INITIALIZE_RESULT = 15,
+  LINEAR_MULTIPLY_REQUEST = 16,
+  LINEAR_MULTIPLY_RESULT = 17,
+  LINEAR_ALPHA_REQUEST = 18,
+  LINEAR_ALPHA_RESULT = 19,
+  LINEAR_BETA_REQUEST = 20,
+  LINEAR_BETA_RESULT = 21,
+  LINEAR_SOLUTION_REQUEST = 22,
+  LINEAR_SOLUTION_RESULT = 23,
 };
 
 struct Frame {
@@ -90,6 +103,61 @@ struct TimedSolveRoundResult {
 struct TimedSolveRoundBatchResult {
   std::vector<mcpd3::PartitionSolveResult> results;
   std::uint64_t worker_solve_wall_us = 0;
+};
+
+struct LinearStructureMessage {
+  int partition_id = -1;
+  std::vector<int> owned_global_nodes;
+  std::vector<int> ghost_global_nodes;
+  std::vector<std::uint64_t> row_offsets;
+  std::vector<int> column_indices;
+  std::vector<int> boundary_owned_local_indices;
+};
+
+struct LinearSystemValuesMessage {
+  int partition_id = -1;
+  std::vector<double> values;
+  std::vector<double> rhs;
+  std::vector<double> initial_x;
+};
+
+struct LinearVectorRequest {
+  int partition_id = -1;
+  std::vector<double> values;
+};
+
+struct LinearScalarRequest {
+  int partition_id = -1;
+  double value = 0.0;
+};
+
+struct LinearPartitionRequest {
+  int partition_id = -1;
+};
+
+struct LinearInitializeResultMessage {
+  int partition_id = -1;
+  LinearInitializeResult result;
+};
+
+struct LinearMultiplyResultMessage {
+  int partition_id = -1;
+  LinearMultiplyResult result;
+};
+
+struct LinearAlphaResultMessage {
+  int partition_id = -1;
+  LinearAlphaUpdateResult result;
+};
+
+struct LinearBetaResultMessage {
+  int partition_id = -1;
+  LinearBetaUpdateResult result;
+};
+
+struct LinearSolutionResultMessage {
+  int partition_id = -1;
+  std::vector<double> solution;
 };
 
 std::vector<std::uint8_t> encodeFrame(MessageType type,
@@ -149,5 +217,59 @@ StopMessage decodeStop(const std::vector<std::uint8_t> &frame);
 
 std::vector<std::uint8_t> encodeError(const ErrorMessage &message);
 ErrorMessage decodeError(const std::vector<std::uint8_t> &frame);
+
+std::vector<std::uint8_t> encodeLinearStructure(
+    const LinearStructureMessage &message);
+LinearStructureMessage decodeLinearStructure(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodeLinearSystemValues(
+    const LinearSystemValuesMessage &message);
+LinearSystemValuesMessage decodeLinearSystemValues(
+    const std::vector<std::uint8_t> &frame);
+
+std::vector<std::uint8_t> encodeLinearInitializeRequest(
+    const LinearVectorRequest &message);
+LinearVectorRequest decodeLinearInitializeRequest(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodeLinearInitializeResult(
+    const LinearInitializeResultMessage &message);
+LinearInitializeResultMessage decodeLinearInitializeResult(
+    const std::vector<std::uint8_t> &frame);
+
+std::vector<std::uint8_t> encodeLinearMultiplyRequest(
+    const LinearVectorRequest &message);
+LinearVectorRequest decodeLinearMultiplyRequest(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodeLinearMultiplyResult(
+    const LinearMultiplyResultMessage &message);
+LinearMultiplyResultMessage decodeLinearMultiplyResult(
+    const std::vector<std::uint8_t> &frame);
+
+std::vector<std::uint8_t> encodeLinearAlphaRequest(
+    const LinearScalarRequest &message);
+LinearScalarRequest decodeLinearAlphaRequest(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodeLinearAlphaResult(
+    const LinearAlphaResultMessage &message);
+LinearAlphaResultMessage decodeLinearAlphaResult(
+    const std::vector<std::uint8_t> &frame);
+
+std::vector<std::uint8_t> encodeLinearBetaRequest(
+    const LinearScalarRequest &message);
+LinearScalarRequest decodeLinearBetaRequest(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodeLinearBetaResult(
+    const LinearBetaResultMessage &message);
+LinearBetaResultMessage decodeLinearBetaResult(
+    const std::vector<std::uint8_t> &frame);
+
+std::vector<std::uint8_t> encodeLinearSolutionRequest(
+    const LinearPartitionRequest &message);
+LinearPartitionRequest decodeLinearSolutionRequest(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodeLinearSolutionResult(
+    const LinearSolutionResultMessage &message);
+LinearSolutionResultMessage decodeLinearSolutionResult(
+    const std::vector<std::uint8_t> &frame);
 
 } // namespace mcpd4

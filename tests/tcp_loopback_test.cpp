@@ -2,6 +2,7 @@
 #include <mcpd4/tcp.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -377,6 +378,137 @@ void remoteWorkerReportsErrorsAsExceptions() {
     stopAndJoin(worker.get(), client);
   } catch (...) {
     stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
+void twoRemoteWorkersSolveCollectivePcgSystem() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *left_client = nullptr;
+  WorkerClientThread *right_client = nullptr;
+  auto left = startRemoteWorker(&listener, &left_client, "linear-left");
+  auto right = startRemoteWorker(&listener, &right_client, "linear-right");
+  try {
+    mcpd4::LinearStructureMessage left_structure;
+    left_structure.partition_id = 0;
+    left_structure.owned_global_nodes = {0, 1};
+    left_structure.ghost_global_nodes = {2};
+    left_structure.row_offsets = {0, 2, 5};
+    left_structure.column_indices = {0, 1, 0, 1, 2};
+    left_structure.boundary_owned_local_indices = {1};
+    left->loadLinearStructure(left_structure);
+
+    mcpd4::LinearStructureMessage right_structure;
+    right_structure.partition_id = 1;
+    right_structure.owned_global_nodes = {2};
+    right_structure.ghost_global_nodes = {1};
+    right_structure.row_offsets = {0, 2};
+    right_structure.column_indices = {0, 1};
+    right_structure.boundary_owned_local_indices = {0};
+    right->loadLinearStructure(right_structure);
+
+    requireThrows(
+        [&] { (void)left->multiplyLinear({/*partition_id=*/0, {0.0}}); },
+        "linear operation before numerical system load should fail remotely");
+
+    mcpd4::LinearSystemValuesMessage left_system;
+    left_system.partition_id = 0;
+    left_system.values = {4.0, -1.0, -1.0, 4.0, -1.0};
+    left_system.rhs = {15.0, 10.0};
+    left_system.initial_x = {0.0, 0.0};
+    left->loadLinearSystem(left_system);
+
+    mcpd4::LinearSystemValuesMessage right_system;
+    right_system.partition_id = 1;
+    right_system.values = {3.0, -1.0};
+    right_system.rhs = {10.0};
+    right_system.initial_x = {0.0};
+    right->loadLinearSystem(right_system);
+
+    auto left_initial =
+        left->initializeLinear({/*partition_id=*/0, {0.0}});
+    auto right_initial =
+        right->initializeLinear({/*partition_id=*/1, {0.0}});
+    const double rhs_norm_squared = left_initial.rhs_norm_squared +
+                                    right_initial.rhs_norm_squared;
+    double residual_inner = left_initial.residual_preconditioned_inner +
+                            right_initial.residual_preconditioned_inner;
+    double relative_residual = std::sqrt(
+        (left_initial.residual_norm_squared +
+         right_initial.residual_norm_squared) /
+        rhs_norm_squared);
+    std::vector<double> left_boundary = left_initial.boundary_direction;
+    std::vector<double> right_boundary = right_initial.boundary_direction;
+
+    int iterations = 0;
+    while (relative_residual > 1e-12 && iterations < 10) {
+      const auto left_product =
+          left->multiplyLinear({/*partition_id=*/0, right_boundary});
+      const auto right_product =
+          right->multiplyLinear({/*partition_id=*/1, left_boundary});
+      const double denominator = left_product.direction_product_inner +
+                                 right_product.direction_product_inner;
+      const double alpha = residual_inner / denominator;
+      const auto left_update =
+          left->updateLinearAlpha({/*partition_id=*/0, alpha});
+      const auto right_update =
+          right->updateLinearAlpha({/*partition_id=*/1, alpha});
+      relative_residual = std::sqrt(
+          (left_update.residual_norm_squared +
+           right_update.residual_norm_squared) /
+          rhs_norm_squared);
+      ++iterations;
+      if (relative_residual <= 1e-12) {
+        break;
+      }
+      const double next_inner =
+          left_update.residual_preconditioned_inner +
+          right_update.residual_preconditioned_inner;
+      const double beta = next_inner / residual_inner;
+      left_boundary =
+          left->updateLinearBeta({/*partition_id=*/0, beta})
+              .boundary_direction;
+      right_boundary =
+          right->updateLinearBeta({/*partition_id=*/1, beta})
+              .boundary_direction;
+      residual_inner = next_inner;
+    }
+
+    require(iterations <= 3,
+            "three-variable remote PCG should converge in at most n steps");
+    require(relative_residual <= 1e-12,
+            "two remote workers should reach the requested PCG residual");
+    const auto left_solution = left->linearSolution(0);
+    const auto right_solution = right->linearSolution(1);
+    require(left_solution.size() == 2 && right_solution.size() == 1,
+            "remote linear solution sizes should match ownership");
+    for (double value : left_solution) {
+      require(std::abs(value - 5.0) <= 1e-10,
+              "left remote worker should recover the known solution");
+    }
+    require(std::abs(right_solution.at(0) - 5.0) <= 1e-10,
+            "right remote worker should recover the known solution");
+    const auto &left_timing = left->timingStats();
+    require(left_timing.linear_structure_rpc_count == 1 &&
+                left_timing.linear_system_rpc_count == 1 &&
+                left_timing.linear_initialize_rpc_count == 1 &&
+                left_timing.linear_multiply_rpc_count == iterations &&
+                left_timing.linear_alpha_rpc_count == iterations &&
+                left_timing.linear_beta_rpc_count == iterations - 1 &&
+                left_timing.linear_solution_rpc_count == 1,
+            "linear RPC telemetry should count each collective PCG phase");
+    require(left_timing.linear_rpc_wall_us > 0 &&
+                left_timing.rpc_bytes.linear_tx_bytes > 0 &&
+                left_timing.rpc_bytes.linear_rx_bytes > 0,
+            "linear RPC telemetry should record time and both byte directions");
+
+    stopAndJoin(left.get(), left_client);
+    left_client = nullptr;
+    stopAndJoin(right.get(), right_client);
+    right_client = nullptr;
+  } catch (...) {
+    stopAndJoin(left.get(), left_client);
+    stopAndJoin(right.get(), right_client);
     throw;
   }
 }
@@ -791,6 +923,7 @@ int main() {
     rejectsMismatchedWorkerCapacityMode();
     remoteWorkerExposesHandshakeResources();
     remoteWorkerReportsErrorsAsExceptions();
+    twoRemoteWorkersSolveCollectivePcgSystem();
     loadPartitionDisconnectReportsWorkerAndPartitionContext();
     remoteWorkerScalesLoadedObjective();
     remoteWorkerSolvesConfiguredPrecisionExtreme();

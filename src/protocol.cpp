@@ -31,6 +31,18 @@ bool isKnownMessageType(std::uint32_t value) {
   case MessageType::ERROR:
   case MessageType::SOLVE_ROUND_BATCH_REQUEST:
   case MessageType::SOLVE_ROUND_BATCH_RESULT:
+  case MessageType::LINEAR_STRUCTURE:
+  case MessageType::LINEAR_SYSTEM_VALUES:
+  case MessageType::LINEAR_INITIALIZE_REQUEST:
+  case MessageType::LINEAR_INITIALIZE_RESULT:
+  case MessageType::LINEAR_MULTIPLY_REQUEST:
+  case MessageType::LINEAR_MULTIPLY_RESULT:
+  case MessageType::LINEAR_ALPHA_REQUEST:
+  case MessageType::LINEAR_ALPHA_RESULT:
+  case MessageType::LINEAR_BETA_REQUEST:
+  case MessageType::LINEAR_BETA_RESULT:
+  case MessageType::LINEAR_SOLUTION_REQUEST:
+  case MessageType::LINEAR_SOLUTION_RESULT:
     return true;
   }
   return false;
@@ -106,6 +118,14 @@ public:
     std::uint32_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
     writeU32(bits);
+  }
+
+  void writeDouble(double value) {
+    static_assert(sizeof(double) == sizeof(std::uint64_t),
+                  "double serialization expects 64-bit double");
+    std::uint64_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    writeU64(bits);
   }
 
   void writeString(const std::string &value) {
@@ -189,6 +209,15 @@ public:
                   "float serialization expects 32-bit float");
     const auto bits = readU32();
     float value = 0;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+  }
+
+  double readDouble() {
+    static_assert(sizeof(double) == sizeof(std::uint64_t),
+                  "double serialization expects 64-bit double");
+    const auto bits = readU64();
+    double value = 0.0;
     std::memcpy(&value, &bits, sizeof(value));
     return value;
   }
@@ -351,6 +380,41 @@ mcpd3::PartitionSolveResult readSolveRoundResultPayload(Reader *reader) {
       [&] { return readConstraintLabel(reader); });
   message.full_labels =
       reader->readVector<mcpd3::NodeLabel>([&] { return readNodeLabel(reader); });
+  return message;
+}
+
+void writeDoubles(Writer *writer, const std::vector<double> &values) {
+  writer->writeVector<double>(values,
+                              [&](double value) { writer->writeDouble(value); });
+}
+
+std::vector<double> readDoubles(Reader *reader) {
+  return reader->readVector<double>([&] { return reader->readDouble(); });
+}
+
+void writeLinearVectorRequest(Writer *writer,
+                              const LinearVectorRequest &message) {
+  writer->writeI32(message.partition_id);
+  writeDoubles(writer, message.values);
+}
+
+LinearVectorRequest readLinearVectorRequest(Reader *reader) {
+  LinearVectorRequest message;
+  message.partition_id = reader->readI32();
+  message.values = readDoubles(reader);
+  return message;
+}
+
+void writeLinearScalarRequest(Writer *writer,
+                              const LinearScalarRequest &message) {
+  writer->writeI32(message.partition_id);
+  writer->writeDouble(message.value);
+}
+
+LinearScalarRequest readLinearScalarRequest(Reader *reader) {
+  LinearScalarRequest message;
+  message.partition_id = reader->readI32();
+  message.value = reader->readDouble();
   return message;
 }
 
@@ -653,6 +717,263 @@ ErrorMessage decodeError(const std::vector<std::uint8_t> &frame) {
   ErrorMessage message;
   message.code = reader.readU32();
   message.message = reader.readString();
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearStructure(
+    const LinearStructureMessage &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writer.writeVector<int>(message.owned_global_nodes,
+                          [&](int value) { writer.writeI32(value); });
+  writer.writeVector<int>(message.ghost_global_nodes,
+                          [&](int value) { writer.writeI32(value); });
+  writer.writeVector<std::uint64_t>(
+      message.row_offsets,
+      [&](std::uint64_t value) { writer.writeU64(value); });
+  writer.writeVector<int>(message.column_indices,
+                          [&](int value) { writer.writeI32(value); });
+  writer.writeVector<int>(message.boundary_owned_local_indices,
+                          [&](int value) { writer.writeI32(value); });
+  return encodeFrame(MessageType::LINEAR_STRUCTURE, writer.bytes());
+}
+
+LinearStructureMessage decodeLinearStructure(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_STRUCTURE);
+  Reader reader(decoded.payload);
+  LinearStructureMessage message;
+  message.partition_id = reader.readI32();
+  message.owned_global_nodes =
+      reader.readVector<int>([&] { return reader.readI32(); });
+  message.ghost_global_nodes =
+      reader.readVector<int>([&] { return reader.readI32(); });
+  message.row_offsets = reader.readVector<std::uint64_t>(
+      [&] { return reader.readU64(); });
+  message.column_indices =
+      reader.readVector<int>([&] { return reader.readI32(); });
+  message.boundary_owned_local_indices =
+      reader.readVector<int>([&] { return reader.readI32(); });
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearSystemValues(
+    const LinearSystemValuesMessage &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writeDoubles(&writer, message.values);
+  writeDoubles(&writer, message.rhs);
+  writeDoubles(&writer, message.initial_x);
+  return encodeFrame(MessageType::LINEAR_SYSTEM_VALUES, writer.bytes());
+}
+
+LinearSystemValuesMessage decodeLinearSystemValues(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_SYSTEM_VALUES);
+  Reader reader(decoded.payload);
+  LinearSystemValuesMessage message;
+  message.partition_id = reader.readI32();
+  message.values = readDoubles(&reader);
+  message.rhs = readDoubles(&reader);
+  message.initial_x = readDoubles(&reader);
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearInitializeRequest(
+    const LinearVectorRequest &message) {
+  Writer writer;
+  writeLinearVectorRequest(&writer, message);
+  return encodeFrame(MessageType::LINEAR_INITIALIZE_REQUEST, writer.bytes());
+}
+
+LinearVectorRequest decodeLinearInitializeRequest(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_INITIALIZE_REQUEST);
+  Reader reader(decoded.payload);
+  auto message = readLinearVectorRequest(&reader);
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearInitializeResult(
+    const LinearInitializeResultMessage &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writer.writeDouble(message.result.rhs_norm_squared);
+  writer.writeDouble(message.result.residual_norm_squared);
+  writer.writeDouble(message.result.residual_preconditioned_inner);
+  writeDoubles(&writer, message.result.boundary_direction);
+  return encodeFrame(MessageType::LINEAR_INITIALIZE_RESULT, writer.bytes());
+}
+
+LinearInitializeResultMessage decodeLinearInitializeResult(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_INITIALIZE_RESULT);
+  Reader reader(decoded.payload);
+  LinearInitializeResultMessage message;
+  message.partition_id = reader.readI32();
+  message.result.rhs_norm_squared = reader.readDouble();
+  message.result.residual_norm_squared = reader.readDouble();
+  message.result.residual_preconditioned_inner = reader.readDouble();
+  message.result.boundary_direction = readDoubles(&reader);
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearMultiplyRequest(
+    const LinearVectorRequest &message) {
+  Writer writer;
+  writeLinearVectorRequest(&writer, message);
+  return encodeFrame(MessageType::LINEAR_MULTIPLY_REQUEST, writer.bytes());
+}
+
+LinearVectorRequest decodeLinearMultiplyRequest(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_MULTIPLY_REQUEST);
+  Reader reader(decoded.payload);
+  auto message = readLinearVectorRequest(&reader);
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearMultiplyResult(
+    const LinearMultiplyResultMessage &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writer.writeDouble(message.result.direction_product_inner);
+  return encodeFrame(MessageType::LINEAR_MULTIPLY_RESULT, writer.bytes());
+}
+
+LinearMultiplyResultMessage decodeLinearMultiplyResult(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_MULTIPLY_RESULT);
+  Reader reader(decoded.payload);
+  LinearMultiplyResultMessage message;
+  message.partition_id = reader.readI32();
+  message.result.direction_product_inner = reader.readDouble();
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearAlphaRequest(
+    const LinearScalarRequest &message) {
+  Writer writer;
+  writeLinearScalarRequest(&writer, message);
+  return encodeFrame(MessageType::LINEAR_ALPHA_REQUEST, writer.bytes());
+}
+
+LinearScalarRequest decodeLinearAlphaRequest(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_ALPHA_REQUEST);
+  Reader reader(decoded.payload);
+  auto message = readLinearScalarRequest(&reader);
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearAlphaResult(
+    const LinearAlphaResultMessage &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writer.writeDouble(message.result.residual_norm_squared);
+  writer.writeDouble(message.result.residual_preconditioned_inner);
+  return encodeFrame(MessageType::LINEAR_ALPHA_RESULT, writer.bytes());
+}
+
+LinearAlphaResultMessage decodeLinearAlphaResult(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_ALPHA_RESULT);
+  Reader reader(decoded.payload);
+  LinearAlphaResultMessage message;
+  message.partition_id = reader.readI32();
+  message.result.residual_norm_squared = reader.readDouble();
+  message.result.residual_preconditioned_inner = reader.readDouble();
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearBetaRequest(
+    const LinearScalarRequest &message) {
+  Writer writer;
+  writeLinearScalarRequest(&writer, message);
+  return encodeFrame(MessageType::LINEAR_BETA_REQUEST, writer.bytes());
+}
+
+LinearScalarRequest decodeLinearBetaRequest(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_BETA_REQUEST);
+  Reader reader(decoded.payload);
+  auto message = readLinearScalarRequest(&reader);
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearBetaResult(
+    const LinearBetaResultMessage &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writeDoubles(&writer, message.result.boundary_direction);
+  return encodeFrame(MessageType::LINEAR_BETA_RESULT, writer.bytes());
+}
+
+LinearBetaResultMessage decodeLinearBetaResult(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_BETA_RESULT);
+  Reader reader(decoded.payload);
+  LinearBetaResultMessage message;
+  message.partition_id = reader.readI32();
+  message.result.boundary_direction = readDoubles(&reader);
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearSolutionRequest(
+    const LinearPartitionRequest &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  return encodeFrame(MessageType::LINEAR_SOLUTION_REQUEST, writer.bytes());
+}
+
+LinearPartitionRequest decodeLinearSolutionRequest(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_SOLUTION_REQUEST);
+  Reader reader(decoded.payload);
+  LinearPartitionRequest message;
+  message.partition_id = reader.readI32();
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeLinearSolutionResult(
+    const LinearSolutionResultMessage &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writeDoubles(&writer, message.solution);
+  return encodeFrame(MessageType::LINEAR_SOLUTION_RESULT, writer.bytes());
+}
+
+LinearSolutionResultMessage decodeLinearSolutionResult(
+    const std::vector<std::uint8_t> &frame) {
+  const auto decoded =
+      decodeExpectedFrame(frame, MessageType::LINEAR_SOLUTION_RESULT);
+  Reader reader(decoded.payload);
+  LinearSolutionResultMessage message;
+  message.partition_id = reader.readI32();
+  message.solution = readDoubles(&reader);
   requireDone(reader);
   return message;
 }

@@ -881,6 +881,135 @@ void roundTripsError() {
   require(decoded.message == message.message, "error message mismatch");
 }
 
+void roundTripsLinearWorkerMessages() {
+  mcpd4::LinearStructureMessage structure;
+  structure.partition_id = 7;
+  structure.owned_global_nodes = {10, 11};
+  structure.ghost_global_nodes = {20};
+  structure.row_offsets = {0, 2, 5};
+  structure.column_indices = {0, 1, 0, 1, 2};
+  structure.boundary_owned_local_indices = {1};
+  const auto decoded_structure = mcpd4::decodeLinearStructure(
+      mcpd4::encodeLinearStructure(structure));
+  require(decoded_structure.partition_id == structure.partition_id,
+          "linear structure partition mismatch");
+  require(decoded_structure.owned_global_nodes == structure.owned_global_nodes,
+          "linear structure owned nodes mismatch");
+  require(decoded_structure.ghost_global_nodes == structure.ghost_global_nodes,
+          "linear structure ghost nodes mismatch");
+  require(decoded_structure.row_offsets == structure.row_offsets,
+          "linear structure row offsets mismatch");
+  require(decoded_structure.column_indices == structure.column_indices,
+          "linear structure columns mismatch");
+  require(decoded_structure.boundary_owned_local_indices ==
+              structure.boundary_owned_local_indices,
+          "linear structure boundary indices mismatch");
+
+  mcpd4::LinearSystemValuesMessage system;
+  system.partition_id = 7;
+  system.values = {4.0, -1.0, -1.0, 4.0, -1.0};
+  system.rhs = {15.0, 10.0};
+  system.initial_x = {0.25, -0.5};
+  const auto decoded_system = mcpd4::decodeLinearSystemValues(
+      mcpd4::encodeLinearSystemValues(system));
+  require(decoded_system.partition_id == system.partition_id,
+          "linear system partition mismatch");
+  require(decoded_system.values == system.values,
+          "linear system values mismatch");
+  require(decoded_system.rhs == system.rhs, "linear system rhs mismatch");
+  require(decoded_system.initial_x == system.initial_x,
+          "linear system initial solution mismatch");
+
+  mcpd4::LinearVectorRequest vector_request;
+  vector_request.partition_id = 7;
+  vector_request.values = {1.25, -2.5};
+  const auto decoded_initialize = mcpd4::decodeLinearInitializeRequest(
+      mcpd4::encodeLinearInitializeRequest(vector_request));
+  require(decoded_initialize.partition_id == vector_request.partition_id &&
+              decoded_initialize.values == vector_request.values,
+          "linear initialize request mismatch");
+  const auto decoded_multiply = mcpd4::decodeLinearMultiplyRequest(
+      mcpd4::encodeLinearMultiplyRequest(vector_request));
+  require(decoded_multiply.partition_id == vector_request.partition_id &&
+              decoded_multiply.values == vector_request.values,
+          "linear multiply request mismatch");
+
+  mcpd4::LinearInitializeResultMessage initialize_result;
+  initialize_result.partition_id = 7;
+  initialize_result.result.rhs_norm_squared = 12.5;
+  initialize_result.result.residual_norm_squared = 3.25;
+  initialize_result.result.residual_preconditioned_inner = 2.75;
+  initialize_result.result.boundary_direction = {-1.0, 2.0};
+  const auto decoded_initialize_result =
+      mcpd4::decodeLinearInitializeResult(
+          mcpd4::encodeLinearInitializeResult(initialize_result));
+  require(decoded_initialize_result.partition_id == 7 &&
+              decoded_initialize_result.result.rhs_norm_squared == 12.5 &&
+              decoded_initialize_result.result.residual_norm_squared == 3.25 &&
+              decoded_initialize_result.result
+                      .residual_preconditioned_inner == 2.75 &&
+              decoded_initialize_result.result.boundary_direction ==
+                  std::vector<double>({-1.0, 2.0}),
+          "linear initialize result mismatch");
+
+  mcpd4::LinearScalarRequest scalar_request;
+  scalar_request.partition_id = 7;
+  scalar_request.value = -0.125;
+  const auto decoded_alpha = mcpd4::decodeLinearAlphaRequest(
+      mcpd4::encodeLinearAlphaRequest(scalar_request));
+  require(decoded_alpha.partition_id == 7 && decoded_alpha.value == -0.125,
+          "linear alpha request mismatch");
+  const auto decoded_beta = mcpd4::decodeLinearBetaRequest(
+      mcpd4::encodeLinearBetaRequest(scalar_request));
+  require(decoded_beta.partition_id == 7 && decoded_beta.value == -0.125,
+          "linear beta request mismatch");
+
+  mcpd4::LinearMultiplyResultMessage multiply_result;
+  multiply_result.partition_id = 7;
+  multiply_result.result.direction_product_inner = 91.0;
+  const auto decoded_multiply_result = mcpd4::decodeLinearMultiplyResult(
+      mcpd4::encodeLinearMultiplyResult(multiply_result));
+  require(decoded_multiply_result.partition_id == 7 &&
+              decoded_multiply_result.result.direction_product_inner == 91.0,
+          "linear multiply result mismatch");
+
+  mcpd4::LinearAlphaResultMessage alpha_result;
+  alpha_result.partition_id = 7;
+  alpha_result.result.residual_norm_squared = 4.5;
+  alpha_result.result.residual_preconditioned_inner = 3.5;
+  const auto decoded_alpha_result = mcpd4::decodeLinearAlphaResult(
+      mcpd4::encodeLinearAlphaResult(alpha_result));
+  require(decoded_alpha_result.partition_id == 7 &&
+              decoded_alpha_result.result.residual_norm_squared == 4.5 &&
+              decoded_alpha_result.result.residual_preconditioned_inner == 3.5,
+          "linear alpha result mismatch");
+
+  mcpd4::LinearBetaResultMessage beta_result;
+  beta_result.partition_id = 7;
+  beta_result.result.boundary_direction = {8.0, 9.0};
+  const auto decoded_beta_result = mcpd4::decodeLinearBetaResult(
+      mcpd4::encodeLinearBetaResult(beta_result));
+  require(decoded_beta_result.partition_id == 7 &&
+              decoded_beta_result.result.boundary_direction ==
+                  std::vector<double>({8.0, 9.0}),
+          "linear beta result mismatch");
+
+  mcpd4::LinearPartitionRequest partition_request;
+  partition_request.partition_id = 7;
+  const auto decoded_solution_request = mcpd4::decodeLinearSolutionRequest(
+      mcpd4::encodeLinearSolutionRequest(partition_request));
+  require(decoded_solution_request.partition_id == 7,
+          "linear solution request mismatch");
+  mcpd4::LinearSolutionResultMessage solution_result;
+  solution_result.partition_id = 7;
+  solution_result.solution = {5.0, 5.0};
+  const auto decoded_solution = mcpd4::decodeLinearSolutionResult(
+      mcpd4::encodeLinearSolutionResult(solution_result));
+  require(decoded_solution.partition_id == 7 &&
+              decoded_solution.solution == solution_result.solution,
+          "linear solution result mismatch");
+}
+
 void rejectsMalformedFrames() {
   requireThrows([] { mcpd4::decodeFrame({1, 0, 0}); },
                 "truncated frame header should fail");
@@ -941,6 +1070,7 @@ int main() {
     roundTripsAlphaUpdate();
     roundTripsStop();
     roundTripsError();
+    roundTripsLinearWorkerMessages();
     rejectsMalformedFrames();
   } catch (const std::exception &e) {
     std::cerr << "protocol_serialization_test failed: " << e.what() << "\n";

@@ -14,7 +14,7 @@
 
 namespace mcpd4 {
 
-constexpr std::uint32_t kProtocolVersion = 7;
+constexpr std::uint32_t kProtocolVersion = 8;
 constexpr std::uint64_t kFeatureSnappyCompression = 1ULL << 0;
 
 struct RpcByteStats {
@@ -44,6 +44,8 @@ struct RpcByteStats {
   std::uint64_t stop_rx_bytes = 0;
   std::uint64_t error_tx_bytes = 0;
   std::uint64_t error_rx_bytes = 0;
+  std::uint64_t linear_tx_bytes = 0;
+  std::uint64_t linear_rx_bytes = 0;
 };
 
 struct TcpPartitionWorkerTimingStats {
@@ -55,6 +57,14 @@ struct TcpPartitionWorkerTimingStats {
   long partition_solve_call_count = 0;
   long solve_batch_rpc_count = 0;
   long scale_objective_rpc_count = 0;
+  std::uint64_t linear_rpc_wall_us = 0;
+  long linear_structure_rpc_count = 0;
+  long linear_system_rpc_count = 0;
+  long linear_initialize_rpc_count = 0;
+  long linear_multiply_rpc_count = 0;
+  long linear_alpha_rpc_count = 0;
+  long linear_beta_rpc_count = 0;
+  long linear_solution_rpc_count = 0;
   RpcByteStats rpc_bytes;
 };
 
@@ -81,6 +91,15 @@ public:
       const std::vector<mcpd3::PartitionSolveRequest> &requests) override;
   void scaleObjective(long factor,
                       bool saturate_capacity_overflow = false) override;
+
+  void loadLinearStructure(const LinearStructureMessage &message);
+  void loadLinearSystem(const LinearSystemValuesMessage &message);
+  LinearInitializeResult initializeLinear(const LinearVectorRequest &request);
+  LinearMultiplyResult multiplyLinear(const LinearVectorRequest &request);
+  LinearAlphaUpdateResult updateLinearAlpha(
+      const LinearScalarRequest &request);
+  LinearBetaUpdateResult updateLinearBeta(const LinearScalarRequest &request);
+  std::vector<double> linearSolution(int partition_id);
 
   void stop(std::uint32_t reason = 0, const std::string &message = "");
   const HelloMessage &hello() const { return hello_; }

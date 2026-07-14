@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <unistd.h>
 
 namespace mcpd4 {
@@ -100,6 +101,20 @@ void recordFrameSent(RpcByteStats *stats, MessageType type,
     break;
   case MessageType::ALPHA_UPDATE:
     break;
+  case MessageType::LINEAR_STRUCTURE:
+  case MessageType::LINEAR_SYSTEM_VALUES:
+  case MessageType::LINEAR_INITIALIZE_REQUEST:
+  case MessageType::LINEAR_INITIALIZE_RESULT:
+  case MessageType::LINEAR_MULTIPLY_REQUEST:
+  case MessageType::LINEAR_MULTIPLY_RESULT:
+  case MessageType::LINEAR_ALPHA_REQUEST:
+  case MessageType::LINEAR_ALPHA_RESULT:
+  case MessageType::LINEAR_BETA_REQUEST:
+  case MessageType::LINEAR_BETA_RESULT:
+  case MessageType::LINEAR_SOLUTION_REQUEST:
+  case MessageType::LINEAR_SOLUTION_RESULT:
+    stats->linear_tx_bytes += bytes;
+    break;
   }
 }
 
@@ -147,6 +162,20 @@ void recordFrameReceived(RpcByteStats *stats, MessageType type,
     stats->error_rx_bytes += bytes;
     break;
   case MessageType::ALPHA_UPDATE:
+    break;
+  case MessageType::LINEAR_STRUCTURE:
+  case MessageType::LINEAR_SYSTEM_VALUES:
+  case MessageType::LINEAR_INITIALIZE_REQUEST:
+  case MessageType::LINEAR_INITIALIZE_RESULT:
+  case MessageType::LINEAR_MULTIPLY_REQUEST:
+  case MessageType::LINEAR_MULTIPLY_RESULT:
+  case MessageType::LINEAR_ALPHA_REQUEST:
+  case MessageType::LINEAR_ALPHA_RESULT:
+  case MessageType::LINEAR_BETA_REQUEST:
+  case MessageType::LINEAR_BETA_RESULT:
+  case MessageType::LINEAR_SOLUTION_REQUEST:
+  case MessageType::LINEAR_SOLUTION_RESULT:
+    stats->linear_rx_bytes += bytes;
     break;
   }
 }
@@ -389,6 +418,162 @@ void TcpPartitionWorker::scaleObjective(long factor,
   ++timing_stats_.scale_objective_rpc_count;
 }
 
+void TcpPartitionWorker::loadLinearStructure(
+    const LinearStructureMessage &message) {
+  const auto start = std::chrono::steady_clock::now();
+  const auto frame = encodeLinearStructure(message);
+  FrameTransferStats transfer;
+  sendFrameBytes(socket_, frame, compression_, &transfer);
+  recordFrameSent(&timing_stats_.rpc_bytes, MessageType::LINEAR_STRUCTURE,
+                  transfer);
+  (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes, compression_);
+  timing_stats_.linear_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.linear_structure_rpc_count;
+}
+
+void TcpPartitionWorker::loadLinearSystem(
+    const LinearSystemValuesMessage &message) {
+  const auto start = std::chrono::steady_clock::now();
+  const auto frame = encodeLinearSystemValues(message);
+  FrameTransferStats transfer;
+  sendFrameBytes(socket_, frame, compression_, &transfer);
+  recordFrameSent(&timing_stats_.rpc_bytes, MessageType::LINEAR_SYSTEM_VALUES,
+                  transfer);
+  (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes, compression_);
+  timing_stats_.linear_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.linear_system_rpc_count;
+}
+
+LinearInitializeResult TcpPartitionWorker::initializeLinear(
+    const LinearVectorRequest &request) {
+  const auto start = std::chrono::steady_clock::now();
+  const auto request_frame = encodeLinearInitializeRequest(request);
+  FrameTransferStats transfer;
+  sendFrameBytes(socket_, request_frame, compression_, &transfer);
+  recordFrameSent(&timing_stats_.rpc_bytes,
+                  MessageType::LINEAR_INITIALIZE_REQUEST, transfer);
+  std::vector<std::uint8_t> frame_bytes;
+  const auto frame = receiveTypedFrame(socket_, &frame_bytes,
+                                       &timing_stats_.rpc_bytes, compression_);
+  if (frame.type == MessageType::ERROR) {
+    throw remoteError(frame_bytes);
+  }
+  if (frame.type != MessageType::LINEAR_INITIALIZE_RESULT) {
+    throw std::runtime_error("expected LINEAR_INITIALIZE_RESULT from worker");
+  }
+  const auto message = decodeLinearInitializeResult(frame_bytes);
+  if (message.partition_id != request.partition_id) {
+    throw std::runtime_error("linear initialize partition id mismatch");
+  }
+  timing_stats_.linear_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.linear_initialize_rpc_count;
+  return message.result;
+}
+
+LinearMultiplyResult TcpPartitionWorker::multiplyLinear(
+    const LinearVectorRequest &request) {
+  const auto start = std::chrono::steady_clock::now();
+  const auto request_frame = encodeLinearMultiplyRequest(request);
+  FrameTransferStats transfer;
+  sendFrameBytes(socket_, request_frame, compression_, &transfer);
+  recordFrameSent(&timing_stats_.rpc_bytes,
+                  MessageType::LINEAR_MULTIPLY_REQUEST, transfer);
+  std::vector<std::uint8_t> frame_bytes;
+  const auto frame = receiveTypedFrame(socket_, &frame_bytes,
+                                       &timing_stats_.rpc_bytes, compression_);
+  if (frame.type == MessageType::ERROR) {
+    throw remoteError(frame_bytes);
+  }
+  if (frame.type != MessageType::LINEAR_MULTIPLY_RESULT) {
+    throw std::runtime_error("expected LINEAR_MULTIPLY_RESULT from worker");
+  }
+  const auto message = decodeLinearMultiplyResult(frame_bytes);
+  if (message.partition_id != request.partition_id) {
+    throw std::runtime_error("linear multiply partition id mismatch");
+  }
+  timing_stats_.linear_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.linear_multiply_rpc_count;
+  return message.result;
+}
+
+LinearAlphaUpdateResult TcpPartitionWorker::updateLinearAlpha(
+    const LinearScalarRequest &request) {
+  const auto start = std::chrono::steady_clock::now();
+  const auto request_frame = encodeLinearAlphaRequest(request);
+  FrameTransferStats transfer;
+  sendFrameBytes(socket_, request_frame, compression_, &transfer);
+  recordFrameSent(&timing_stats_.rpc_bytes, MessageType::LINEAR_ALPHA_REQUEST,
+                  transfer);
+  std::vector<std::uint8_t> frame_bytes;
+  const auto frame = receiveTypedFrame(socket_, &frame_bytes,
+                                       &timing_stats_.rpc_bytes, compression_);
+  if (frame.type == MessageType::ERROR) {
+    throw remoteError(frame_bytes);
+  }
+  if (frame.type != MessageType::LINEAR_ALPHA_RESULT) {
+    throw std::runtime_error("expected LINEAR_ALPHA_RESULT from worker");
+  }
+  const auto message = decodeLinearAlphaResult(frame_bytes);
+  if (message.partition_id != request.partition_id) {
+    throw std::runtime_error("linear alpha partition id mismatch");
+  }
+  timing_stats_.linear_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.linear_alpha_rpc_count;
+  return message.result;
+}
+
+LinearBetaUpdateResult TcpPartitionWorker::updateLinearBeta(
+    const LinearScalarRequest &request) {
+  const auto start = std::chrono::steady_clock::now();
+  const auto request_frame = encodeLinearBetaRequest(request);
+  FrameTransferStats transfer;
+  sendFrameBytes(socket_, request_frame, compression_, &transfer);
+  recordFrameSent(&timing_stats_.rpc_bytes, MessageType::LINEAR_BETA_REQUEST,
+                  transfer);
+  std::vector<std::uint8_t> frame_bytes;
+  const auto frame = receiveTypedFrame(socket_, &frame_bytes,
+                                       &timing_stats_.rpc_bytes, compression_);
+  if (frame.type == MessageType::ERROR) {
+    throw remoteError(frame_bytes);
+  }
+  if (frame.type != MessageType::LINEAR_BETA_RESULT) {
+    throw std::runtime_error("expected LINEAR_BETA_RESULT from worker");
+  }
+  const auto message = decodeLinearBetaResult(frame_bytes);
+  if (message.partition_id != request.partition_id) {
+    throw std::runtime_error("linear beta partition id mismatch");
+  }
+  timing_stats_.linear_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.linear_beta_rpc_count;
+  return message.result;
+}
+
+std::vector<double> TcpPartitionWorker::linearSolution(int partition_id) {
+  const auto start = std::chrono::steady_clock::now();
+  const auto request_frame =
+      encodeLinearSolutionRequest(LinearPartitionRequest{partition_id});
+  FrameTransferStats transfer;
+  sendFrameBytes(socket_, request_frame, compression_, &transfer);
+  recordFrameSent(&timing_stats_.rpc_bytes,
+                  MessageType::LINEAR_SOLUTION_REQUEST, transfer);
+  std::vector<std::uint8_t> frame_bytes;
+  const auto frame = receiveTypedFrame(socket_, &frame_bytes,
+                                       &timing_stats_.rpc_bytes, compression_);
+  if (frame.type == MessageType::ERROR) {
+    throw remoteError(frame_bytes);
+  }
+  if (frame.type != MessageType::LINEAR_SOLUTION_RESULT) {
+    throw std::runtime_error("expected LINEAR_SOLUTION_RESULT from worker");
+  }
+  auto message = decodeLinearSolutionResult(frame_bytes);
+  if (message.partition_id != partition_id) {
+    throw std::runtime_error("linear solution partition id mismatch");
+  }
+  timing_stats_.linear_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.linear_solution_rpc_count;
+  return std::move(message.solution);
+}
+
 void TcpPartitionWorker::stop(std::uint32_t reason,
                               const std::string &message) {
   if (!socket_.valid()) {
@@ -477,6 +662,9 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
     worker = std::make_unique<mcpd3::InProcessPartitionWorker>();
   }
   TemporalSolveCodecState temporal_state;
+  std::unordered_map<int, LinearStructureMessage> linear_structures;
+  std::unordered_map<int, std::unique_ptr<ResidentLinearPartition>>
+      linear_partitions;
   while (true) {
     try {
       FrameTransferStats receive_transfer;
@@ -595,6 +783,146 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
               sendReady(socket, hello.worker_name, compression);
           if (status_hooks.on_frame_sent) {
             status_hooks.on_frame_sent(MessageType::READY, transfer);
+          }
+        }
+        break;
+      case MessageType::LINEAR_STRUCTURE:
+        {
+          auto message = decodeLinearStructure(frame_bytes);
+          const int partition_id = message.partition_id;
+          linear_structures[partition_id] = std::move(message);
+          linear_partitions.erase(partition_id);
+          const auto transfer = sendReady(socket, hello.worker_name, compression);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::READY, transfer);
+          }
+        }
+        break;
+      case MessageType::LINEAR_SYSTEM_VALUES:
+        {
+          auto values = decodeLinearSystemValues(frame_bytes);
+          const auto structure_it = linear_structures.find(values.partition_id);
+          if (structure_it == linear_structures.end()) {
+            throw std::runtime_error(
+                "linear structure must be loaded before numerical system");
+          }
+          const auto &structure = structure_it->second;
+          LinearSystemPartition partition;
+          partition.partition_id = structure.partition_id;
+          partition.owned_global_nodes = structure.owned_global_nodes;
+          partition.ghost_global_nodes = structure.ghost_global_nodes;
+          partition.row_offsets = structure.row_offsets;
+          partition.column_indices = structure.column_indices;
+          partition.boundary_owned_local_indices =
+              structure.boundary_owned_local_indices;
+          partition.values = std::move(values.values);
+          partition.rhs = std::move(values.rhs);
+          partition.initial_x = std::move(values.initial_x);
+          linear_partitions[partition.partition_id] =
+              std::make_unique<ResidentLinearPartition>(std::move(partition));
+          const auto transfer = sendReady(socket, hello.worker_name, compression);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::READY, transfer);
+          }
+        }
+        break;
+      case MessageType::LINEAR_INITIALIZE_REQUEST:
+        {
+          auto request = decodeLinearInitializeRequest(frame_bytes);
+          const auto partition_it = linear_partitions.find(request.partition_id);
+          if (partition_it == linear_partitions.end()) {
+            throw std::runtime_error(
+                "linear system must be loaded before initialize");
+          }
+          LinearInitializeResultMessage message;
+          message.partition_id = request.partition_id;
+          message.result = partition_it->second->initialize(request.values);
+          const auto result_frame = encodeLinearInitializeResult(message);
+          FrameTransferStats transfer;
+          sendFrameBytes(socket, result_frame, compression, &transfer);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::LINEAR_INITIALIZE_RESULT,
+                                       transfer);
+          }
+        }
+        break;
+      case MessageType::LINEAR_MULTIPLY_REQUEST:
+        {
+          auto request = decodeLinearMultiplyRequest(frame_bytes);
+          const auto partition_it = linear_partitions.find(request.partition_id);
+          if (partition_it == linear_partitions.end()) {
+            throw std::runtime_error(
+                "linear system must be loaded before multiply");
+          }
+          LinearMultiplyResultMessage message;
+          message.partition_id = request.partition_id;
+          message.result = partition_it->second->multiply(request.values);
+          const auto result_frame = encodeLinearMultiplyResult(message);
+          FrameTransferStats transfer;
+          sendFrameBytes(socket, result_frame, compression, &transfer);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::LINEAR_MULTIPLY_RESULT,
+                                       transfer);
+          }
+        }
+        break;
+      case MessageType::LINEAR_ALPHA_REQUEST:
+        {
+          const auto request = decodeLinearAlphaRequest(frame_bytes);
+          const auto partition_it = linear_partitions.find(request.partition_id);
+          if (partition_it == linear_partitions.end()) {
+            throw std::runtime_error(
+                "linear system must be loaded before alpha update");
+          }
+          LinearAlphaResultMessage message;
+          message.partition_id = request.partition_id;
+          message.result = partition_it->second->updateAlpha(request.value);
+          const auto result_frame = encodeLinearAlphaResult(message);
+          FrameTransferStats transfer;
+          sendFrameBytes(socket, result_frame, compression, &transfer);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::LINEAR_ALPHA_RESULT,
+                                       transfer);
+          }
+        }
+        break;
+      case MessageType::LINEAR_BETA_REQUEST:
+        {
+          const auto request = decodeLinearBetaRequest(frame_bytes);
+          const auto partition_it = linear_partitions.find(request.partition_id);
+          if (partition_it == linear_partitions.end()) {
+            throw std::runtime_error(
+                "linear system must be loaded before beta update");
+          }
+          LinearBetaResultMessage message;
+          message.partition_id = request.partition_id;
+          message.result = partition_it->second->updateBeta(request.value);
+          const auto result_frame = encodeLinearBetaResult(message);
+          FrameTransferStats transfer;
+          sendFrameBytes(socket, result_frame, compression, &transfer);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::LINEAR_BETA_RESULT,
+                                       transfer);
+          }
+        }
+        break;
+      case MessageType::LINEAR_SOLUTION_REQUEST:
+        {
+          const auto request = decodeLinearSolutionRequest(frame_bytes);
+          const auto partition_it = linear_partitions.find(request.partition_id);
+          if (partition_it == linear_partitions.end()) {
+            throw std::runtime_error(
+                "linear system must be loaded before solution request");
+          }
+          LinearSolutionResultMessage message;
+          message.partition_id = request.partition_id;
+          message.solution = partition_it->second->solution();
+          const auto result_frame = encodeLinearSolutionResult(message);
+          FrameTransferStats transfer;
+          sendFrameBytes(socket, result_frame, compression, &transfer);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::LINEAR_SOLUTION_RESULT,
+                                       transfer);
           }
         }
         break;
