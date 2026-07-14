@@ -2183,3 +2183,11 @@
   must continue participating when the global residual is nonzero. The
   regression starts one side locally exact and proves cross-boundary updates
   activate it and converge globally.
+
+## 2026-07-13 23:40 PDT - MCPD3 historical replay integration
+
+- Advanced the MCPD3 submodule to the revision that adds an opt-in,
+  deterministic 32-bit historical DD replay policy. Normal MCPD4 builds do not
+  enable that policy and retain checked, widened production arithmetic.
+- Rebuilt all MCPD4 targets against the updated submodule and passed all five
+  CTest targets, including TCP loopback and process integration.
