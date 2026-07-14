@@ -217,10 +217,9 @@ std::vector<EncodedAlphaUpdate> encodeAlphaUpdatesForPartition(
     wire_update.constraint_id = update.constraint_id;
     wire_update.value =
         find_iter == partition_state.alpha_by_constraint.end()
-            ? mcpd3::widen_capacity(update.alpha)
+            ? update.alpha
             : mcpd3::checked_subtract(
-                  mcpd3::widen_capacity(update.alpha),
-                  mcpd3::widen_capacity(find_iter->second),
+                  update.alpha, find_iter->second,
                   "temporal alpha delta overflow");
     partition_state.alpha_by_constraint[update.constraint_id] = update.alpha;
     encoded.push_back(wire_update);
@@ -237,14 +236,12 @@ std::vector<mcpd3::AlphaUpdate> decodeAlphaUpdatesForPartition(
   for (const auto &wire_update : encoded) {
     auto find_iter =
         partition_state.alpha_by_constraint.find(wire_update.constraint_id);
-    const mcpd3::Objective widened_alpha =
+    const mcpd3::Lagrange alpha =
         find_iter == partition_state.alpha_by_constraint.end()
             ? wire_update.value
             : mcpd3::checked_add(
-                  mcpd3::widen_capacity(find_iter->second), wire_update.value,
+                  find_iter->second, wire_update.value,
                   "temporal alpha reconstruction overflow");
-    const mcpd3::Capacity alpha =
-        mcpd3::narrow_objective_to_capacity(widened_alpha);
     partition_state.alpha_by_constraint[wire_update.constraint_id] = alpha;
     updates.push_back(mcpd3::AlphaUpdate{
         /*constraint_id=*/wire_update.constraint_id,

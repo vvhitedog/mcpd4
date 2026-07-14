@@ -192,14 +192,15 @@ void roundTripsConfiguredPrecisionExtremes() {
   const mcpd3::Capacity extreme = mcpd3::capacity_test_extreme_value();
   const mcpd3::Objective objective_extreme = mcpd3::checked_add(
       mcpd3::widen_capacity(extreme), mcpd3::widen_capacity(extreme));
+  const mcpd3::Lagrange alpha_extreme = objective_extreme;
 
   auto package = makePackage();
   package.arc_capacities = {extreme, -extreme, extreme, -extreme};
   package.terminal_capacities = {extreme, -extreme, 0};
-  package.constraint_endpoints[0].alpha = extreme;
-  package.constraint_endpoints[0].last_alpha = -extreme;
-  package.constraint_endpoints[1].alpha = -extreme;
-  package.constraint_endpoints[1].last_alpha = extreme;
+  package.constraint_endpoints[0].alpha = alpha_extreme;
+  package.constraint_endpoints[0].last_alpha = -alpha_extreme;
+  package.constraint_endpoints[1].alpha = -alpha_extreme;
+  package.constraint_endpoints[1].last_alpha = alpha_extreme;
   requirePackageEqual(
       mcpd4::decodePartitionPackage(mcpd4::encodePartitionPackage(package)),
       package);
@@ -210,17 +211,17 @@ void roundTripsConfiguredPrecisionExtremes() {
   request.scale = 1;
   request.regularization_strength = extreme;
   request.alpha_updates = {
-      mcpd3::AlphaUpdate{/*constraint_id=*/1, /*alpha=*/extreme,
+      mcpd3::AlphaUpdate{/*constraint_id=*/1, /*alpha=*/alpha_extreme,
                          /*last_alpha=*/0, /*alpha_momentum=*/0},
-      mcpd3::AlphaUpdate{/*constraint_id=*/2, /*alpha=*/-extreme,
+      mcpd3::AlphaUpdate{/*constraint_id=*/2, /*alpha=*/-alpha_extreme,
                          /*last_alpha=*/0, /*alpha_momentum=*/0}};
   const auto decoded_request =
       mcpd4::decodeSolveRoundRequest(mcpd4::encodeSolveRoundRequest(request));
   require(decoded_request.regularization_strength == extreme,
           "extreme regularization strength mismatch");
-  require(decoded_request.alpha_updates[0].alpha == extreme &&
-              decoded_request.alpha_updates[1].alpha == -extreme,
-          "extreme stateless alpha mismatch");
+  require(decoded_request.alpha_updates[0].alpha == alpha_extreme &&
+              decoded_request.alpha_updates[1].alpha == -alpha_extreme,
+          "widened stateless alpha mismatch");
 
   mcpd3::PartitionSolveResult result;
   result.round_id = 1;
@@ -242,17 +243,17 @@ void roundTripsConfiguredPrecisionExtremes() {
   mcpd4::TemporalSolveCodecState decoder;
   const auto first = mcpd4::decodeDeltaSolveRoundRequest(
       mcpd4::encodeDeltaSolveRoundRequest(request, &encoder), &decoder);
-  require(first.alpha_updates[0].alpha == extreme &&
-              first.alpha_updates[1].alpha == -extreme,
-          "extreme temporal alpha initial sync mismatch");
+  require(first.alpha_updates[0].alpha == alpha_extreme &&
+              first.alpha_updates[1].alpha == -alpha_extreme,
+          "widened temporal alpha initial sync mismatch");
   request.round_id = 2;
-  request.alpha_updates[0].alpha = -extreme;
-  request.alpha_updates[1].alpha = extreme;
+  request.alpha_updates[0].alpha = -alpha_extreme;
+  request.alpha_updates[1].alpha = alpha_extreme;
   const auto changed = mcpd4::decodeDeltaSolveRoundRequest(
       mcpd4::encodeDeltaSolveRoundRequest(request, &encoder), &decoder);
-  require(changed.alpha_updates[0].alpha == -extreme &&
-              changed.alpha_updates[1].alpha == extreme,
-          "extreme temporal alpha sign-change mismatch");
+  require(changed.alpha_updates[0].alpha == -alpha_extreme &&
+              changed.alpha_updates[1].alpha == alpha_extreme,
+          "widened temporal alpha sign-change mismatch");
 
   mcpd4::TemporalSolveCodecState result_encoder;
   mcpd4::TemporalSolveCodecState result_decoder;

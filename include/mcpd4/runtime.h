@@ -14,7 +14,7 @@
 
 namespace mcpd4 {
 
-constexpr std::uint32_t kProtocolVersion = 8;
+constexpr std::uint32_t kProtocolVersion = 9;
 constexpr std::uint64_t kFeatureSnappyCompression = 1ULL << 0;
 
 struct RpcByteStats {

@@ -271,7 +271,7 @@ void writeAlphaUpdate(Writer *writer, const mcpd3::AlphaUpdate &update) {
 mcpd3::AlphaUpdate readAlphaUpdate(Reader *reader) {
   mcpd3::AlphaUpdate update;
   update.constraint_id = reader->readI32();
-  update.alpha = reader->readCapacity();
+  update.alpha = reader->readObjective();
   return update;
 }
 
@@ -292,8 +292,8 @@ mcpd3::ConstraintEndpointBinding readConstraintEndpoint(Reader *reader) {
   binding.global_node_id = reader->readI32();
   binding.local_index = reader->readI32();
   binding.is_source = reader->readBool();
-  binding.alpha = reader->readCapacity();
-  binding.last_alpha = reader->readCapacity();
+  binding.alpha = reader->readObjective();
+  binding.last_alpha = reader->readObjective();
   binding.alpha_momentum = reader->readFloat();
   return binding;
 }

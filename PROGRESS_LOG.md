@@ -1,5 +1,19 @@
 # Progress Log
 
+## 2026-07-13 22:00 PDT - Widened DD state transport
+
+- Advanced mcpd3 to keep compact source capacities and arc residuals while
+  widening node balances, terminal residuals, and Lagrange multipliers.
+- Updated stateless partition packages, solve requests, and temporal delta
+  state to encode/decode alpha in the widened `Lagrange` domain.
+- Added a regression that sends alpha values twice the configured source
+  capacity maximum through initial package sync, stateless requests, temporal
+  initial sync, and sign-changing delta reconstruction.
+- Bumped the mcpd4 transport protocol to version 9 so mixed old/new binaries
+  fail at handshake instead of failing later on a widened alpha value.
+- Passed the full five-test 32-bit transport/integration suite and the widened
+  protocol test in 64-bit, 128-bit, and GMP modes.
+
 ## 2026-07-13 15:47 PDT - Ratio-aware mcpd3 flow dependency
 
 - Advanced the mcpd3 submodule to `2b52bc0`, which adds checked rational
