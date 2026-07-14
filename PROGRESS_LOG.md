@@ -2191,3 +2191,16 @@
   enable that policy and retain checked, widened production arithmetic.
 - Rebuilt all MCPD4 targets against the updated submodule and passed all five
   CTest targets, including TCP loopback and process integration.
+
+## 2026-07-14 12:05 PDT - Cumulative scaled-epsilon backend
+
+- Advanced the mcpd3 backend to persistent per-boundary cumulative epsilon
+  weights. Continued disagreement now forces monotone budget growth until
+  agreement or strict-budget promotion; objective promotion keeps this
+  secondary regularizer unscaled.
+- Worker warm-state version 4 serializes cumulative weights and remains able to
+  read version 3 binary-anchor state. The distributed protocol is unchanged
+  because regularization state remains resident inside each worker.
+- Rebuilt mcpd4 and passed all five CTest targets in 32-, 64-, 128-bit, and GMP
+  modes: 20/20 mode/test combinations, including TCP loopback and process
+  integration.
