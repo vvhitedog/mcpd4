@@ -2204,3 +2204,11 @@
 - Rebuilt mcpd4 and passed all five CTest targets in 32-, 64-, 128-bit, and GMP
   modes: 20/20 mode/test combinations, including TCP loopback and process
   integration.
+
+## 2026-07-14 13:12 PDT - Plateau scheduler backend revision
+
+- Advanced the mcpd3 submodule to the opt-in native disagreement-plateau
+  scheduler. MCPD4 behavior and protocol remain unchanged because the new mode
+  is not yet exposed through the distributed coordinator.
+- Rebuilt mcpd4 and passed all five CTest targets in both 32- and 64-bit modes,
+  including TCP loopback and process integration.
