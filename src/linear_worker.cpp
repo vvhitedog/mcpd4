@@ -235,22 +235,18 @@ LinearInitializeResult ResidentLinearPartition::initialize(
   const double residual_norm_squared = innerProduct(residual_, residual_);
   const double residual_preconditioned_inner =
       innerProduct(residual_, preconditioned_residual_);
-  if (residual_norm_squared == 0.0) {
-    direction_.clear();
-    state_ = State::Converged;
-  } else {
+  if (residual_norm_squared != 0.0) {
     if (!(residual_preconditioned_inner > 0.0) ||
         !std::isfinite(residual_preconditioned_inner)) {
       throw std::runtime_error(
           "preconditioner did not produce a positive residual inner product");
     }
-    direction_ = preconditioned_residual_;
-    state_ = State::DirectionReady;
   }
+  direction_ = preconditioned_residual_;
+  state_ = State::DirectionReady;
   return {innerProduct(partition_.rhs, partition_.rhs),
           residual_norm_squared, residual_preconditioned_inner,
-          state_ == State::DirectionReady ? boundaryValues(direction_)
-                                           : std::vector<double>{}};
+          boundaryValues(direction_)};
 }
 
 LinearMultiplyResult ResidentLinearPartition::multiply(
@@ -281,17 +277,14 @@ LinearAlphaUpdateResult ResidentLinearPartition::updateAlpha(double alpha) {
   const double residual_preconditioned_inner =
       innerProduct(residual_, preconditioned_residual_);
   product_.clear();
-  if (residual_norm_squared == 0.0) {
-    direction_.clear();
-    state_ = State::Converged;
-  } else {
+  if (residual_norm_squared != 0.0) {
     if (!(residual_preconditioned_inner > 0.0) ||
         !std::isfinite(residual_preconditioned_inner)) {
       throw std::runtime_error(
           "preconditioner did not preserve a positive residual inner product");
     }
-    state_ = State::AlphaUpdated;
   }
+  state_ = State::AlphaUpdated;
   return {residual_norm_squared, residual_preconditioned_inner};
 }
 

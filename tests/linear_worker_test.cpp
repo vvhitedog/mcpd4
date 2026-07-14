@@ -127,8 +127,84 @@ void exactWarmStartConvergesDuringInitialization() {
               "exact warm start should have zero residual");
   requireNear(initialized.residual_preconditioned_inner, 0.0, 1e-24,
               "exact warm start should have zero preconditioned residual");
-  requireThrows([&] { (void)partition.multiply({5.0}); },
-                "zero-residual partition should reject a missing direction");
+  require(initialized.boundary_direction == std::vector<double>({0.0}),
+          "zero local residual should still expose a zero boundary direction");
+  (void)partition.multiply({0.0});
+}
+
+void locallyExactPartitionRemainsInGlobalPcg() {
+  mcpd4::LinearSystemPartition left_package;
+  left_package.partition_id = 0;
+  left_package.owned_global_nodes = {0};
+  left_package.ghost_global_nodes = {1};
+  left_package.row_offsets = {0, 2};
+  left_package.column_indices = {0, 1};
+  left_package.values = {2.0, -1.0};
+  left_package.rhs = {1.0};
+  left_package.initial_x = {0.5};
+  left_package.boundary_owned_local_indices = {0};
+
+  mcpd4::LinearSystemPartition right_package;
+  right_package.partition_id = 1;
+  right_package.owned_global_nodes = {1};
+  right_package.ghost_global_nodes = {0};
+  right_package.row_offsets = {0, 2};
+  right_package.column_indices = {0, 1};
+  right_package.values = {2.0, -1.0};
+  right_package.rhs = {0.0};
+  right_package.initial_x = {0.0};
+  right_package.boundary_owned_local_indices = {0};
+
+  mcpd4::ResidentLinearPartition left(std::move(left_package));
+  mcpd4::ResidentLinearPartition right(std::move(right_package));
+  auto left_initial = left.initialize({0.0});
+  auto right_initial = right.initialize({0.5});
+  requireNear(left_initial.residual_norm_squared, 0.0, 0.0,
+              "left partition should begin locally exact");
+  require(left_initial.boundary_direction == std::vector<double>({0.0}),
+          "locally exact partition must contribute a zero direction");
+
+  const double rhs_norm_squared = left_initial.rhs_norm_squared +
+                                  right_initial.rhs_norm_squared;
+  double residual_inner = left_initial.residual_preconditioned_inner +
+                          right_initial.residual_preconditioned_inner;
+  double relative_residual = std::sqrt(
+      (left_initial.residual_norm_squared +
+       right_initial.residual_norm_squared) /
+      rhs_norm_squared);
+  std::vector<double> left_boundary = left_initial.boundary_direction;
+  std::vector<double> right_boundary = right_initial.boundary_direction;
+  int iterations = 0;
+  while (relative_residual > 1e-12 && iterations < 5) {
+    const auto left_product = left.multiply({right_boundary.at(0)});
+    const auto right_product = right.multiply({left_boundary.at(0)});
+    const double denominator = left_product.direction_product_inner +
+                               right_product.direction_product_inner;
+    const double alpha = residual_inner / denominator;
+    const auto left_update = left.updateAlpha(alpha);
+    const auto right_update = right.updateAlpha(alpha);
+    relative_residual = std::sqrt(
+        (left_update.residual_norm_squared +
+         right_update.residual_norm_squared) /
+        rhs_norm_squared);
+    ++iterations;
+    if (relative_residual <= 1e-12) {
+      break;
+    }
+    const double next_inner =
+        left_update.residual_preconditioned_inner +
+        right_update.residual_preconditioned_inner;
+    const double beta = next_inner / residual_inner;
+    left_boundary = left.updateBeta(beta).boundary_direction;
+    right_boundary = right.updateBeta(beta).boundary_direction;
+    residual_inner = next_inner;
+  }
+  require(relative_residual <= 1e-12,
+          "global PCG should activate and converge the locally exact side");
+  requireNear(left.solution().at(0), 2.0 / 3.0, 1e-12,
+              "left global solution mismatch");
+  requireNear(right.solution().at(0), 1.0 / 3.0, 1e-12,
+              "right global solution mismatch");
 }
 
 void validatesPackagesAndStateTransitions() {
@@ -215,6 +291,7 @@ int main() {
   try {
     splitPcgRecoversKnownSolution();
     exactWarmStartConvergesDuringInitialization();
+    locallyExactPartitionRemainsInGlobalPcg();
     validatesPackagesAndStateTransitions();
   } catch (const std::exception &e) {
     std::cerr << "linear_worker_test failed: " << e.what() << '\n';

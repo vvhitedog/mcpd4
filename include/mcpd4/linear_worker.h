@@ -61,7 +61,6 @@ private:
     DirectionReady,
     ProductReady,
     AlphaUpdated,
-    Converged,
   };
 
   void validate() const;
