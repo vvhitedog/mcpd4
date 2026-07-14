@@ -37,6 +37,7 @@ target_link_libraries(mcpd4_protocol PUBLIC mcpd3_capacity_config)
 
 add_library(mcpd4_runtime
   src/discovery.cpp
+  src/linear_worker.cpp
   src/runtime.cpp
   src/status.cpp
   src/tcp.cpp
@@ -97,6 +98,13 @@ if (BUILD_TESTING)
     mcpd4_protocol)
   add_test(NAME protocol_serialization_test
     COMMAND protocol_serialization_test)
+
+  add_executable(linear_worker_test
+    tests/linear_worker_test.cpp)
+  target_link_libraries(linear_worker_test PRIVATE
+    mcpd4_runtime)
+  add_test(NAME linear_worker_test
+    COMMAND linear_worker_test)
 
   add_executable(tcp_loopback_test
     tests/tcp_loopback_test.cpp)
