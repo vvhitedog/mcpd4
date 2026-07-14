@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstring>
 #include <netdb.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <stdexcept>
 #include <string>
@@ -111,6 +112,14 @@ void requireFrameWithinLimit(std::uint64_t size,
   }
 }
 
+void enableTcpNoDelay(const SocketHandle &socket) {
+  int one = 1;
+  if (::setsockopt(socket.get(), IPPROTO_TCP, TCP_NODELAY, &one,
+                   sizeof(one)) != 0) {
+    throw socketError("failed to enable TCP_NODELAY");
+  }
+}
+
 } // namespace
 
 SocketHandle::SocketHandle(int fd) : fd_(fd) {}
@@ -195,6 +204,7 @@ SocketHandle connectTcp(const std::string &host, std::uint16_t port) {
       continue;
     }
     if (::connect(candidate.get(), info->ai_addr, info->ai_addrlen) == 0) {
+      enableTcpNoDelay(candidate);
       socket = std::move(candidate);
       break;
     }
@@ -229,7 +239,9 @@ SocketHandle acceptTcp(SocketHandle *listener,
   if (fd < 0) {
     throw socketError("accept failed");
   }
-  return SocketHandle(fd);
+  SocketHandle socket(fd);
+  enableTcpNoDelay(socket);
+  return socket;
 }
 
 std::uint16_t localPort(const SocketHandle &socket) {
@@ -240,6 +252,16 @@ std::uint16_t localPort(const SocketHandle &socket) {
     throw socketError("getsockname failed");
   }
   return ntohs(addr.sin_port);
+}
+
+bool tcpNoDelayEnabled(const SocketHandle &socket) {
+  int enabled = 0;
+  socklen_t length = sizeof(enabled);
+  if (::getsockopt(socket.get(), IPPROTO_TCP, TCP_NODELAY, &enabled,
+                   &length) != 0) {
+    throw socketError("failed to read TCP_NODELAY");
+  }
+  return enabled != 0;
 }
 
 bool snappyCompressionAvailable() {

@@ -75,6 +75,14 @@ ConnectedPair makeConnectedPair() {
   return ConnectedPair{std::move(server), std::move(client)};
 }
 
+void connectedSocketsDisableNagleDelay() {
+  auto pair = makeConnectedPair();
+  require(mcpd4::tcpNoDelayEnabled(pair.client),
+          "connected client socket should enable TCP_NODELAY");
+  require(mcpd4::tcpNoDelayEnabled(pair.server),
+          "accepted server socket should enable TCP_NODELAY");
+}
+
 class WorkerClientThread {
 public:
   WorkerClientThread(std::uint16_t port,
@@ -772,6 +780,7 @@ void remoteWorkerCoordinatorPromotesObjectiveScale() {
 
 int main() {
   try {
+    connectedSocketsDisableNagleDelay();
     receivesFrameSplitAcrossTcpPackets();
     rejectsOversizedPayloadBeforeReadingBody();
     rejectsOversizedPayloadBeforeWritingBody();

@@ -52,6 +52,7 @@ SocketHandle connectTcp(const std::string &host, std::uint16_t port);
 SocketHandle acceptTcp(SocketHandle *listener,
                        std::chrono::milliseconds timeout);
 std::uint16_t localPort(const SocketHandle &socket);
+bool tcpNoDelayEnabled(const SocketHandle &socket);
 
 bool snappyCompressionAvailable();
 const char *transportCompressionName(TransportCompression compression);
