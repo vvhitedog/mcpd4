@@ -581,3 +581,9 @@
   multipliers on a coarse lattice: a radius-8 Ishikawa cut made no progress in
   500,000 step-6 iterations and retained 16 disagreements. Clamping the next
   positive scale to 1 solved it in 863 total iterations with default patience.
+## 2026-07-13 - Collective PCG local stopping
+
+- Do not mark a resident linear partition converged from its local residual.
+  Another partition can have a nonzero direction whose cross-boundary matrix
+  product makes the locally exact partition's next residual nonzero. Only the
+  coordinator's global residual reduction may stop collective PCG.

@@ -2150,3 +2150,22 @@
 - Advanced the mcpd3 backend to the checked precision-arithmetic revision.
 - Rebuilt every mcpd4 target and passed all four CTest tests in 32-, 64-,
   128-bit, and GMP modes: 16/16 mode/test combinations.
+## 2026-07-13 19:26:12 PDT - Resident collective-PCG transport
+
+- Added `TCP_NODELAY` to connected and accepted worker sockets, with loopback
+  verification on both ends.
+- Added a generic resident sparse linear partition using owned/ghost CSR rows,
+  IC(0) preconditioning, and coordinator-driven PCG phases. Validation covers
+  malformed ownership, CSR, finite values, SPD factorization, ghost sizes, and
+  invalid state transitions.
+- Added protocol-version-8 messages for one-time linear structure loading,
+  repeatable numerical-system loading, initialize/multiply/alpha/beta phases,
+  and owned-solution retrieval. Logical linear RPC bytes and per-operation
+  counts are retained in worker telemetry.
+- Added a two-worker TCP loopback test that recovers the known solution of a
+  split SPD system in at most three iterations and verifies remote error
+  recovery and telemetry.
+- Corrected a collective-PCG edge case: a partition with zero local residual
+  must continue participating when the global residual is nonzero. The
+  regression starts one side locally exact and proves cross-boundary updates
+  activate it and converge globally.
