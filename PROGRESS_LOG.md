@@ -2212,3 +2212,16 @@
   is not yet exposed through the distributed coordinator.
 - Rebuilt mcpd4 and passed all five CTest targets in both 32- and 64-bit modes,
   including TCP loopback and process integration.
+
+## 2026-07-15 - Allocation-free worker backend revision
+
+- Advanced the mcpd3 submodule to allocation-free incremental cut and flow
+  maintenance. The worker protocol and resident partition mapping are
+  unchanged; each local solver now uses dense generation marks and reusable
+  change buffers.
+- Rebuilding exposed a pre-existing intermittent TCP saturation failure. The
+  mcpd3 solver objective was uninitialized before its first solve, although
+  objective promotion can occur in that state. A deterministic poisoned-memory
+  regression now covers the initialized-zero invariant.
+- The fixed TCP loopback test passed 100 consecutive runs. The complete mcpd4
+  Release suite passes 5/5, including process integration.
