@@ -54,6 +54,14 @@ if (MCPD4_ENABLE_SNAPPY)
   target_link_libraries(mcpd4_runtime PUBLIC snappy)
 endif ()
 
+add_library(mcpd4_partitioned_hi_pr
+  src/partitioned_hi_pr.cpp)
+target_include_directories(mcpd4_partitioned_hi_pr PUBLIC
+  include
+  third_party/mcpd3)
+target_link_libraries(mcpd4_partitioned_hi_pr PUBLIC
+  mcpd3_capacity_config)
+
 add_executable(mcpd4_worker
   src/worker_main.cpp)
 target_link_libraries(mcpd4_worker PRIVATE
@@ -80,6 +88,13 @@ target_link_libraries(mcpd4_inprocess_benchmark PRIVATE
   mcpd4_runtime)
 
 if (BUILD_TESTING)
+  add_executable(partitioned_hi_pr_test
+    tests/partitioned_hi_pr_test.cpp)
+  target_link_libraries(partitioned_hi_pr_test PRIVATE
+    mcpd4_partitioned_hi_pr)
+  add_test(NAME partitioned_hi_pr_test
+    COMMAND partitioned_hi_pr_test)
+
   add_executable(distributed_partition_worker_smoke_test
     tests/partition_worker_smoke_test.cpp
     third_party/mcpd3/maxflow/graph.cpp
