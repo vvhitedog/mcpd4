@@ -201,6 +201,36 @@ void deterministicCases() {
     const auto result = solve(5, 0, 4, arcs, {-1, 0, 1, 2, -1});
     verifyCertified(result, arcs, 12, 0, 4, "disjoint paths");
   }
+  {
+    // A coordinator push reaches node 2, local discharge moves it to node 3,
+    // and only the next coordinator round can cross from node 3 to node 4.
+    const std::vector<DirectedArc> arcs = {
+        arc(0, 1, 6), arc(1, 2, 6), arc(2, 3, 6),
+        arc(3, 4, 6), arc(4, 5, 6)};
+    const std::vector<int> partitions = {-1, 0, 1, 1, 2, -1};
+    const auto result = solve(6, 0, 5, arcs, partitions);
+    verifyCertified(result, arcs, 6, 0, 5,
+                    "alternating local and boundary phases");
+    require(result.stats.coordination_rounds == 2,
+            "alternating path should require exactly two rounds");
+
+    PartitionedHiPrOptions one_round;
+    one_round.max_coordination_rounds = 1;
+    const auto truncated = solve(6, 0, 5, arcs, partitions, one_round);
+    require(!truncated.converged,
+            "one-round alternating path incorrectly reported convergence");
+    require(truncated.maximum_preflow < 6,
+            "one-round alternating path unexpectedly reached the sink");
+  }
+  {
+    const std::vector<DirectedArc> arcs = {
+        arc(2, 0, 100), arc(0, 1, 7), arc(1, 2, 7), arc(2, 1, 100)};
+    const auto result = solve(3, 0, 2, arcs, {-1, 7, -1});
+    verifyCertified(result, arcs, 7, 0, 2,
+                    "incoming source and outgoing sink arcs");
+    require(result.stats.boundary_pushes == 0,
+            "terminal arcs were incorrectly classified as boundary arcs");
+  }
 }
 
 void randomizedDifferentialCases() {
