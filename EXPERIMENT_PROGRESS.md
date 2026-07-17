@@ -67,3 +67,28 @@
   20,578. Invariant-enabled PR validation runs also passed on all three cuts.
 - The measurements remain single-cut results. Full-PU PR integration and
   timing have not been performed.
+
+### 2026-07-17 12:22 PDT - Multiple-Partitioning Cover
+
+- Created isolated branch `exp/multipartition-hi-pr` from the completed
+  single-partitioning experiment at `a7763b7`.
+- Added a shared-state partition-cover solver. It cycles graph partitionings,
+  permits relabel only where a vertex is interior, and performs no coordinator
+  boundary pushes.
+- Added fail-closed validation that every nonterminal is interior and every
+  positive-capacity nonterminal arc is local in at least one partitioning.
+- Added graph-aware contiguous cover generation that greedily eliminates
+  persistent boundary nodes and maximizes graph distance between boundary
+  sets, plus geometry diagnostics.
+- Passed deterministic one- and two-cycle cover cases, forced exhaustion,
+  incomplete-cover rejection, and 2,000 randomized cover comparisons in
+  addition to the preserved 5,000 single-partitioning comparisons.
+- On grid 128x128 P4, M2 reduced full BFS count from 11 to 2 and was 9-22%
+  faster across repeated timing batches. The cover had zero uncovered
+  nodes/arcs and minimum boundary distance 13.
+- On the three book cuts, no-intermediate-BFS M2 reduced BFS but increased
+  local scanning and regressed. Work-triggered BFS produced small wins on
+  Spiral and Head, while IFSAR remained slower. Full results and commands are
+  recorded in `EXPERIMENT_RESULTS.md`.
+- Passed all seven repository CTests, ASan/UBSan with leak detection, and the
+  complete differential suite in 32-, 64-, 128-bit, and GMP capacity modes.

@@ -14,3 +14,15 @@
   bunny graph, factors 0.5, 1, 2, and 4 all lost to waiting until local work
   blocked. The full residual BFS cost outweighed the saved local relabels. The
   option remains available for graph-specific experiments.
+- Do not assume that adding more separated partitionings monotonically helps.
+  On grid 128x128 P4, M2 solved in 17.778 ms while M4 took 20.087 ms because the
+  extra local phases repeated node activation and arc scans.
+- Do not assume that eliminating intermediate global BFS is sufficient for a
+  speedup. M2 with only initial/final BFS increased local arc scans by 1.35x to
+  1.87x on the Ghiglia-Pritt cuts and was slower on all three. A work-triggered
+  compromise helped Spiral and Head but not IFSAR, so no sampled relabel factor
+  is a safe universal default.
+- Do not run the partition-cover solver with an incomplete family and interpret
+  stagnation as a cut. If a node remains boundary or an arc remains crossing in
+  every partitioning, the local schedule is not fair. The implementation now
+  rejects that input before preflow initialization.

@@ -99,3 +99,64 @@ certificate.
   reduced.
 - Define ownership and atomic exchange for reverse residual capacity on every
   boundary arc.
+
+## Multiple-Partitioning Cover Extension
+
+The `partitionCoverHiPr` experiment keeps one global residual graph, excess
+vector, and label vector while cycling through a family of partitionings
+`P_0, ..., P_(M-1)`. Parts within one partitioning are future parallel work;
+different partitionings are processed sequentially because they mutate the
+same preflow state.
+
+For partitioning `P_i`, let `B_i` contain every nonterminal incident to an arc
+whose endpoints have different `P_i` labels. The required cover condition is:
+
+```text
+intersection(B_0, ..., B_(M-1)) is empty
+```
+
+Equivalently, every nonterminal is interior in at least one partitioning. In
+that partitioning all of its incident residual-arc pairs are local. The
+implementation also explicitly verifies that every positive-capacity
+nonterminal arc is local somewhere and rejects incomplete covers before
+initializing a preflow.
+
+During one cover phase, admissible pushes use only arcs local to the current
+partitioning. Boundary vertices may push on visible local arcs but do not
+relabel. Interior vertices may relabel because their scan includes every
+incident residual arc in the global graph. Current-arc cursors reset when the
+partitioning changes because the visible arc subset changes. There is no
+coordinator boundary-push phase: an arc crossing `P_i` is processed in a later
+partitioning where it is local.
+
+### Correctness
+
+The initial global reverse BFS supplies a valid labeling for the complete
+residual graph. Every cover operation is then a legal operation on that full
+graph:
+
+- an admissible local push preserves residual capacity, preflow feasibility,
+  and label validity;
+- a local relabel is performed only at an interior vertex and therefore takes
+  the minimum over all of its residual neighbors;
+- the gap rule operates on the global height buckets and is valid for any
+  globally valid labeling.
+
+With intermediate global relabeling disabled, labels are monotone and the
+standard finite push-relabel argument applies under the fair cover schedule:
+every finite-height active vertex is interior and eligible for complete
+discharge at least once per cover cycle. A phase late in a cycle can activate a
+vertex whose useful partitioning has already run, so termination is checked
+only after complete cycles and another cycle is allowed. Optional work-based
+global relabels replace labels with exact residual distances and preserve all
+invariants.
+
+When no finite-height active nonterminal remains, the same final residual BFS
+and maximum-preflow cut argument above certifies the exact cut. Thus changing
+partitionings affects operation order, not the maxflow objective.
+
+`makeSeparatedContiguousPartitionCover` generates balanced shifted candidates,
+then greedily minimizes the boundary nodes that remain blocked in every
+selected partitioning and maximizes graph distance from boundaries already
+selected. Geometry diagnostics report boundary counts, uncovered nodes/arcs,
+and minimum pairwise boundary distance.

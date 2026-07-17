@@ -97,6 +97,46 @@ fixture. Additional invariant-enabled PR runs also converged with matching
 preflow and cut certificates. These are single-cut measurements; PR still has
 not been integrated into the full PU iteration.
 
+## Multiple-Partitioning Cover Results
+
+The cover extension was measured with four contiguous parts. `M1` is the
+preserved coordinator-boundary implementation. `M2` uses two graph-separated
+partitionings over shared residual state and performs no coordinator boundary
+pushes. Times below exclude DIMACS parsing and one-time partition-cover
+construction. They are three-run Release medians.
+
+| Graph | M1 baseline | M2, initial/final BFS only | Change | Global BFS, M1 -> M2 |
+|---|---:|---:|---:|---:|
+| grid 128x128 | 21.899 ms | 18.636 ms | 14.9% faster | 11 -> 2 |
+| Spiral first UP cut | 99.116 ms | 119.601 ms | 20.7% slower | 12 -> 2 |
+| Head first UP cut | 69.541 ms | 92.553 ms | 33.1% slower | 7 -> 2 |
+| IFSAR first UP cut | 846.980 ms | 935.839 ms | 10.5% slower | 10 -> 2 |
+
+The grid cover had 768 boundary nodes per partitioning, no uncovered nodes or
+arcs, and minimum boundary-set distance 13. Cover construction took roughly
+3-6 ms and is expected to be amortized across repeated PU cuts. Repeated timing
+batches placed the M2 improvement between 9% and 22%; the table uses a
+representative same-session three-run pair. Four partitionings converged in one
+cycle but took 20.1-22.6 ms in sampled batches, so more covers are not
+automatically better.
+
+The book regressions came from extra local work rather than BFS. M2 increased
+local arc scans from 11.29M to 19.51M on Spiral, 6.20M to 11.63M on Head, and
+120.09M to 161.41M on IFSAR. Work-triggered global relabeling recovered some of
+that loss:
+
+| Graph | Work factor | M2 cover | Change from M1 | Global BFS |
+|---|---:|---:|---:|---:|
+| Spiral | 4 | 95.338 ms | 3.8% faster | 10 |
+| Head | 8 | 59.226 ms | 14.8% faster | 4 |
+| IFSAR | 8 | 885.077 ms | 4.5% slower | 12 |
+
+Spiral and Head covers had minimum boundary-set distance 27; IFSAR's was 56.
+All had zero uncovered nodes/arcs, zero coordinator boundary pushes, and exact
+objectives matching BK. There is no universal sampled work factor: the cover is
+a valid scheduling mechanism and can reduce BFS cost, but it is not a general
+performance win in its current serial form.
+
 ## Key Findings
 
 - Bucketed gap retirement is essential. On bunny P1, replacing a full vertex
@@ -111,6 +151,9 @@ not been integrated into the full PU iteration.
 - Original-style periodic global relabel work limits did not transfer well to
   this coordinator design. On bunny P1, factors 0.5, 1, 2, and 4 all lost to
   waiting until local work blocked; repeated full-graph BFS dominated.
+- Multiple separated partitionings remove the need for coordinator boundary
+  pushes and can reduce global BFS frequency while preserving exactness. Their
+  benefit depends on whether saved BFS work exceeds repeated local scans.
 
 ## Commands
 
@@ -124,4 +167,7 @@ cmake --build /home/matt/software/experiments/build-mcpd4-partitioned-hi-pr-rele
   --target mcpd4_partitioned_hi_pr_benchmark -j 8
 ./mcpd4_partitioned_hi_pr_benchmark GRAPH.max --symmetric-streaming \
   --partitions 8 --partitioner basic --repeats 3
+./mcpd4_partitioned_hi_pr_benchmark GRAPH.max --directed \
+  --partitions 4 --partitionings 2 --repeats 3 \
+  --global-relabel-work-factor 8
 ```
