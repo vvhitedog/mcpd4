@@ -41,6 +41,35 @@ The grid reader reports a 65,152 terminal imbalance offset. Both implementations
 were compared on the same normalized `MinCutGraph`; its exact reported value is
 40,941 and the omitted offset does not affect the minimizing cut.
 
+## Native Dual-Decomposition Comparison
+
+A follow-up comparison used the same direct grid min-cut for partitioned PR and
+native `mcpd3::DualDecomposition` (`mcpd3-n`). The 256x256 graph was generated
+with the same `make_grid_graph` generator and seed 24 as the 128x128 fixture.
+Both solvers used two basic partitions and 32-bit capacities. The mcpd3-n run
+used two local threads and the current phase-solver defaults:
+`objective_scale=10350`, initial step 690, five scales, patience 250, momentum
+enabled, and group stopping disabled.
+
+Parsing is excluded. The PR time includes residual construction and solve; its
+separate partitioning time is shown in parentheses. The mcpd3-n time is the
+median of DD construction plus solve. Each median is over five runs.
+
+| Graph | Partitioned PR | mcpd3-n DD | PR / DD | Exact value |
+|---|---:|---:|---:|---:|
+| grid 128x128 | 19.393 ms (+0.077 ms partitioning) | 13.620 ms | 1.43x | 40,941 |
+| grid 256x256 | 109.345 ms (+0.254 ms partitioning) | 23.152 ms | 4.73x | 163,756 |
+
+Both methods reached agreement/certification and matched the exact objective.
+The PR local phases are serial in this prototype, whereas mcpd3-n executes its
+two local subproblems concurrently. These numbers therefore compare the current
+CPU implementations, not a projected parallel PR implementation.
+
+For context only, the separate physical phase-unwrapping benchmark records
+whole-PU mcpd3-n medians near 270 ms at 128x128 (11 cut attempts) and 990 ms at
+256x256 (21 cut attempts). Those whole-PU values must not be compared directly
+with the one-cut PR values above until PR is integrated as a PU cut backend.
+
 ## Key Findings
 
 - Bucketed gap retirement is essential. On bunny P1, replacing a full vertex

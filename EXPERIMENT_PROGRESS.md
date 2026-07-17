@@ -42,3 +42,17 @@
   added a total-flow test above 32-bit capacity range.
 - Passed the final suite under ASan/UBSan and 32-, 64-, 128-bit, and GMP
   capacity modes.
+
+### 2026-07-17 01:13 PDT - Native DD Comparison
+
+- Compared partitioned PR against the actual native mcpd3 dual-decomposition
+  solver on identical 128x128 and 256x256 seed-24 direct grid cuts.
+- Used two basic partitions, 32-bit capacities, five repetitions, and the
+  current phase-level mcpd3-n schedule defaults. Both solvers returned the same
+  exact objectives.
+- Partitioned PR took 19.393 ms versus 13.620 ms for mcpd3-n at 128x128, and
+  109.345 ms versus 23.152 ms at 256x256, before adding PR's negligible
+  0.077/0.254 ms partition setup. The current serial PR prototype is therefore
+  1.43x and 4.73x slower at P2.
+- Kept the single-cut comparison separate from recorded whole-PU mcpd3-n wall
+  times, which include 11 cuts at 128x128 and 21 cuts at 256x256.
