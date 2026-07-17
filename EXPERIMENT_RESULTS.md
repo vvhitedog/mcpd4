@@ -70,6 +70,33 @@ whole-PU mcpd3-n medians near 270 ms at 128x128 (11 cut attempts) and 990 ms at
 256x256 (21 cut attempts). Those whole-PU values must not be compared directly
 with the one-cut PR values above until PR is integrated as a PU cut backend.
 
+## Ghiglia-Pritt Book Cuts
+
+The next comparison exports the first UP binary-move cut from a zero ambiguity
+state on three published Ghiglia-Pritt datasets. Spiral, Head, and IFSAR are
+classified as easy, medium, and hard from their prior complete four-partition
+mcpd3-n PU walls (3.003 s, 5.927 s, and 43.457 s respectively). This label
+describes the complete PU problem, not necessarily the first cut alone.
+
+Both direct-cut solvers used two basic partitions and 32-bit capacities. PR
+used its default serial local phase. Mcpd3-n used two local threads and the
+phase defaults: objective scale 10,350, initial step 690, five scales, patience
+250, momentum enabled, and group stopping disabled. Parsing is excluded. PR
+time includes residual construction and solve plus the separately measured
+partition setup; mcpd3-n is DD construction plus solve. Values are five-run
+medians.
+
+| Dataset | Variables | Exact cut | Partitioned PR | mcpd3-n DD | PR / DD |
+|---|---:|---:|---:|---:|---:|
+| Spiral (easy) | 66,049 | 2,028 | 99.301 ms | 38.980 ms | 2.55x |
+| Head (medium) | 65,536 | 4,294 | 72.676 ms | 21.046 ms | 3.45x |
+| IFSAR (hard) | 262,144 | 20,578 | 1,022.094 ms | 249.103 ms | 4.10x |
+
+PR, its internal BK reference, and mcpd3-n returned the same objective on every
+fixture. Additional invariant-enabled PR runs also converged with matching
+preflow and cut certificates. These are single-cut measurements; PR still has
+not been integrated into the full PU iteration.
+
 ## Key Findings
 
 - Bucketed gap retirement is essential. On bunny P1, replacing a full vertex

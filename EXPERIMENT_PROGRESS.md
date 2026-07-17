@@ -56,3 +56,14 @@
   1.43x and 4.73x slower at P2.
 - Kept the single-cut comparison separate from recorded whole-PU mcpd3-n wall
   times, which include 11 cuts at 128x128 and 21 cuts at 256x256.
+
+### 2026-07-17 01:25 PDT - Book Cut Comparison
+
+- Exported the zero-state first-UP binary cut from the Ghiglia-Pritt Spiral,
+  Head, and IFSAR datasets using a tested phase-side DIMACS writer.
+- Compared five-run Release medians with two basic partitions. Partitioned PR
+  was 2.55x, 3.45x, and 4.10x slower than native mcpd3 DD respectively.
+- Every PR, BK, and mcpd3-n run matched exact cut values 2,028, 4,294, and
+  20,578. Invariant-enabled PR validation runs also passed on all three cuts.
+- The measurements remain single-cut results. Full-PU PR integration and
+  timing have not been performed.
