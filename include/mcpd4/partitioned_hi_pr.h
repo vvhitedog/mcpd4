@@ -24,9 +24,15 @@ struct PartitionedHiPrOptions {
 };
 
 struct PartitionedHiPrStats {
+  std::size_t partitioning_count = 1;
+  std::size_t partition_cover_cycles = 0;
+  std::size_t partition_local_phases = 0;
   std::size_t residual_arc_count = 0;
+  // These are sums across partitionings for partition-cover solves.
   std::size_t boundary_directed_arc_count = 0;
   std::size_t boundary_node_count = 0;
+  std::size_t minimum_boundary_node_count = 0;
+  std::size_t maximum_boundary_node_count = 0;
   std::size_t coordination_rounds = 0;
   std::size_t global_relabels = 0;
   std::size_t local_pushes = 0;
@@ -51,6 +57,14 @@ struct PartitionedHiPrResult {
   PartitionedHiPrStats stats;
 };
 
+struct PartitionCoverGeometry {
+  std::vector<std::size_t> boundary_node_counts;
+  std::size_t uncovered_node_count = 0;
+  std::size_t uncovered_directed_arc_count = 0;
+  // -1 means fewer than two nonempty boundary sets or no connecting path.
+  int minimum_pairwise_boundary_distance = -1;
+};
+
 // partition_of_node has one entry per node. Source and sink entries are
 // ignored; every other entry must be nonnegative.
 PartitionedHiPrResult partitionedHiPr(
@@ -58,5 +72,30 @@ PartitionedHiPrResult partitionedHiPr(
     const std::vector<DirectedArc> &arcs,
     const std::vector<int> &partition_of_node,
     const PartitionedHiPrOptions &options = {});
+
+// Runs push-relabel over one shared residual state while cycling through
+// multiple partitionings. A nonterminal may be a boundary node in a given
+// partitioning, but every nonterminal must be interior in at least one
+// partitioning. This also guarantees that each incident arc is locally
+// visible somewhere. No coordinator boundary-push phase is used.
+PartitionedHiPrResult partitionCoverHiPr(
+    int node_count, int source, int sink,
+    const std::vector<DirectedArc> &arcs,
+    const std::vector<std::vector<int>> &partitionings,
+    const PartitionedHiPrOptions &options = {});
+
+// Builds contiguous, approximately balanced partitionings and greedily
+// chooses shifted boundaries that first eliminate persistent boundary nodes,
+// then maximize graph distance from boundaries already selected. Throws when
+// the requested family cannot cover every nonterminal.
+std::vector<std::vector<int>> makeSeparatedContiguousPartitionCover(
+    int node_count, int source, int sink,
+    const std::vector<DirectedArc> &arcs, int partition_count,
+    int partitioning_count);
+
+PartitionCoverGeometry analyzePartitionCoverGeometry(
+    int node_count, int source, int sink,
+    const std::vector<DirectedArc> &arcs,
+    const std::vector<std::vector<int>> &partitionings);
 
 } // namespace mcpd4::experimental

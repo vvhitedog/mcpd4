@@ -24,6 +24,7 @@ using mcpd4::experimental::DirectedArc;
 struct Config {
   std::string dimacs_path;
   int partition_count = 2;
+  int partitioning_count = 1;
   int repeats = 3;
   std::size_t max_rounds = 100000;
   double global_relabel_work_factor = 0.0;
@@ -65,6 +66,7 @@ Config parseArgs(int argc, char **argv) {
     throw std::invalid_argument(
         "usage: mcpd4_partitioned_hi_pr_benchmark DIMACS "
         "[--directed|--symmetric-streaming] [--partitions N] "
+        "[--partitionings N] "
         "[--partitioner basic|metis] [--repeats N] [--max-rounds N] "
         "[--global-relabel-work-factor F] [--validate]");
   }
@@ -80,6 +82,8 @@ Config parseArgs(int argc, char **argv) {
     };
     if (option == "--partitions") {
       config.partition_count = parsePositiveInt(value(), option);
+    } else if (option == "--partitionings") {
+      config.partitioning_count = parsePositiveInt(value(), option);
     } else if (option == "--repeats") {
       config.repeats = parsePositiveInt(value(), option);
     } else if (option == "--max-rounds") {
@@ -106,6 +110,10 @@ Config parseArgs(int argc, char **argv) {
   if (config.directed && config.symmetric_streaming) {
     throw std::invalid_argument(
         "directed and symmetric-streaming input modes are mutually exclusive");
+  }
+  if (config.partitioning_count > 1 && config.partitioner != "basic") {
+    throw std::invalid_argument(
+        "multiple partitionings currently require the basic partitioner");
   }
   return config;
 }
@@ -194,38 +202,70 @@ int main(int argc, char **argv) {
     const mcpd3::MinCutGraph graph = readGraph(config);
     const std::uint64_t read_wall_us = elapsedUs(read_start);
 
-    const auto partition_start = Clock::now();
-    std::vector<int> partitions = partitionGraph(config, graph);
-    const std::uint64_t partition_wall_us = elapsedUs(partition_start);
-
-    std::vector<std::size_t> partition_sizes(config.partition_count, 0);
-    for (const int partition : partitions) {
-      if (partition < 0 || partition >= config.partition_count) {
-        throw std::runtime_error("partitioner returned an invalid partition id");
-      }
-      ++partition_sizes[partition];
-    }
-
     const int source = graph.nnode;
     const int sink = graph.nnode + 1;
-    partitions.push_back(-1);
-    partitions.push_back(-1);
     const std::vector<DirectedArc> explicit_arcs =
         makeExplicitGraph(graph, source, sink);
+
+    const auto partition_start = Clock::now();
+    std::vector<std::vector<int>> partitionings;
+    if (config.partitioning_count == 1) {
+      std::vector<int> partitions = partitionGraph(config, graph);
+      partitions.push_back(-1);
+      partitions.push_back(-1);
+      partitionings.push_back(std::move(partitions));
+    } else {
+      partitionings =
+          mcpd4::experimental::makeSeparatedContiguousPartitionCover(
+              graph.nnode + 2, source, sink, explicit_arcs,
+              config.partition_count, config.partitioning_count);
+    }
+    const std::uint64_t partition_wall_us = elapsedUs(partition_start);
+    const auto cover_geometry =
+        mcpd4::experimental::analyzePartitionCoverGeometry(
+            graph.nnode + 2, source, sink, explicit_arcs, partitionings);
+
+    std::vector<std::vector<std::size_t>> partition_sizes(
+        partitionings.size(),
+        std::vector<std::size_t>(config.partition_count, 0));
+    for (std::size_t cover = 0; cover < partitionings.size(); ++cover) {
+      for (int node = 0; node < graph.nnode; ++node) {
+        const int partition = partitionings[cover][node];
+        if (partition < 0 || partition >= config.partition_count) {
+          throw std::runtime_error(
+              "partitioner returned an invalid partition id");
+        }
+        ++partition_sizes[cover][partition];
+      }
+    }
 
     std::cout << "capacity_mode " << mcpd3::capacity_mode_name() << '\n';
     std::cout << "graph_node_count " << graph.nnode << '\n';
     std::cout << "graph_edge_pair_count " << graph.narc << '\n';
     std::cout << "explicit_directed_arc_count " << explicit_arcs.size() << '\n';
     std::cout << "partition_count " << config.partition_count << '\n';
+    std::cout << "partitioning_count " << config.partitioning_count << '\n';
     std::cout << "partitioner " << config.partitioner << '\n';
     std::cout << "global_relabel_work_factor "
               << config.global_relabel_work_factor << '\n';
-    std::cout << "partition_sizes";
-    for (const auto size : partition_sizes) {
-      std::cout << ' ' << size;
+    std::cout << "cover_boundary_node_counts";
+    for (const auto count : cover_geometry.boundary_node_counts) {
+      std::cout << ' ' << count;
     }
     std::cout << '\n';
+    std::cout << "cover_uncovered_node_count "
+              << cover_geometry.uncovered_node_count << '\n';
+    std::cout << "cover_uncovered_directed_arc_count "
+              << cover_geometry.uncovered_directed_arc_count << '\n';
+    std::cout << "cover_minimum_pairwise_boundary_distance "
+              << cover_geometry.minimum_pairwise_boundary_distance << '\n';
+    for (std::size_t cover = 0; cover < partition_sizes.size(); ++cover) {
+      std::cout << "partition_sizes cover=" << cover;
+      for (const auto size : partition_sizes[cover]) {
+        std::cout << ' ' << size;
+      }
+      std::cout << '\n';
+    }
     std::cout << "timing_read_wall_us " << read_wall_us << '\n';
     std::cout << "timing_partition_wall_us " << partition_wall_us << '\n';
 
@@ -248,8 +288,14 @@ int main(int argc, char **argv) {
           config.global_relabel_work_factor;
       options.validate_invariants = config.validate;
       const auto partitioned_start = Clock::now();
-      const auto result = mcpd4::experimental::partitionedHiPr(
-          graph.nnode + 2, source, sink, explicit_arcs, partitions, options);
+      const auto result =
+          config.partitioning_count == 1
+              ? mcpd4::experimental::partitionedHiPr(
+                    graph.nnode + 2, source, sink, explicit_arcs,
+                    partitionings.front(), options)
+              : mcpd4::experimental::partitionCoverHiPr(
+                    graph.nnode + 2, source, sink, explicit_arcs,
+                    partitionings, options);
       const std::uint64_t partitioned_wall_us = elapsedUs(partitioned_start);
       partitioned_times.push_back(partitioned_wall_us);
 
@@ -263,6 +309,10 @@ int main(int argc, char **argv) {
                 << mcpd3::integer_to_string(result.cut_capacity)
                 << " coordination_rounds "
                 << result.stats.coordination_rounds
+                << " partition_cover_cycles "
+                << result.stats.partition_cover_cycles
+                << " partition_local_phases "
+                << result.stats.partition_local_phases
                 << " global_relabels " << result.stats.global_relabels
                 << " local_pushes " << result.stats.local_pushes
                 << " boundary_pushes " << result.stats.boundary_pushes
@@ -275,6 +325,10 @@ int main(int argc, char **argv) {
                 << " boundary_directed_arcs "
                 << result.stats.boundary_directed_arc_count
                 << " boundary_nodes " << result.stats.boundary_node_count
+                << " minimum_boundary_nodes "
+                << result.stats.minimum_boundary_node_count
+                << " maximum_boundary_nodes "
+                << result.stats.maximum_boundary_node_count
                 << " global_relabel_wall_us "
                 << result.stats.global_relabel_wall_us
                 << " boundary_push_wall_us "

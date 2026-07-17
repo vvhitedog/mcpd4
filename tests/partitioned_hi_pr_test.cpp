@@ -136,6 +136,16 @@ PartitionedHiPrResult solve(int node_count, int source, int sink,
       node_count, source, sink, arcs, partitions, options);
 }
 
+PartitionedHiPrResult solveCover(
+    int node_count, int source, int sink,
+    const std::vector<DirectedArc> &arcs,
+    std::vector<std::vector<int>> partitionings,
+    PartitionedHiPrOptions options = {}) {
+  options.validate_invariants = true;
+  return mcpd4::experimental::partitionCoverHiPr(
+      node_count, source, sink, arcs, partitionings, options);
+}
+
 void verifyCertified(const PartitionedHiPrResult &result,
                      const std::vector<DirectedArc> &arcs,
                      Objective expected, int source, int sink,
@@ -155,6 +165,9 @@ void verifyCertified(const PartitionedHiPrResult &result,
     require(value >= 0, context + ": preflow contains negative excess");
   }
 }
+
+template <typename Operation>
+void requireThrows(Operation operation, const std::string &context);
 
 void deterministicCases() {
   {
@@ -257,6 +270,174 @@ void deterministicCases() {
   }
 }
 
+void partitionCoverCases() {
+  {
+    // Cover 0 blocks the chain at 3->4. Cover 1 makes that edge local and
+    // instead places its boundary behind the active excess. Together every
+    // nonterminal is interior in at least one cover.
+    const std::vector<DirectedArc> arcs = {
+        arc(0, 1, 6), arc(1, 2, 6), arc(2, 3, 6), arc(3, 4, 6),
+        arc(4, 5, 6), arc(5, 6, 6), arc(6, 7, 6)};
+    const std::vector<std::vector<int>> partitionings = {
+        {-1, 0, 0, 0, 1, 1, 1, -1},
+        {-1, 0, 1, 1, 1, 1, 1, -1},
+    };
+    const auto result = solveCover(8, 0, 7, arcs, partitionings);
+    verifyCertified(result, arcs, 6, 0, 7, "two-cover chain");
+    require(result.stats.partitioning_count == 2,
+            "two-cover chain reported the wrong cover count");
+    require(result.stats.partition_cover_cycles == 1,
+            "two-cover chain should converge in one complete cover cycle");
+    require(result.stats.partition_local_phases == 2,
+            "two-cover chain should run both local phases");
+    require(result.stats.boundary_pushes == 0,
+            "partition cover unexpectedly used coordinator boundary pushes");
+    require(result.stats.global_relabels == 2,
+            "partition cover should need only initial and final BFS");
+  }
+  {
+    const std::vector<DirectedArc> arcs = {
+        arc(0, 1, 6), arc(1, 2, 6), arc(2, 3, 6), arc(3, 4, 6),
+        arc(4, 5, 6), arc(5, 6, 6), arc(6, 7, 6)};
+    const std::vector<std::vector<int>> partitionings = {
+        {-1, 0, 1, 1, 1, 1, 1, -1},
+        {-1, 0, 0, 0, 1, 1, 1, -1},
+    };
+    PartitionedHiPrOptions one_cycle;
+    one_cycle.max_coordination_rounds = 1;
+    const auto truncated =
+        solveCover(8, 0, 7, arcs, partitionings, one_cycle);
+    require(!truncated.converged,
+            "one-cycle cover incorrectly certified an unfinished preflow");
+    require(truncated.maximum_preflow < 6,
+            "one-cycle cover unexpectedly completed the reversed schedule");
+
+    const auto result = solveCover(8, 0, 7, arcs, partitionings);
+    verifyCertified(result, arcs, 6, 0, 7, "two-cycle reversed cover");
+    require(result.stats.partition_cover_cycles == 2,
+            "reversed cover should require two cycles");
+  }
+  {
+    std::vector<DirectedArc> arcs;
+    for (int node = 0; node < 11; ++node) {
+      arcs.push_back(arc(node, node + 1, 5));
+    }
+    const auto partitionings =
+        mcpd4::experimental::makeSeparatedContiguousPartitionCover(
+            12, 0, 11, arcs, 2, 2);
+    require(partitionings.size() == 2,
+            "separated cover generator returned the wrong cover count");
+    const auto geometry =
+        mcpd4::experimental::analyzePartitionCoverGeometry(
+            12, 0, 11, arcs, partitionings);
+    require(geometry.uncovered_node_count == 0 &&
+                geometry.uncovered_directed_arc_count == 0,
+            "generated chain cover is incomplete");
+    require(geometry.minimum_pairwise_boundary_distance >= 1,
+            "generated chain boundaries are not well separated");
+    const auto result = solveCover(12, 0, 11, arcs, partitionings);
+    verifyCertified(result, arcs, 5, 0, 11,
+                    "generated separated chain cover");
+    require(result.stats.minimum_boundary_node_count == 2 &&
+                result.stats.maximum_boundary_node_count == 2,
+            "generated chain cover has unexpected boundary geometry");
+    requireThrows(
+        [&] {
+          mcpd4::experimental::makeSeparatedContiguousPartitionCover(
+              12, 0, 11, arcs, 2, 1);
+        },
+        "single incomplete generated cover");
+  }
+  {
+    const std::vector<DirectedArc> arcs = {
+        arc(0, 1, 4), arc(1, 2, 4), arc(2, 3, 4), arc(3, 4, 4)};
+    requireThrows(
+        [&] {
+          solveCover(5, 0, 4, arcs,
+                     {{-1, 0, 0, 1, -1}, {-1, 0, 0, 1, -1}});
+        },
+        "incomplete repeated partition cover");
+  }
+  {
+    const std::vector<DirectedArc> arcs = {
+        arc(0, 1, 9), arc(0, 2, 7), arc(1, 3, 4), arc(2, 3, 6),
+        arc(1, 2, 3), arc(2, 1, 2), arc(3, 4, 8)};
+    const std::vector<std::vector<int>> partitionings = {
+        {-1, 0, 0, 1, -1},
+        {-1, 0, 0, 0, -1},
+    };
+    const auto result = solveCover(5, 0, 4, arcs, partitionings);
+    verifyCertified(result, arcs, exactMaxflow(5, 0, 4, arcs), 0, 4,
+                    "parallel directed cover");
+    require(result.stats.boundary_pushes == 0,
+            "parallel directed cover used boundary pushes");
+  }
+}
+
+void randomizedPartitionCoverCases() {
+  std::mt19937 generator(0xC0A3E5u);
+  for (int trial = 0; trial < 1000; ++trial) {
+    const int node_count = 7 + static_cast<int>(generator() % 10);
+    const int source = 0;
+    const int sink = node_count - 1;
+    const int first_cut = 2;
+    const int second_cut = node_count - 3;
+    std::vector<std::vector<int>> covers(2,
+                                         std::vector<int>(node_count, -1));
+    for (int node = 1; node < sink; ++node) {
+      covers[0][node] = node < first_cut ? 0 : 1;
+      covers[1][node] = node < second_cut ? 0 : 1;
+    }
+
+    std::vector<DirectedArc> arcs;
+    for (int node = 0; node + 1 < node_count; ++node) {
+      arcs.push_back(arc(node, node + 1, 1 + generator() % 20));
+      if ((generator() & 1U) != 0) {
+        arcs.push_back(arc(node + 1, node, generator() % 8));
+      }
+      if ((generator() % 3U) == 0) {
+        arcs.push_back(arc(node, node + 1, generator() % 8));
+      }
+    }
+
+    const Objective expected = exactMaxflow(node_count, source, sink, arcs);
+    const auto result =
+        solveCover(node_count, source, sink, arcs, covers);
+    verifyCertified(result, arcs, expected, source, sink,
+                    "random cover trial " + std::to_string(trial));
+    require(result.stats.boundary_pushes == 0,
+            "random cover trial used coordinator boundary pushes");
+  }
+
+  for (int trial = 0; trial < 1000; ++trial) {
+    const int node_count = 2 + static_cast<int>(generator() % 9);
+    const int source = 0;
+    const int sink = node_count - 1;
+    std::vector<DirectedArc> arcs;
+    const int arc_count = static_cast<int>(generator() % (4 * node_count + 1));
+    for (int index = 0; index < arc_count; ++index) {
+      arcs.push_back(arc(static_cast<int>(generator() % node_count),
+                         static_cast<int>(generator() % node_count),
+                         generator() % 12));
+    }
+    std::vector<int> split(node_count, -1);
+    std::vector<int> all_local(node_count, -1);
+    for (int node = 1; node < sink; ++node) {
+      split[node] = static_cast<int>(generator() % 3);
+      all_local[node] = 0;
+    }
+    PartitionedHiPrOptions options;
+    if ((trial % 7) == 0) {
+      options.global_relabel_work_factor = 0.000001;
+    }
+    const Objective expected = exactMaxflow(node_count, source, sink, arcs);
+    const auto result = solveCover(node_count, source, sink, arcs,
+                                   {split, all_local}, options);
+    verifyCertified(result, arcs, expected, source, sink,
+                    "arbitrary random cover trial " + std::to_string(trial));
+  }
+}
+
 void randomizedDifferentialCases() {
   std::mt19937 generator(0x51A7C0DEu);
   for (int trial = 0; trial < 5000; ++trial) {
@@ -320,6 +501,14 @@ void validationCases() {
   options.global_relabel_work_factor = -1;
   requireThrows([&] { solve(3, 0, 2, path, {-1, 0, -1}, options); },
                 "negative global relabel work factor");
+
+  requireThrows([&] { solveCover(3, 0, 2, path, {}); }, "empty cover");
+  requireThrows(
+      [&] { solveCover(3, 0, 2, path, {{-1, 0}, {-1, 0, -1}}); },
+      "cover vector size");
+  requireThrows(
+      [&] { solveCover(3, 0, 2, path, {{-1, -1, -1}}); },
+      "negative cover partition");
 }
 
 } // namespace
@@ -327,7 +516,9 @@ void validationCases() {
 int main() {
   try {
     deterministicCases();
+    partitionCoverCases();
     randomizedDifferentialCases();
+    randomizedPartitionCoverCases();
     validationCases();
   } catch (const std::exception &error) {
     std::cerr << "partitioned_hi_pr_test failed: " << error.what() << '\n';

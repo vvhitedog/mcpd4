@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <queue>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -24,11 +26,13 @@ class PartitionedHiPrSolver {
 public:
   PartitionedHiPrSolver(int node_count, int source, int sink,
                         const std::vector<DirectedArc> &input_arcs,
-                        const std::vector<int> &partition_of_node,
-                        const PartitionedHiPrOptions &options)
+                        const std::vector<std::vector<int>> &partitionings,
+                        const PartitionedHiPrOptions &options,
+                        bool partition_cover_mode)
       : node_count_(node_count), source_(source), sink_(sink),
-        input_arcs_(input_arcs), partitions_(partition_of_node),
-        options_(options), nodes_(node_count), height_count_(node_count + 1),
+        input_arcs_(input_arcs), partitionings_(partitionings),
+        options_(options), partition_cover_mode_(partition_cover_mode),
+        nodes_(node_count), height_count_(node_count + 1),
         active_heads_(node_count, -1), level_heads_(node_count, -1),
         coordinator_heads_(node_count, -1),
         coordinator_next_(node_count, -1),
@@ -40,18 +44,8 @@ public:
   PartitionedHiPrResult solve() {
     initializePreflow();
 
-    bool converged = false;
-    for (std::size_t round = 0; round < options_.max_coordination_rounds;
-         ++round) {
-      ++stats_.coordination_rounds;
-      globalRelabel();
-      coordinatorDischarge();
-      localDischarge();
-      if (!hasFiniteActiveVertex()) {
-        converged = true;
-        break;
-      }
-    }
+    bool converged = partition_cover_mode_ ? solvePartitionCover()
+                                           : solveSinglePartitioning();
 
     // Local relabels are valid but not necessarily exact shortest distances.
     // One final BFS gives the canonical weak-source cut classification.
@@ -72,7 +66,6 @@ private:
     int head = -1;
     int reverse = -1;
     mcpd3::Capacity residual = 0;
-    bool boundary = false;
   };
 
   struct Node {
@@ -86,8 +79,42 @@ private:
     int previous_at_level = -1;
     bool in_active_bucket = false;
     bool in_level_bucket = false;
-    bool boundary = false;
   };
+
+  bool solveSinglePartitioning() {
+    for (std::size_t round = 0; round < options_.max_coordination_rounds;
+         ++round) {
+      ++stats_.coordination_rounds;
+      globalRelabel();
+      coordinatorDischarge();
+      localDischarge();
+      if (!hasFiniteActiveVertex()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool solvePartitionCover() {
+    globalRelabel();
+    for (std::size_t cycle = 0; cycle < options_.max_coordination_rounds;
+         ++cycle) {
+      ++stats_.coordination_rounds;
+      ++stats_.partition_cover_cycles;
+      for (std::size_t cover = 0; cover < partitionings_.size(); ++cover) {
+        current_partitioning_ = cover;
+        ++stats_.partition_local_phases;
+        localDischarge();
+        if (globalRelabelWorkLimitReached()) {
+          globalRelabel();
+        }
+      }
+      if (!hasFiniteActiveVertex()) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   void validateInput() const {
     if (node_count_ < 2) {
@@ -97,12 +124,23 @@ private:
         sink_ >= node_count_ || source_ == sink_) {
       throw std::invalid_argument("invalid source or sink");
     }
-    if (partitions_.size() != static_cast<std::size_t>(node_count_)) {
-      throw std::invalid_argument("partition vector must have one entry per node");
+    if (partitionings_.empty()) {
+      throw std::invalid_argument("at least one partitioning is required");
     }
-    for (int node = 0; node < node_count_; ++node) {
-      if (node != source_ && node != sink_ && partitions_[node] < 0) {
-        throw std::invalid_argument("nonterminal partition ids must be nonnegative");
+    if (!partition_cover_mode_ && partitionings_.size() != 1) {
+      throw std::invalid_argument(
+          "single-partition mode requires exactly one partitioning");
+    }
+    for (const auto &partitioning : partitionings_) {
+      if (partitioning.size() != static_cast<std::size_t>(node_count_)) {
+        throw std::invalid_argument(
+            "partition vector must have one entry per node");
+      }
+      for (int node = 0; node < node_count_; ++node) {
+        if (node != source_ && node != sink_ && partitioning[node] < 0) {
+          throw std::invalid_argument(
+              "nonterminal partition ids must be nonnegative");
+        }
       }
     }
     if (options_.max_coordination_rounds == 0) {
@@ -124,12 +162,14 @@ private:
     }
   }
 
-  bool isBoundaryArc(const DirectedArc &arc) const {
+  bool isBoundaryArc(const DirectedArc &arc,
+                     std::size_t partitioning) const {
     if (arc.capacity == 0 || arc.tail == arc.head || arc.tail == source_ ||
         arc.tail == sink_ || arc.head == source_ || arc.head == sink_) {
       return false;
     }
-    return partitions_[arc.tail] != partitions_[arc.head];
+    return partitionings_[partitioning][arc.tail] !=
+           partitionings_[partitioning][arc.head];
   }
 
   void buildResidualGraph() {
@@ -153,6 +193,13 @@ private:
     }
 
     arcs_.resize(residual_arc_count);
+    boundary_arcs_.assign(
+        partitionings_.size(),
+        std::vector<std::uint8_t>(residual_arc_count, 0));
+    boundary_nodes_.assign(
+        partitionings_.size(),
+        std::vector<std::uint8_t>(static_cast<std::size_t>(node_count_), 0));
+    stats_.partitioning_count = partitionings_.size();
     stats_.residual_arc_count = residual_arc_count;
     if (options_.validate_invariants) {
       pair_capacity_.resize(residual_arc_count);
@@ -168,23 +215,88 @@ private:
       }
       const int forward = static_cast<int>(cursor[input.tail]++);
       const int reverse = static_cast<int>(cursor[input.head]++);
-      const bool boundary = isBoundaryArc(input);
-      arcs_[forward] = {input.head, reverse, input.capacity, boundary};
-      arcs_[reverse] = {input.tail, forward, 0, boundary};
+      arcs_[forward] = {input.head, reverse, input.capacity};
+      arcs_[reverse] = {input.tail, forward, 0};
       if (options_.validate_invariants) {
         pair_capacity_[forward] = input.capacity;
         pair_capacity_[reverse] = input.capacity;
       }
-      if (boundary) {
+      for (std::size_t partitioning = 0;
+           partitioning < partitionings_.size(); ++partitioning) {
+        if (!isBoundaryArc(input, partitioning)) {
+          continue;
+        }
+        boundary_arcs_[partitioning][forward] = 1;
+        boundary_arcs_[partitioning][reverse] = 1;
+        boundary_nodes_[partitioning][input.tail] = 1;
+        boundary_nodes_[partitioning][input.head] = 1;
         ++stats_.boundary_directed_arc_count;
-        nodes_[input.tail].boundary = true;
-        nodes_[input.head].boundary = true;
       }
     }
-    stats_.boundary_node_count = static_cast<std::size_t>(std::count_if(
-        nodes_.begin(), nodes_.end(), [](const Node &node) {
-          return node.boundary;
-        }));
+
+    stats_.minimum_boundary_node_count =
+        std::numeric_limits<std::size_t>::max();
+    for (const auto &boundary_nodes : boundary_nodes_) {
+      const std::size_t count = static_cast<std::size_t>(std::count(
+          boundary_nodes.begin(), boundary_nodes.end(), std::uint8_t{1}));
+      stats_.boundary_node_count += count;
+      stats_.minimum_boundary_node_count =
+          std::min(stats_.minimum_boundary_node_count, count);
+      stats_.maximum_boundary_node_count =
+          std::max(stats_.maximum_boundary_node_count, count);
+    }
+
+    if (partition_cover_mode_) {
+      validatePartitionCover();
+    }
+  }
+
+  void validatePartitionCover() const {
+    for (int node = 0; node < node_count_; ++node) {
+      if (node == source_ || node == sink_) {
+        continue;
+      }
+      bool interior_somewhere = false;
+      for (const auto &boundary_nodes : boundary_nodes_) {
+        if (boundary_nodes[node] == 0) {
+          interior_somewhere = true;
+          break;
+        }
+      }
+      if (!interior_somewhere) {
+        throw std::invalid_argument(
+            "partition cover leaves a nonterminal boundary in every "
+            "partitioning");
+      }
+    }
+
+    for (const auto &input : input_arcs_) {
+      if (input.capacity == 0 || input.tail == input.head ||
+          input.tail == source_ || input.tail == sink_ ||
+          input.head == source_ || input.head == sink_) {
+        continue;
+      }
+      bool local_somewhere = false;
+      for (std::size_t partitioning = 0;
+           partitioning < partitionings_.size(); ++partitioning) {
+        if (!isBoundaryArc(input, partitioning)) {
+          local_somewhere = true;
+          break;
+        }
+      }
+      if (!local_somewhere) {
+        throw std::invalid_argument(
+            "partition cover leaves an arc crossing every partitioning");
+      }
+    }
+  }
+
+  bool isCurrentBoundaryArc(std::size_t arc) const {
+    return boundary_arcs_[current_partitioning_][arc] != 0;
+  }
+
+  bool isCurrentBoundaryNode(int node) const {
+    return boundary_nodes_[current_partitioning_][node] != 0;
   }
 
   void initializePreflow() {
@@ -327,7 +439,7 @@ private:
         for (std::size_t index = nodes_[tail].first;
              index < nodes_[tail].end && nodes_[tail].excess > 0; ++index) {
           const auto &arc = arcs_[index];
-          if (!arc.boundary || arc.residual <= 0 ||
+          if (!isCurrentBoundaryArc(index) || arc.residual <= 0 ||
               nodes_[arc.head].height + 1 != height) {
             continue;
           }
@@ -353,7 +465,7 @@ private:
     for (std::size_t index = nodes_[tail].first;
          index < nodes_[tail].end; ++index) {
       const auto &arc = arcs_[index];
-      if (!arc.boundary && arc.residual > 0 &&
+      if (!isCurrentBoundaryArc(index) && arc.residual > 0 &&
           nodes_[arc.head].height == target_height) {
         return true;
       }
@@ -366,10 +478,10 @@ private:
         nodes_[node].height >= node_count_ || nodes_[node].in_active_bucket) {
       return;
     }
-    if (nodes_[node].boundary && !hasAdmissibleInteriorArc(node)) {
+    if (isCurrentBoundaryNode(node) && !hasAdmissibleInteriorArc(node)) {
       return;
     }
-    if (nodes_[node].boundary) {
+    if (isCurrentBoundaryNode(node)) {
       nodes_[node].current = nodes_[node].first;
     }
     const int height = nodes_[node].height;
@@ -458,7 +570,7 @@ private:
     for (std::size_t index = nodes_[node].first;
          index < nodes_[node].end; ++index) {
       const int neighbor = arcs_[index].head;
-      if (nodes_[neighbor].boundary && nodes_[neighbor].excess > 0) {
+      if (isCurrentBoundaryNode(neighbor) && nodes_[neighbor].excess > 0) {
         activateLocal(neighbor);
       }
     }
@@ -473,7 +585,7 @@ private:
       const auto &arc = arcs_[index];
       ++stats_.local_arc_scans;
       ++local_work_since_global_relabel_;
-      if (arc.boundary || arc.residual <= 0 ||
+      if (isCurrentBoundaryArc(index) || arc.residual <= 0 ||
           nodes_[arc.head].height >= minimum_height) {
         continue;
       }
@@ -509,7 +621,7 @@ private:
         const auto &arc = arcs_[index];
         ++stats_.local_arc_scans;
         ++local_work_since_global_relabel_;
-        if (arc.boundary || arc.residual <= 0 ||
+        if (isCurrentBoundaryArc(index) || arc.residual <= 0 ||
             nodes_[arc.head].height != target_height) {
           continue;
         }
@@ -525,7 +637,7 @@ private:
       if (nodes_[tail].excess == 0) {
         break;
       }
-      if (nodes_[tail].boundary) {
+      if (isCurrentBoundaryNode(tail)) {
         break;
       }
       relabelLocal(tail);
@@ -539,6 +651,9 @@ private:
     for (auto &node : nodes_) {
       node.in_active_bucket = false;
       node.next_active = -1;
+      // A different cover exposes a different arc subset, so a current-arc
+      // cursor from the previous phase cannot be reused safely.
+      node.current = node.first;
     }
     for (int node = 0; node < node_count_; ++node) {
       activateLocal(node);
@@ -693,10 +808,14 @@ private:
   int source_;
   int sink_;
   const std::vector<DirectedArc> &input_arcs_;
-  const std::vector<int> &partitions_;
+  std::vector<std::vector<int>> partitionings_;
   PartitionedHiPrOptions options_;
+  bool partition_cover_mode_ = false;
+  std::size_t current_partitioning_ = 0;
   std::vector<Node> nodes_;
   std::vector<ResidualArc> arcs_;
+  std::vector<std::vector<std::uint8_t>> boundary_arcs_;
+  std::vector<std::vector<std::uint8_t>> boundary_nodes_;
   std::vector<mcpd3::Capacity> pair_capacity_;
   std::vector<int> height_count_;
   std::vector<int> active_heads_;
@@ -719,8 +838,339 @@ PartitionedHiPrResult partitionedHiPr(
     const std::vector<int> &partition_of_node,
     const PartitionedHiPrOptions &options) {
   return PartitionedHiPrSolver(node_count, source, sink, arcs,
-                               partition_of_node, options)
+                               {partition_of_node}, options, false)
       .solve();
+}
+
+PartitionedHiPrResult partitionCoverHiPr(
+    int node_count, int source, int sink,
+    const std::vector<DirectedArc> &arcs,
+    const std::vector<std::vector<int>> &partitionings,
+    const PartitionedHiPrOptions &options) {
+  return PartitionedHiPrSolver(node_count, source, sink, arcs, partitionings,
+                               options, true)
+      .solve();
+}
+
+std::vector<std::vector<int>> makeSeparatedContiguousPartitionCover(
+    int node_count, int source, int sink,
+    const std::vector<DirectedArc> &arcs, int partition_count,
+    int partitioning_count) {
+  if (node_count < 2 || source < 0 || source >= node_count || sink < 0 ||
+      sink >= node_count || source == sink) {
+    throw std::invalid_argument("invalid graph terminals for partition cover");
+  }
+  if (partition_count <= 0 || partitioning_count <= 0) {
+    throw std::invalid_argument(
+        "partition and partitioning counts must be positive");
+  }
+
+  std::vector<int> ordered_nodes;
+  ordered_nodes.reserve(static_cast<std::size_t>(node_count - 2));
+  for (int node = 0; node < node_count; ++node) {
+    if (node != source && node != sink) {
+      ordered_nodes.push_back(node);
+    }
+  }
+  if (partition_count > static_cast<int>(ordered_nodes.size())) {
+    throw std::invalid_argument(
+        "partition count exceeds the number of nonterminal nodes");
+  }
+  for (const auto &arc : arcs) {
+    if (arc.tail < 0 || arc.tail >= node_count || arc.head < 0 ||
+        arc.head >= node_count || arc.capacity < 0) {
+      throw std::invalid_argument("invalid arc in partition-cover graph");
+    }
+  }
+
+  struct Candidate {
+    std::vector<int> partitions;
+    std::vector<std::uint8_t> boundary;
+  };
+
+  const int candidate_count = std::max(9, 4 * partitioning_count + 1);
+  std::vector<Candidate> candidates;
+  candidates.reserve(static_cast<std::size_t>(candidate_count));
+  const long double chunk =
+      static_cast<long double>(ordered_nodes.size()) / partition_count;
+  for (int candidate_index = 0; candidate_index < candidate_count;
+       ++candidate_index) {
+    const long double normalized =
+        candidate_count == 1
+            ? 0.0L
+            : (2.0L * candidate_index / (candidate_count - 1) - 1.0L);
+    const long double shift = normalized * 0.45L * chunk;
+
+    std::vector<int> cuts;
+    cuts.reserve(static_cast<std::size_t>(partition_count - 1));
+    int previous = 0;
+    for (int partition = 1; partition < partition_count; ++partition) {
+      const int minimum = previous + 1;
+      const int maximum = static_cast<int>(ordered_nodes.size()) -
+                          (partition_count - partition);
+      const long double ideal =
+          static_cast<long double>(partition) * ordered_nodes.size() /
+              partition_count +
+          shift;
+      const int cut = std::clamp(static_cast<int>(std::llround(ideal)),
+                                 minimum, maximum);
+      cuts.push_back(cut);
+      previous = cut;
+    }
+
+    Candidate candidate;
+    candidate.partitions.assign(static_cast<std::size_t>(node_count), -1);
+    candidate.boundary.assign(static_cast<std::size_t>(node_count), 0);
+    int partition = 0;
+    std::size_t next_cut = 0;
+    for (std::size_t rank = 0; rank < ordered_nodes.size(); ++rank) {
+      while (next_cut < cuts.size() &&
+             rank >= static_cast<std::size_t>(cuts[next_cut])) {
+        ++partition;
+        ++next_cut;
+      }
+      candidate.partitions[ordered_nodes[rank]] = partition;
+    }
+    for (const auto &arc : arcs) {
+      if (arc.capacity == 0 || arc.tail == arc.head || arc.tail == source ||
+          arc.tail == sink || arc.head == source || arc.head == sink) {
+        continue;
+      }
+      if (candidate.partitions[arc.tail] != candidate.partitions[arc.head]) {
+        candidate.boundary[arc.tail] = 1;
+        candidate.boundary[arc.head] = 1;
+      }
+    }
+    candidates.push_back(std::move(candidate));
+  }
+
+  std::vector<std::size_t> degree(static_cast<std::size_t>(node_count), 0);
+  for (const auto &arc : arcs) {
+    if (arc.capacity > 0 && arc.tail != arc.head && arc.tail != source &&
+        arc.tail != sink && arc.head != source && arc.head != sink) {
+      ++degree[arc.tail];
+      ++degree[arc.head];
+    }
+  }
+  std::vector<std::size_t> offsets(static_cast<std::size_t>(node_count) + 1,
+                                   0);
+  for (int node = 0; node < node_count; ++node) {
+    offsets[node + 1] = offsets[node] + degree[node];
+  }
+  std::vector<int> neighbors(offsets.back());
+  std::vector<std::size_t> cursors = offsets;
+  for (const auto &arc : arcs) {
+    if (arc.capacity > 0 && arc.tail != arc.head && arc.tail != source &&
+        arc.tail != sink && arc.head != source && arc.head != sink) {
+      neighbors[cursors[arc.tail]++] = arc.head;
+      neighbors[cursors[arc.head]++] = arc.tail;
+    }
+  }
+
+  std::vector<bool> used(candidates.size(), false);
+  std::vector<std::uint8_t> persistent_boundary(
+      static_cast<std::size_t>(node_count), 0);
+  std::vector<std::uint8_t> boundary_union(static_cast<std::size_t>(node_count),
+                                           0);
+  std::vector<std::vector<int>> result;
+  result.reserve(static_cast<std::size_t>(partitioning_count));
+
+  for (int selection = 0; selection < partitioning_count; ++selection) {
+    std::vector<int> distance(static_cast<std::size_t>(node_count),
+                              std::numeric_limits<int>::max());
+    std::queue<int> queue;
+    if (selection > 0) {
+      for (int node = 0; node < node_count; ++node) {
+        if (boundary_union[node] != 0) {
+          distance[node] = 0;
+          queue.push(node);
+        }
+      }
+      while (!queue.empty()) {
+        const int tail = queue.front();
+        queue.pop();
+        for (std::size_t index = offsets[tail]; index < offsets[tail + 1];
+             ++index) {
+          const int head = neighbors[index];
+          if (distance[head] == std::numeric_limits<int>::max()) {
+            distance[head] = distance[tail] + 1;
+            queue.push(head);
+          }
+        }
+      }
+    }
+
+    int best = -1;
+    std::size_t best_persistent_overlap =
+        std::numeric_limits<std::size_t>::max();
+    int best_distance = -1;
+    for (int candidate_index = 0;
+         candidate_index < static_cast<int>(candidates.size());
+         ++candidate_index) {
+      if (used[candidate_index]) {
+        continue;
+      }
+      const auto &boundary = candidates[candidate_index].boundary;
+      std::size_t overlap = 0;
+      int minimum_distance = std::numeric_limits<int>::max();
+      for (int node = 0; node < node_count; ++node) {
+        if (boundary[node] == 0) {
+          continue;
+        }
+        if (selection > 0 && persistent_boundary[node] != 0) {
+          ++overlap;
+        }
+        minimum_distance = std::min(minimum_distance, distance[node]);
+      }
+      if (selection == 0) {
+        const int center = candidate_count / 2;
+        if (best == -1 || std::abs(candidate_index - center) <
+                              std::abs(best - center)) {
+          best = candidate_index;
+        }
+      } else if (best == -1 || overlap < best_persistent_overlap ||
+                 (overlap == best_persistent_overlap &&
+                  minimum_distance > best_distance)) {
+        best = candidate_index;
+        best_persistent_overlap = overlap;
+        best_distance = minimum_distance;
+      }
+    }
+    if (best < 0) {
+      throw std::logic_error("failed to select a partition-cover candidate");
+    }
+    used[best] = true;
+    result.push_back(candidates[best].partitions);
+    for (int node = 0; node < node_count; ++node) {
+      if (selection == 0) {
+        persistent_boundary[node] = candidates[best].boundary[node];
+      } else {
+        persistent_boundary[node] = static_cast<std::uint8_t>(
+            persistent_boundary[node] != 0 &&
+            candidates[best].boundary[node] != 0);
+      }
+      boundary_union[node] = static_cast<std::uint8_t>(
+          boundary_union[node] != 0 || candidates[best].boundary[node] != 0);
+    }
+  }
+
+  for (int node = 0; node < node_count; ++node) {
+    if (node != source && node != sink && persistent_boundary[node] != 0) {
+      throw std::runtime_error(
+          "candidate partitionings cannot provide complete interior coverage");
+    }
+  }
+  return result;
+}
+
+PartitionCoverGeometry analyzePartitionCoverGeometry(
+    int node_count, int source, int sink,
+    const std::vector<DirectedArc> &arcs,
+    const std::vector<std::vector<int>> &partitionings) {
+  if (node_count < 2 || source < 0 || source >= node_count || sink < 0 ||
+      sink >= node_count || source == sink || partitionings.empty()) {
+    throw std::invalid_argument("invalid partition-cover geometry input");
+  }
+  for (const auto &partitioning : partitionings) {
+    if (partitioning.size() != static_cast<std::size_t>(node_count)) {
+      throw std::invalid_argument(
+          "partition-cover geometry vector has the wrong size");
+    }
+  }
+
+  std::vector<std::vector<std::uint8_t>> boundaries(
+      partitionings.size(),
+      std::vector<std::uint8_t>(static_cast<std::size_t>(node_count), 0));
+  PartitionCoverGeometry geometry;
+  geometry.boundary_node_counts.resize(partitionings.size(), 0);
+  for (const auto &arc : arcs) {
+    if (arc.tail < 0 || arc.tail >= node_count || arc.head < 0 ||
+        arc.head >= node_count || arc.capacity < 0) {
+      throw std::invalid_argument("invalid arc in partition-cover geometry");
+    }
+    if (arc.capacity == 0 || arc.tail == arc.head || arc.tail == source ||
+        arc.tail == sink || arc.head == source || arc.head == sink) {
+      continue;
+    }
+    bool boundary_everywhere = true;
+    for (std::size_t cover = 0; cover < partitionings.size(); ++cover) {
+      if (partitionings[cover][arc.tail] ==
+          partitionings[cover][arc.head]) {
+        boundary_everywhere = false;
+      } else {
+        boundaries[cover][arc.tail] = 1;
+        boundaries[cover][arc.head] = 1;
+      }
+    }
+    if (boundary_everywhere) {
+      ++geometry.uncovered_directed_arc_count;
+    }
+  }
+  for (std::size_t cover = 0; cover < boundaries.size(); ++cover) {
+    geometry.boundary_node_counts[cover] = static_cast<std::size_t>(std::count(
+        boundaries[cover].begin(), boundaries[cover].end(), std::uint8_t{1}));
+  }
+  for (int node = 0; node < node_count; ++node) {
+    if (node == source || node == sink) {
+      continue;
+    }
+    bool boundary_everywhere = true;
+    for (const auto &boundary : boundaries) {
+      boundary_everywhere = boundary_everywhere && boundary[node] != 0;
+    }
+    if (boundary_everywhere) {
+      ++geometry.uncovered_node_count;
+    }
+  }
+
+  std::vector<std::vector<int>> adjacency(static_cast<std::size_t>(node_count));
+  for (const auto &arc : arcs) {
+    if (arc.capacity > 0 && arc.tail != arc.head && arc.tail != source &&
+        arc.tail != sink && arc.head != source && arc.head != sink) {
+      adjacency[arc.tail].push_back(arc.head);
+      adjacency[arc.head].push_back(arc.tail);
+    }
+  }
+  int minimum_pair_distance = std::numeric_limits<int>::max();
+  for (std::size_t first = 0; first < boundaries.size(); ++first) {
+    if (geometry.boundary_node_counts[first] == 0) {
+      continue;
+    }
+    std::vector<int> distance(static_cast<std::size_t>(node_count), -1);
+    std::queue<int> queue;
+    for (int node = 0; node < node_count; ++node) {
+      if (boundaries[first][node] != 0) {
+        distance[node] = 0;
+        queue.push(node);
+      }
+    }
+    while (!queue.empty()) {
+      const int tail = queue.front();
+      queue.pop();
+      for (const int head : adjacency[tail]) {
+        if (distance[head] == -1) {
+          distance[head] = distance[tail] + 1;
+          queue.push(head);
+        }
+      }
+    }
+    for (std::size_t second = first + 1; second < boundaries.size(); ++second) {
+      if (geometry.boundary_node_counts[second] == 0) {
+        continue;
+      }
+      int pair_distance = std::numeric_limits<int>::max();
+      for (int node = 0; node < node_count; ++node) {
+        if (boundaries[second][node] != 0 && distance[node] >= 0) {
+          pair_distance = std::min(pair_distance, distance[node]);
+        }
+      }
+      minimum_pair_distance = std::min(minimum_pair_distance, pair_distance);
+    }
+  }
+  if (minimum_pair_distance != std::numeric_limits<int>::max()) {
+    geometry.minimum_pairwise_boundary_distance = minimum_pair_distance;
+  }
+  return geometry;
 }
 
 } // namespace mcpd4::experimental
