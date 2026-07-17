@@ -25,3 +25,20 @@
   against an independent Dinic oracle, a forced two-round local/boundary case,
   and a one-round non-certification case.
 - Passed ASan/UBSan and 32-, 64-, and 128-bit capacity builds.
+
+### 2026-07-17 Benchmark And Optimization Pass
+
+- Added a release benchmark adapter using the existing BK solver as the exact
+  value and timing reference, with contiguous and METIS partitioning.
+- Replaced full-vertex gap scans with per-height linked buckets. On Waterloo
+  LB07 bunny sml P1, this reduced wall time from 14.895 s to 1.157 s.
+- Added optional `hi_pr`-style work-triggered global relabeling. It remained
+  exact but was slower on bunny because repeated full-graph BFS dominated, so
+  it is retained behind an option and disabled by default.
+- Verified exact objectives on a 128x128 grid, a wide-layered graph, and the
+  805,800-node Waterloo bunny graph across multiple partition counts and both
+  partitioners. Full measurements are in `EXPERIMENT_RESULTS.md`.
+- Expanded differential testing to 5,000 randomized directed multigraphs and
+  added a total-flow test above 32-bit capacity range.
+- Passed the final suite under ASan/UBSan and 32-, 64-, 128-bit, and GMP
+  capacity modes.

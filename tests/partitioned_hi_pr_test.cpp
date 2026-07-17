@@ -231,11 +231,35 @@ void deterministicCases() {
     require(result.stats.boundary_pushes == 0,
             "terminal arcs were incorrectly classified as boundary arcs");
   }
+  {
+    const std::vector<DirectedArc> arcs = {
+        arc(0, 1, 20), arc(1, 2, 7), arc(1, 3, 13), arc(3, 4, 13),
+        arc(2, 4, 7)};
+    PartitionedHiPrOptions frequent_updates;
+    frequent_updates.global_relabel_work_factor = 0.000001;
+    const auto result =
+        solve(5, 0, 4, arcs, {-1, 0, 0, 0, -1}, frequent_updates);
+    verifyCertified(result, arcs, 20, 0, 4,
+                    "work-triggered global relabel");
+    require(result.stats.work_global_relabel_interruptions > 0,
+            "small work limit did not interrupt local discharge");
+  }
+  {
+    const long maximum = std::numeric_limits<std::int32_t>::max();
+    const std::vector<DirectedArc> arcs = {
+        arc(0, 1, maximum), arc(0, 2, maximum),
+        arc(1, 3, maximum), arc(2, 3, maximum)};
+    const Objective expected =
+        2 * mcpd3::widen_capacity(mcpd3::capacity_from_integer(maximum));
+    const auto result = solve(4, 0, 3, arcs, {-1, 0, 1, -1});
+    verifyCertified(result, arcs, expected, 0, 3,
+                    "widened total preflow capacity");
+  }
 }
 
 void randomizedDifferentialCases() {
   std::mt19937 generator(0x51A7C0DEu);
-  for (int trial = 0; trial < 600; ++trial) {
+  for (int trial = 0; trial < 5000; ++trial) {
     const int node_count = 2 + static_cast<int>(generator() % 9);
     const int source = 0;
     const int sink = node_count - 1;
@@ -291,6 +315,11 @@ void validationCases() {
   options.max_coordination_rounds = 0;
   requireThrows([&] { solve(3, 0, 2, path, {-1, 0, -1}, options); },
                 "zero round limit");
+
+  options.max_coordination_rounds = 10;
+  options.global_relabel_work_factor = -1;
+  requireThrows([&] { solve(3, 0, 2, path, {-1, 0, -1}, options); },
+                "negative global relabel work factor");
 }
 
 } // namespace

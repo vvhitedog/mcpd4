@@ -9,6 +9,21 @@ include(CTest)
 
 find_package(Threads REQUIRED)
 
+option(MCPD4_EXPERIMENT_ENABLE_METIS
+  "Enable METIS partitioning in experimental benchmarks" ON)
+set(METIS_FOUND FALSE)
+if (MCPD4_EXPERIMENT_ENABLE_METIS)
+  find_path(METIS_INCLUDE_DIRS NAMES metis.h
+    HINTS ENV METIS_INCLUDE_DIR ENV METIS_DIR
+    PATH_SUFFIXES include)
+  find_library(METIS_LIBRARIES NAMES metis
+    HINTS ENV METIS_LIB_DIR ENV METIS_DIR
+    PATH_SUFFIXES lib lib64 lib/x86_64-linux-gnu)
+  if (METIS_INCLUDE_DIRS AND METIS_LIBRARIES)
+    set(METIS_FOUND TRUE)
+  endif ()
+endif ()
+
 include(third_party/mcpd3/cmake/McpdCapacity.cmake)
 mcpd_configure_capacity(mcpd3_capacity_config
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mcpd3)
@@ -62,6 +77,23 @@ target_include_directories(mcpd4_partitioned_hi_pr PUBLIC
 target_link_libraries(mcpd4_partitioned_hi_pr PUBLIC
   mcpd3_capacity_config)
 
+add_executable(mcpd4_partitioned_hi_pr_benchmark
+  src/partitioned_hi_pr_benchmark_main.cpp
+  third_party/mcpd3/maxflow/graph.cpp
+  third_party/mcpd3/maxflow/maxflow.cpp)
+target_include_directories(mcpd4_partitioned_hi_pr_benchmark PRIVATE
+  third_party/mcpd3)
+target_link_libraries(mcpd4_partitioned_hi_pr_benchmark PRIVATE
+  mcpd4_partitioned_hi_pr)
+if (METIS_FOUND)
+  target_compile_definitions(mcpd4_partitioned_hi_pr_benchmark PRIVATE
+    HAVE_METIS=1)
+  target_include_directories(mcpd4_partitioned_hi_pr_benchmark PRIVATE
+    ${METIS_INCLUDE_DIRS})
+  target_link_libraries(mcpd4_partitioned_hi_pr_benchmark PRIVATE
+    ${METIS_LIBRARIES})
+endif ()
+
 add_executable(mcpd4_worker
   src/worker_main.cpp)
 target_link_libraries(mcpd4_worker PRIVATE
@@ -94,6 +126,10 @@ if (BUILD_TESTING)
     mcpd4_partitioned_hi_pr)
   add_test(NAME partitioned_hi_pr_test
     COMMAND partitioned_hi_pr_test)
+  add_test(NAME partitioned_hi_pr_benchmark_smoke
+    COMMAND mcpd4_partitioned_hi_pr_benchmark
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/hand_bottleneck.max
+      --directed --partitions 2 --partitioner basic --repeats 1 --validate)
 
   add_executable(distributed_partition_worker_smoke_test
     tests/partition_worker_smoke_test.cpp

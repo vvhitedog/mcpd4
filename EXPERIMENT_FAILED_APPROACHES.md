@@ -9,3 +9,8 @@
   copyright notice states that commercial use requires a license. This branch
   uses the algorithm and data-layout ideas as an experimental basis and keeps
   the provenance explicit.
+- Periodic full-graph relabeling at the original `hi_pr`-style work factors is
+  not a good default for the partition protocol. On the 805,800-node Waterloo
+  bunny graph, factors 0.5, 1, 2, and 4 all lost to waiting until local work
+  blocked. The full residual BFS cost outweighed the saved local relabels. The
+  option remains available for graph-specific experiments.

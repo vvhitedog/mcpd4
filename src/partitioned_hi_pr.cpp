@@ -2,9 +2,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <queue>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -29,7 +29,8 @@ public:
       : node_count_(node_count), source_(source), sink_(sink),
         input_arcs_(input_arcs), partitions_(partition_of_node),
         options_(options), nodes_(node_count), height_count_(node_count + 1),
-        active_heads_(node_count, -1), coordinator_heads_(node_count, -1),
+        active_heads_(node_count, -1), level_heads_(node_count, -1),
+        coordinator_heads_(node_count, -1),
         coordinator_next_(node_count, -1),
         coordinator_queued_(node_count, false), bfs_queue_(node_count) {
     validateInput();
@@ -81,7 +82,10 @@ private:
     mcpd3::Objective excess = 0;
     int height = 0;
     int next_active = -1;
+    int next_at_level = -1;
+    int previous_at_level = -1;
     bool in_active_bucket = false;
+    bool in_level_bucket = false;
     bool boundary = false;
   };
 
@@ -103,6 +107,11 @@ private:
     }
     if (options_.max_coordination_rounds == 0) {
       throw std::invalid_argument("maximum coordination rounds must be positive");
+    }
+    if (!std::isfinite(options_.global_relabel_work_factor) ||
+        options_.global_relabel_work_factor < 0) {
+      throw std::invalid_argument(
+          "global relabel work factor must be finite and nonnegative");
     }
     for (const auto &arc : input_arcs_) {
       if (arc.tail < 0 || arc.tail >= node_count_ || arc.head < 0 ||
@@ -144,7 +153,10 @@ private:
     }
 
     arcs_.resize(residual_arc_count);
-    pair_capacity_.resize(residual_arc_count);
+    stats_.residual_arc_count = residual_arc_count;
+    if (options_.validate_invariants) {
+      pair_capacity_.resize(residual_arc_count);
+    }
     std::vector<std::size_t> cursor(node_count_);
     for (int node = 0; node < node_count_; ++node) {
       cursor[node] = nodes_[node].first;
@@ -159,13 +171,20 @@ private:
       const bool boundary = isBoundaryArc(input);
       arcs_[forward] = {input.head, reverse, input.capacity, boundary};
       arcs_[reverse] = {input.tail, forward, 0, boundary};
-      pair_capacity_[forward] = input.capacity;
-      pair_capacity_[reverse] = input.capacity;
+      if (options_.validate_invariants) {
+        pair_capacity_[forward] = input.capacity;
+        pair_capacity_[reverse] = input.capacity;
+      }
       if (boundary) {
+        ++stats_.boundary_directed_arc_count;
         nodes_[input.tail].boundary = true;
         nodes_[input.head].boundary = true;
       }
     }
+    stats_.boundary_node_count = static_cast<std::size_t>(std::count_if(
+        nodes_.begin(), nodes_.end(), [](const Node &node) {
+          return node.boundary;
+        }));
   }
 
   void initializePreflow() {
@@ -174,7 +193,10 @@ private:
       node.height = 0;
       node.current = node.first;
       node.next_active = -1;
+      node.next_at_level = -1;
+      node.previous_at_level = -1;
       node.in_active_bucket = false;
+      node.in_level_bucket = false;
     }
     nodes_[source_].height = node_count_;
 
@@ -202,11 +224,16 @@ private:
     const auto start = Clock::now();
     ++stats_.global_relabels;
     std::fill(height_count_.begin(), height_count_.end(), 0);
+    std::fill(level_heads_.begin(), level_heads_.end(), -1);
+    maximum_finite_height_ = 0;
     for (auto &node : nodes_) {
       node.height = node_count_;
       node.current = node.first;
       node.in_active_bucket = false;
       node.next_active = -1;
+      node.next_at_level = -1;
+      node.previous_at_level = -1;
+      node.in_level_bucket = false;
     }
 
     std::size_t head = 0;
@@ -231,10 +258,11 @@ private:
     nodes_[source_].height = node_count_;
     for (int node = 0; node < node_count_; ++node) {
       if (nodes_[node].height < node_count_) {
-        ++height_count_[nodes_[node].height];
+        addToLevel(node);
       }
     }
     stats_.global_relabel_wall_us += elapsedUs(start);
+    local_work_since_global_relabel_ = 0;
     if (options_.validate_invariants) {
       validateLabels("global relabel");
     }
@@ -370,20 +398,60 @@ private:
     return -1;
   }
 
+  void addToLevel(int node) {
+    const int height = nodes_[node].height;
+    if (height < 0 || height >= node_count_ || nodes_[node].in_level_bucket) {
+      throw std::logic_error("invalid insertion into height bucket");
+    }
+    const int old_head = level_heads_[height];
+    nodes_[node].previous_at_level = -1;
+    nodes_[node].next_at_level = old_head;
+    if (old_head != -1) {
+      nodes_[old_head].previous_at_level = node;
+    }
+    level_heads_[height] = node;
+    nodes_[node].in_level_bucket = true;
+    ++height_count_[height];
+    maximum_finite_height_ = std::max(maximum_finite_height_, height);
+  }
+
+  void removeFromLevel(int node) {
+    if (!nodes_[node].in_level_bucket) {
+      throw std::logic_error("node is missing from its height bucket");
+    }
+    const int height = nodes_[node].height;
+    const int previous = nodes_[node].previous_at_level;
+    const int next = nodes_[node].next_at_level;
+    if (previous == -1) {
+      level_heads_[height] = next;
+    } else {
+      nodes_[previous].next_at_level = next;
+    }
+    if (next != -1) {
+      nodes_[next].previous_at_level = previous;
+    }
+    nodes_[node].previous_at_level = -1;
+    nodes_[node].next_at_level = -1;
+    nodes_[node].in_level_bucket = false;
+    --height_count_[height];
+  }
+
   void applyGap(int empty_height) {
     ++stats_.gap_events;
-    for (int node = 0; node < node_count_; ++node) {
-      if (nodes_[node].height <= empty_height ||
-          nodes_[node].height >= node_count_) {
-        continue;
+    for (int height = empty_height + 1;
+         height <= maximum_finite_height_; ++height) {
+      active_heads_[height] = -1;
+      while (level_heads_[height] != -1) {
+        const int node = level_heads_[height];
+        removeFromLevel(node);
+        nodes_[node].height = node_count_;
+        nodes_[node].current = nodes_[node].first;
+        nodes_[node].in_active_bucket = false;
+        nodes_[node].next_active = -1;
+        ++stats_.retired_by_gap;
       }
-      --height_count_[nodes_[node].height];
-      nodes_[node].height = node_count_;
-      nodes_[node].current = nodes_[node].first;
-      nodes_[node].in_active_bucket = false;
-      nodes_[node].next_active = -1;
-      ++stats_.retired_by_gap;
     }
+    maximum_finite_height_ = empty_height - 1;
   }
 
   void notifyBoundaryNeighbors(int node) {
@@ -403,6 +471,8 @@ private:
     for (std::size_t index = nodes_[node].first;
          index < nodes_[node].end; ++index) {
       const auto &arc = arcs_[index];
+      ++stats_.local_arc_scans;
+      ++local_work_since_global_relabel_;
       if (arc.boundary || arc.residual <= 0 ||
           nodes_[arc.head].height >= minimum_height) {
         continue;
@@ -411,16 +481,17 @@ private:
       minimum_arc = index;
     }
 
-    --height_count_[old_height];
+    removeFromLevel(node);
     const int new_height = minimum_height < node_count_
                                ? minimum_height + 1
                                : node_count_;
     nodes_[node].height = new_height;
     nodes_[node].current = minimum_arc;
     if (new_height < node_count_) {
-      ++height_count_[new_height];
+      addToLevel(node);
     }
     ++stats_.local_relabels;
+    local_work_since_global_relabel_ += 12;
 
     if (old_height > 0 && height_count_[old_height] == 0) {
       applyGap(old_height);
@@ -436,6 +507,8 @@ private:
       std::size_t index = nodes_[tail].current;
       for (; index < nodes_[tail].end && nodes_[tail].excess > 0; ++index) {
         const auto &arc = arcs_[index];
+        ++stats_.local_arc_scans;
+        ++local_work_since_global_relabel_;
         if (arc.boundary || arc.residual <= 0 ||
             nodes_[arc.head].height != target_height) {
           continue;
@@ -477,12 +550,28 @@ private:
         break;
       }
       dischargeLocal(node);
+      if (globalRelabelWorkLimitReached()) {
+        ++stats_.work_global_relabel_interruptions;
+        break;
+      }
     }
     stats_.local_discharge_wall_us += elapsedUs(start);
     if (options_.validate_invariants) {
       validatePreflow("local discharge");
       validateLabels("local discharge");
     }
+  }
+
+  bool globalRelabelWorkLimitReached() const {
+    if (options_.global_relabel_work_factor == 0) {
+      return false;
+    }
+    const long double base =
+        6.0L * static_cast<long double>(node_count_) +
+        static_cast<long double>(input_arcs_.size());
+    const long double limit =
+        static_cast<long double>(options_.global_relabel_work_factor) * base;
+    return static_cast<long double>(local_work_since_global_relabel_) > limit;
   }
 
   bool hasFiniteActiveVertex() const {
@@ -537,6 +626,38 @@ private:
         }
       }
     }
+
+    std::vector<int> observed_count(node_count_, 0);
+    std::vector<bool> observed_node(node_count_, false);
+    for (int height = 0; height < node_count_; ++height) {
+      int previous = -1;
+      int traversed = 0;
+      for (int node = level_heads_[height]; node != -1;
+           node = nodes_[node].next_at_level) {
+        if (++traversed > node_count_ || node < 0 || node >= node_count_ ||
+            observed_node[node] || !nodes_[node].in_level_bucket ||
+            nodes_[node].height != height ||
+            nodes_[node].previous_at_level != previous) {
+          throw std::logic_error(std::string(stage) +
+                                 ": corrupt height bucket");
+        }
+        observed_node[node] = true;
+        ++observed_count[height];
+        previous = node;
+      }
+      if (observed_count[height] != height_count_[height]) {
+        throw std::logic_error(std::string(stage) +
+                               ": height bucket count mismatch");
+      }
+    }
+    for (int node = 0; node < node_count_; ++node) {
+      const bool should_be_bucketed = nodes_[node].height < node_count_;
+      if (observed_node[node] != should_be_bucketed ||
+          nodes_[node].in_level_bucket != should_be_bucketed) {
+        throw std::logic_error(std::string(stage) +
+                               ": node height-bucket membership mismatch");
+      }
+    }
   }
 
   PartitionedHiPrResult makeResult(bool converged) const {
@@ -579,7 +700,10 @@ private:
   std::vector<mcpd3::Capacity> pair_capacity_;
   std::vector<int> height_count_;
   std::vector<int> active_heads_;
+  std::vector<int> level_heads_;
   int maximum_active_height_ = -1;
+  int maximum_finite_height_ = 0;
+  std::size_t local_work_since_global_relabel_ = 0;
   std::vector<int> coordinator_heads_;
   std::vector<int> coordinator_next_;
   std::vector<bool> coordinator_queued_;
