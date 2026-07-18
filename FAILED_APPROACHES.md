@@ -1,5 +1,18 @@
 # Failed Approaches And Taboos
 
+## 2026-07-17
+
+- Do not allow persistent disagreement at an exhausted unit scale to return as
+  ordinary schedule exhaustion. Both native DD and the package/coordinator path
+  must promote while promotion headroom remains; only an explicit promotion,
+  iteration, numeric, or time limit may end that recovery attempt.
+- Do not reuse the configured scale-level count unchanged after objective
+  promotion. Recompute enough levels from the promoted initial step to include
+  scale 1, especially when objective scale and alpha step differ.
+- Do not assume an mcpd4 checkout inherits an mcpd3 scheduler correction. Its
+  pinned submodule revision must be advanced and the TCP/process suite rebuilt
+  against that exact revision.
+
 ## 2026-07-12
 
 - A fresh Debug/ASan+UBSan build of the monolithic mcpd3

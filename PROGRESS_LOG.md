@@ -1,5 +1,16 @@
 # Progress Log
 
+## 2026-07-17 18:46 PDT - Promoted schedule parity
+
+- Advanced the pinned mcpd3 dependency with the final-unit-scale promotion
+  invariant used by native DD: package/coordinator solves now promote on
+  exhausted unit-scale disagreement and recompute enough schedule levels to
+  return to unit scale after every promotion.
+- This removes the previous transport-path divergence where mcpd4 could stop
+  or restart above unit scale while the corrected local solver continued.
+- The complete five-test suite passes in the default, 64-bit, 128-bit, and GMP
+  builds after the submodule update.
+
 ## 2026-07-13 22:00 PDT - Widened DD state transport
 
 - Advanced mcpd3 to keep compact source capacities and arc residuals while
