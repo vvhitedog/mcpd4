@@ -164,6 +164,11 @@ struct WorkerRuntimeStatusHooks {
       on_partitions_unloaded;
   std::function<void(long round_id, const std::vector<int> &partition_ids)>
       on_solve_start;
+  std::function<void(long round_id, int partition_id)>
+      on_partition_solve_start;
+  std::function<void(long round_id, int partition_id,
+                     std::uint64_t elapsed_us)>
+      on_partition_solve_done;
   std::function<void(std::uint64_t elapsed_us, long partition_solve_count,
                      bool batch)>
       on_solve_done;
@@ -177,6 +182,7 @@ struct WorkerRuntimeOptions {
   std::string streaming_directory;
   std::uint64_t streaming_resident_bytes = 0;
   mcpd3::SolverStorageOptions solver_storage;
+  std::size_t max_active_partition_solves = 0;
 };
 
 void runWorkerClient(const std::string &host, std::uint16_t port,

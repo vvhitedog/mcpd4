@@ -11,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <sys/socket.h>
@@ -93,10 +94,12 @@ public:
                      mcpd4::HelloMessage hello,
                      mcpd4::TransportCompression compression =
                          mcpd4::TransportCompression::NONE,
-                     mcpd4::WorkerRuntimeOptions runtime_options = {})
-      : thread_([this, port, hello, compression, runtime_options] {
+                     mcpd4::WorkerRuntimeOptions runtime_options = {},
+                     mcpd4::WorkerRuntimeStatusHooks status_hooks = {})
+      : thread_([this, port, hello, compression, runtime_options,
+                 status_hooks] {
           try {
-            mcpd4::runWorkerClient("127.0.0.1", port, hello, {},
+            mcpd4::runWorkerClient("127.0.0.1", port, hello, status_hooks,
                                    compression, runtime_options);
           } catch (...) {
             exception_ = std::current_exception();
@@ -191,14 +194,16 @@ std::unique_ptr<mcpd4::TcpPartitionWorker> startRemoteWorker(
     const std::string &worker_name,
     mcpd4::TransportCompression compression =
         mcpd4::TransportCompression::NONE,
-    mcpd4::WorkerRuntimeOptions runtime_options = {}) {
+    mcpd4::WorkerRuntimeOptions runtime_options = {},
+    mcpd4::WorkerRuntimeStatusHooks status_hooks = {}) {
   const auto port = mcpd4::localPort(*listener);
   auto hello = makeHello(worker_name);
   if (compression == mcpd4::TransportCompression::SNAPPY) {
     hello.feature_bits |= mcpd4::kFeatureSnappyCompression;
   }
   *client = new WorkerClientThread(port, hello, compression,
-                                   std::move(runtime_options));
+                                   std::move(runtime_options),
+                                   std::move(status_hooks));
   return mcpd4::acceptTcpPartitionWorker(listener, 2s, compression);
 }
 
@@ -1284,6 +1289,62 @@ void remoteWorkerSolvesExplicitBatch() {
   }
 }
 
+void remoteWorkerCyclesAConcurrencyLimitedBatch() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  mcpd4::WorkerRuntimeOptions runtime_options;
+  runtime_options.max_active_partition_solves = 1;
+
+  std::mutex event_mutex;
+  std::vector<std::string> events;
+  mcpd4::WorkerRuntimeStatusHooks hooks;
+  hooks.on_partition_solve_start =
+      [&](long round_id, int partition_id) {
+        std::lock_guard<std::mutex> lock(event_mutex);
+        events.push_back("start:" + std::to_string(round_id) + ":" +
+                         std::to_string(partition_id));
+      };
+  hooks.on_partition_solve_done =
+      [&](long round_id, int partition_id, std::uint64_t elapsed_us) {
+        (void)elapsed_us;
+        std::lock_guard<std::mutex> lock(event_mutex);
+        events.push_back("done:" + std::to_string(round_id) + ":" +
+                         std::to_string(partition_id));
+      };
+
+  auto worker = startRemoteWorker(
+      &listener, &client, "bounded-batch-worker",
+      mcpd4::TransportCompression::NONE, runtime_options, hooks);
+  try {
+    for (const auto &package : makeTieBreakRegularizationPackages()) {
+      worker->loadPartition(package);
+    }
+
+    mcpd3::PartitionSolveRequest first;
+    first.round_id = 9;
+    first.partition_id = 0;
+    first.scale = 100;
+    mcpd3::PartitionSolveRequest second = first;
+    second.partition_id = 1;
+
+    const auto results = worker->solveRoundBatch({first, second});
+    require(results.size() == 2 && results[0].partition_id == 0 &&
+                results[1].partition_id == 1,
+            "bounded batch must preserve result order");
+    {
+      std::lock_guard<std::mutex> lock(event_mutex);
+      require(events ==
+                  std::vector<std::string>({"start:9:0", "done:9:0",
+                                            "start:9:1", "done:9:1"}),
+              "one active solve must expose each sequential handoff");
+    }
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
 void remoteWorkerDeltaEncodingReducesRepeatedSolveBytes() {
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
@@ -1732,6 +1793,7 @@ int main() {
     remoteWorkerSolvesConfiguredPrecisionExtreme();
     remoteWorkerSaturatesScaleObjectiveOverflow();
     remoteWorkerSolvesExplicitBatch();
+    remoteWorkerCyclesAConcurrencyLimitedBatch();
     remoteWorkerDeltaEncodingReducesRepeatedSolveBytes();
     remoteWorkerUsesSnappyCompression();
     remoteWorkerStreamsLargeFinalLabelsIntoMappedStorage();

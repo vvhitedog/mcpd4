@@ -556,6 +556,7 @@ usage: mcpd4_worker HOST PORT [--name NAME]
        [--rpc-compression none|snappy]
        [--streaming-partitions] [--streaming-dir DIR]
        [--streaming-cache-bytes N]
+       [--max-active-partition-solves N]
        [--bk-storage malloc|file_mmap|anon_mmap]
        [--bk-mmap-dir DIR] [--bk-mmap-advise ADVISE]
 ```
@@ -579,6 +580,12 @@ usage: mcpd4_worker HOST PORT [--name NAME]
 - `--streaming-dir DIR`: compatibility alias for `--bk-mmap-dir DIR`.
 - `--streaming-cache-bytes N`: deprecated and ignored; live mapped state is
   paged by the operating system.
+- `--max-active-partition-solves N`: cap the number of partition maxflows
+  active on this physical worker during one batched DD round. The default is
+  unlimited and preserves fully parallel execution. Use `1` when several
+  large file-backed partitions share one disk/page cache: all warm solver
+  state remains mapped, but the worker cycles through its assigned partitions
+  sequentially.
 - `--name NAME`: optional worker name used in logs and progress output.
 - `--bk-storage MODE`: choose backing for the complete local solver state,
   including topology, capacities, primal-dual flow, labels, and BK residual
@@ -649,8 +656,10 @@ timing summary.
 Worker status includes its phase, CPU/RAM, temp path, coordinator endpoint,
 worker storage mode, streaming directory/cache settings, BK storage/mmap
 settings, loaded partition ids, current partition-load fields, current
-round/partition ids, solve counts, batch RPC count, worker solve wall time, RPC
-byte/wire counters, compression timing, and last error.
+round/partition ids, the active-solve limit, active and completed partition
+ids for the current batch, the last partition solve time, solve counts, batch
+RPC count, worker solve wall time, RPC byte/wire counters, compression timing,
+and last error.
 
 Example post-mortem query:
 

@@ -2431,3 +2431,17 @@
   same file-backed policy as residual nodes, arcs, flow, and labels, while
   retaining lazy allocation for resident one-shot BK.
 - MCPD3 passes 2/2 tests, MCPD4 passes 8/8, and Phase passes 58/58.
+
+## 2026-07-21 03:17 PDT - Bounded active partition solves
+
+- Added worker option `--max-active-partition-solves N`. A worker still keeps
+  every assigned solver and its exact warm state, but executes batched
+  partition maxflows in bounded waves. `N=1` provides disk/cache-friendly
+  sequential cycling without changing the DD algorithm or RPC batching.
+- Worker status now reports the configured limit, active and completed
+  partition IDs in the current batch, the last completed partition, and its
+  elapsed time. Worker stderr also emits explicit per-partition start and
+  completion handoffs.
+- A TCP regression proves a two-partition batch with limit one executes in the
+  exact order start-0, complete-0, start-1, complete-1 while preserving result
+  order. The process test covers CLI plumbing and status output.

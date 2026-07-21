@@ -1087,6 +1087,8 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
                            std::to_string(worker_status_port),
                            "--status-token",
                            status_token,
+                           "--max-active-partition-solves",
+                           "1",
                            "--name",
                            "discovered-worker"});
 
@@ -1230,6 +1232,14 @@ void discoveryModeAcceptsDiscoveredWorkersAndClose(
     require(worker_status_output.find("bk_mmap_advise -") !=
                 std::string::npos,
             "worker should not apply BK mmap advice unless requested\n" +
+                worker_status_output);
+    require(worker_status_output.find(
+                "max_active_partition_solves 1") != std::string::npos,
+            "worker status should report its active partition limit\n" +
+                worker_status_output);
+    require(worker_status_output.find("active_partition_ids -") !=
+                std::string::npos,
+            "idle worker status should report no active partition solve\n" +
                 worker_status_output);
 
     auto close = spawnProcess({discovery_bin,

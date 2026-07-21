@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <exception>
+#include <future>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -312,6 +313,61 @@ std::uint64_t elapsedUs(std::chrono::steady_clock::time_point start) {
       std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start)
           .count());
+}
+
+std::vector<mcpd3::PartitionSolveResult> solveBoundedPartitionBatch(
+    mcpd3::PartitionWorker *worker,
+    const std::vector<mcpd3::PartitionSolveRequest> &requests,
+    std::size_t max_active_partition_solves,
+    const WorkerRuntimeStatusHooks &status_hooks) {
+  if (max_active_partition_solves == 0) {
+    return worker->solveRoundBatch(requests);
+  }
+
+  std::unordered_set<int> partition_ids;
+  for (const auto &request : requests) {
+    if (!partition_ids.insert(request.partition_id).second) {
+      throw std::runtime_error(
+          "batch solve requests must target distinct partitions");
+    }
+  }
+
+  std::vector<mcpd3::PartitionSolveResult> results(requests.size());
+  const std::size_t active_limit =
+      std::min(max_active_partition_solves, requests.size());
+  for (std::size_t wave_begin = 0; wave_begin < requests.size();
+       wave_begin += active_limit) {
+    const std::size_t wave_end =
+        std::min(requests.size(), wave_begin + active_limit);
+    auto solve_one = [&](std::size_t index) {
+      const auto &request = requests[index];
+      if (status_hooks.on_partition_solve_start) {
+        status_hooks.on_partition_solve_start(request.round_id,
+                                              request.partition_id);
+      }
+      const auto start = std::chrono::steady_clock::now();
+      results[index] = worker->solveRound(request);
+      if (status_hooks.on_partition_solve_done) {
+        status_hooks.on_partition_solve_done(
+            request.round_id, request.partition_id, elapsedUs(start));
+      }
+    };
+
+    if (wave_end - wave_begin == 1) {
+      solve_one(wave_begin);
+      continue;
+    }
+    std::vector<std::future<void>> futures;
+    futures.reserve(wave_end - wave_begin);
+    for (std::size_t index = wave_begin; index < wave_end; ++index) {
+      futures.push_back(
+          std::async(std::launch::async, [&, index] { solve_one(index); }));
+    }
+    for (auto &future : futures) {
+      future.get();
+    }
+  }
+  return results;
 }
 
 std::size_t checkedSizeT(std::uint64_t value, const char *name) {
@@ -1096,9 +1152,17 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
             status_hooks.on_solve_start(request.round_id,
                                         {request.partition_id});
           }
+          if (status_hooks.on_partition_solve_start) {
+            status_hooks.on_partition_solve_start(request.round_id,
+                                                  request.partition_id);
+          }
           const auto start = std::chrono::steady_clock::now();
           const auto result = worker->solveRound(request);
           const auto elapsed = elapsedUs(start);
+          if (status_hooks.on_partition_solve_done) {
+            status_hooks.on_partition_solve_done(
+                request.round_id, request.partition_id, elapsed);
+          }
           if (status_hooks.on_solve_done) {
             status_hooks.on_solve_done(elapsed, 1, false);
           }
@@ -1128,7 +1192,9 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
             status_hooks.on_solve_start(round_id, partition_ids);
           }
           const auto start = std::chrono::steady_clock::now();
-          const auto results = worker->solveRoundBatch(requests);
+          const auto results = solveBoundedPartitionBatch(
+              worker.get(), requests,
+              runtime_options.max_active_partition_solves, status_hooks);
           const auto elapsed = elapsedUs(start);
           if (status_hooks.on_solve_done) {
             status_hooks.on_solve_done(

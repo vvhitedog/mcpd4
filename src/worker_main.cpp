@@ -57,6 +57,7 @@ void usage(const char *argv0) {
       << "       [--rpc-compression none|snappy]\n"
       << "       [--streaming-partitions] [--streaming-dir DIR]\n"
       << "       [--streaming-cache-bytes N]\n"
+      << "       [--max-active-partition-solves N]\n"
       << "       [--bk-storage malloc|file_mmap|anon_mmap]\n"
       << "       [--bk-mmap-dir DIR] [--bk-mmap-advise ADVISE]\n";
 }
@@ -240,6 +241,7 @@ struct WorkerStatusState {
   std::string worker_storage_mode = "memory";
   std::string streaming_dir = "-";
   std::uint64_t streaming_cache_bytes = 0;
+  std::size_t max_active_partition_solves = 0;
   std::string bk_storage = "malloc";
   std::string bk_mmap_dir = "-";
   std::string bk_mmap_advise = "-";
@@ -254,6 +256,10 @@ struct WorkerStatusState {
   int last_loaded_partition_id = -1;
   long current_round_id = 0;
   std::vector<int> current_partition_ids;
+  std::vector<int> active_partition_ids;
+  std::vector<int> completed_partition_ids;
+  int last_completed_partition_id = -1;
+  std::uint64_t last_partition_solve_wall_us = 0;
   long partition_solve_call_count_total = 0;
   long solve_batch_rpc_count_total = 0;
   std::uint64_t worker_solve_wall_us = 0;
@@ -290,6 +296,11 @@ struct WorkerStatusState {
     worker_storage_mode = mode;
     streaming_dir = directory.empty() ? "-" : directory;
     streaming_cache_bytes = cache_bytes;
+  }
+
+  void setMaxActivePartitionSolves(std::size_t value) {
+    std::lock_guard<std::mutex> lock(mutex);
+    max_active_partition_solves = value;
   }
 
   void setBkStorage(const std::string &storage, const std::string &mmap_dir,
@@ -346,6 +357,29 @@ struct WorkerStatusState {
     phase = ids.size() > 1 ? "solving_batch" : "solving_round";
     current_round_id = round_id;
     current_partition_ids = ids;
+    active_partition_ids.clear();
+    completed_partition_ids.clear();
+  }
+
+  void recordPartitionSolveStart(long round_id, int partition_id) {
+    std::lock_guard<std::mutex> lock(mutex);
+    phase = current_partition_ids.size() > 1 ? "solving_batch"
+                                             : "solving_round";
+    current_round_id = round_id;
+    active_partition_ids.push_back(partition_id);
+  }
+
+  void recordPartitionSolveDone(long round_id, int partition_id,
+                                std::uint64_t elapsed_us) {
+    std::lock_guard<std::mutex> lock(mutex);
+    current_round_id = round_id;
+    active_partition_ids.erase(
+        std::remove(active_partition_ids.begin(), active_partition_ids.end(),
+                    partition_id),
+        active_partition_ids.end());
+    completed_partition_ids.push_back(partition_id);
+    last_completed_partition_id = partition_id;
+    last_partition_solve_wall_us = elapsed_us;
   }
 
   void recordSolveDone(std::uint64_t elapsed_us, long partition_count,
@@ -495,6 +529,8 @@ struct WorkerStatusState {
         << " worker_storage_mode " << worker_storage_mode
         << " streaming_dir " << statusValue(streaming_dir)
         << " streaming_cache_bytes " << streaming_cache_bytes
+        << " max_active_partition_solves "
+        << max_active_partition_solves
         << " bk_storage " << statusValue(bk_storage)
         << " bk_mmap_dir " << statusValue(bk_mmap_dir)
         << " bk_mmap_advise " << statusValue(bk_mmap_advise)
@@ -512,6 +548,12 @@ struct WorkerStatusState {
         << " last_loaded_partition_id " << last_loaded_partition_id
         << " current_round_id " << current_round_id
         << " current_partition_ids " << joinInts(current_partition_ids)
+        << " active_partition_ids " << joinInts(active_partition_ids)
+        << " completed_partition_ids "
+        << joinInts(completed_partition_ids)
+        << " last_completed_partition_id " << last_completed_partition_id
+        << " last_partition_solve_wall_us "
+        << last_partition_solve_wall_us
         << " partition_solve_call_count_total "
         << partition_solve_call_count_total
         << " solve_batch_rpc_count_total " << solve_batch_rpc_count_total
@@ -584,6 +626,7 @@ int main(int argc, char **argv) {
     bool streaming_partitions = false;
     std::string streaming_dir;
     std::uint64_t streaming_cache_bytes = 0;
+    std::size_t max_active_partition_solves = 0;
     std::string bk_storage;
     std::string bk_mmap_dir;
     std::string bk_mmap_advise;
@@ -628,6 +671,14 @@ int main(int argc, char **argv) {
       } else if (arg == "--streaming-cache-bytes" && i + 1 < argc) {
         streaming_cache_bytes =
             parsePositiveU64(argv[++i], "--streaming-cache-bytes");
+      } else if (arg == "--max-active-partition-solves" && i + 1 < argc) {
+        const auto parsed =
+            parsePositiveU64(argv[++i], "--max-active-partition-solves");
+        if (parsed > std::numeric_limits<std::size_t>::max()) {
+          throw std::runtime_error(
+              "--max-active-partition-solves is outside size_t range");
+        }
+        max_active_partition_solves = static_cast<std::size_t>(parsed);
       } else if (arg == "--bk-storage" && i + 1 < argc) {
         bk_storage = argv[++i];
       } else if (arg == "--bk-mmap-dir" && i + 1 < argc) {
@@ -695,6 +746,7 @@ int main(int argc, char **argv) {
     status_state.setStorageMode(
         effectiveBkStorageMode() == "file_mmap" ? "file_mmap" : "resident",
         envValue("MCPD3_BK_MMAP_DIR"), 0);
+    status_state.setMaxActivePartitionSolves(max_active_partition_solves);
     status_state.setBkStorage(effectiveBkStorageMode(),
                               envValue("MCPD3_BK_MMAP_DIR"),
                               envValue("MCPD3_BK_MMAP_ADVISE"));
@@ -753,6 +805,21 @@ int main(int argc, char **argv) {
         [&status_state](long round_id, const std::vector<int> &partition_ids) {
           status_state.recordSolveStart(round_id, partition_ids);
         };
+    hooks.on_partition_solve_start =
+        [&status_state](long round_id, int partition_id) {
+          status_state.recordPartitionSolveStart(round_id, partition_id);
+          std::cerr << "mcpd4_worker_partition_solve_started round_id "
+                    << round_id << " partition_id " << partition_id << "\n";
+        };
+    hooks.on_partition_solve_done =
+        [&status_state](long round_id, int partition_id,
+                        std::uint64_t elapsed_us) {
+          status_state.recordPartitionSolveDone(round_id, partition_id,
+                                                elapsed_us);
+          std::cerr << "mcpd4_worker_partition_solve_completed round_id "
+                    << round_id << " partition_id " << partition_id
+                    << " solve_elapsed_us " << elapsed_us << "\n";
+        };
     hooks.on_solve_done = [&status_state](std::uint64_t elapsed_us,
                                           long partition_solve_count,
                                           bool batch) {
@@ -772,6 +839,8 @@ int main(int argc, char **argv) {
     runtime_options.streaming_partitions = streaming_partitions;
     runtime_options.streaming_directory = envValue("MCPD3_BK_MMAP_DIR");
     runtime_options.streaming_resident_bytes = streaming_cache_bytes;
+    runtime_options.max_active_partition_solves =
+        max_active_partition_solves;
     const std::string solver_storage_mode = effectiveBkStorageMode();
     if (solver_storage_mode == "file_mmap") {
       runtime_options.solver_storage.mode =
