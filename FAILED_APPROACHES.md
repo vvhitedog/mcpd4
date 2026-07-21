@@ -667,3 +667,11 @@
   unknown partition then leaves earlier partitions scaled even though the RPC
   reports failure, corrupting persistent workspace state.
 - Resolve and validate the complete partition selection first, then mutate it.
+
+## 2026-07-21 - Copy capacity payloads to rewrite workspace IDs
+
+- Do not copy `PartitionCapacityUpdate` merely to substitute a remote
+  partition ID. `SolverArray` copies are deep, so this recreates the exact
+  partition-sized resident/mapped transfer the out-of-core path removes.
+- Carry the target partition ID separately through the worker and multipart
+  encoders; preserve the original capacity backing unchanged.

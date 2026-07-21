@@ -2352,7 +2352,7 @@
   and Snappy modes and verifies that a 2:1 warm-flow scale doubles the exact
   lower bound.
 
-## 2026-07-21 02:17 PDT - Workspace-safe objective promotion
+## 2026-07-21 00:36 PDT - Workspace-safe objective promotion
 
 - Advanced the wire protocol to version 14 so objective-scale promotion may
   name the exact partitions owned by one coordinator workspace. An empty ID
@@ -2364,3 +2364,18 @@
   exposed and fixed partial mutation when an invalid ID followed a valid ID.
 - MCPD3 passes 2/2 CTest targets. MCPD4 protocol and TCP loopback tests pass;
   the complete MCPD4 suite is run again after committing the upstream unit.
+
+## 2026-07-21 00:36 PDT - Persistent worker namespaces
+
+- Added a serialized shared-worker connection that gives each coordinator an
+  isolated local partition-ID namespace while retaining one physical worker
+  and its persistent solver objects.
+- Namespace-global and scoped promotion affect only owned remote partitions.
+  Solve results and bounded labels translate back to local IDs, while capacity
+  refresh remaps only the target ID and streams the original mapped arrays.
+- Dedicated and live-TCP regressions load local partition `0` in two
+  workspaces on one worker, then prove scale and warm-flow refresh operations
+  leave the other workspace unchanged. Invalid local IDs and duplicates are
+  covered.
+- MCPD3 passes 2/2 tests; the focused MCPD4 protocol, namespace, and TCP tests
+  pass 3/3.

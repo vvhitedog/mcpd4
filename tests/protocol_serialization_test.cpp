@@ -1163,6 +1163,16 @@ void roundTripsMappedMultipartPartitionCapacityUpdate() {
   const auto decoded_header =
       mcpd4::decodePartitionCapacityUpdateTransferBegin(
           mcpd4::encodePartitionCapacityUpdateTransferBegin(header));
+  const auto remapped_chunk =
+      mcpd4::decodePartitionCapacityUpdateTransferChunk(
+          mcpd4::encodePartitionCapacityUpdateTransferChunkFor(
+              /*target_partition_id=*/29, update,
+              mcpd4::PartitionCapacityUpdateSection::ARC_CAPACITIES,
+              /*offset=*/0, /*count=*/1));
+  require(remapped_chunk.partition_id == 29 &&
+              remapped_chunk.values ==
+                  std::vector<mcpd3::Capacity>{update.arc_capacities[0]},
+          "remapped capacity chunk must change only its target ID");
 
   const auto scratch =
       std::filesystem::temp_directory_path() /

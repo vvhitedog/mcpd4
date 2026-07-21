@@ -1262,6 +1262,15 @@ std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferChunk(
     const mcpd3::PartitionCapacityUpdate &message,
     PartitionCapacityUpdateSection section, std::uint64_t offset,
     std::size_t count) {
+  return encodePartitionCapacityUpdateTransferChunkFor(
+      message.partition_id, message, section, offset, count);
+}
+
+std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferChunkFor(
+    int target_partition_id,
+    const mcpd3::PartitionCapacityUpdate &message,
+    PartitionCapacityUpdateSection section, std::uint64_t offset,
+    std::size_t count) {
   const auto header = makePartitionCapacityUpdateTransferHeader(message);
   const auto section_index = partitionCapacityUpdateSectionIndex(section);
   const auto total = header.section_counts[section_index];
@@ -1269,7 +1278,7 @@ std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferChunk(
           "partition capacity update chunk is outside its section");
   const auto begin = checkedContainerSize(offset);
   Writer writer;
-  writer.writeI32(message.partition_id);
+  writer.writeI32(target_partition_id);
   writer.writeU32(static_cast<std::uint32_t>(section));
   writer.writeU64(offset);
   writer.writeU32(checkedSize(count));

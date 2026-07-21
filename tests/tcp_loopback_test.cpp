@@ -1,4 +1,5 @@
 #include <mcpd4/runtime.h>
+#include <mcpd4/shared_partition_worker.h>
 #include <mcpd4/tcp.h>
 
 #include <chrono>
@@ -784,6 +785,80 @@ void remoteWorkerScopesObjectiveScalingToSelectedPartitions() {
     stopAndJoin(worker.get(), client);
   } catch (...) {
     stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
+void remoteWorkerNamespacesPersistentWorkspaceState() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto remote = startRemoteWorker(&listener, &client, "namespace-worker");
+  auto *remote_ptr = remote.get();
+  auto connection =
+      std::make_shared<mcpd4::SharedPartitionWorkerConnection>(
+          std::move(remote));
+  auto first = connection->makeNamespace();
+  auto second = connection->makeNamespace();
+  try {
+    auto make_package = [](mcpd3::Capacity edge_capacity,
+                           int first_global_node) {
+      mcpd3::PartitionPackage package;
+      package.partition_id = 0;
+      package.local_node_count = 2;
+      package.arcs = {0, 1};
+      package.arc_capacities = {edge_capacity, 0};
+      package.terminal_capacities = {9, -9};
+      package.local_to_global = {first_global_node,
+                                 first_global_node + 100};
+      return package;
+    };
+    first->loadPartition(make_package(3, 9));
+    second->loadPartition(make_package(5, 10));
+
+    auto solve_namespace = [](mcpd3::PartitionWorker *worker,
+                              long round_id) {
+      mcpd3::PartitionSolveRequest request;
+      request.round_id = round_id;
+      request.partition_id = 0;
+      return worker->solveRound(request);
+    };
+    const auto first_before = solve_namespace(first.get(), 1);
+    const auto second_before = solve_namespace(second.get(), 1);
+    first->scaleObjective(2);
+    const auto first_scaled = solve_namespace(first.get(), 2);
+    const auto second_unscaled = solve_namespace(second.get(), 2);
+    require(first_scaled.lower_bound == first_before.lower_bound * 2,
+            "TCP namespace scale should affect its own remote partition");
+    require(second_unscaled.lower_bound == second_before.lower_bound,
+            "TCP namespace scale must preserve the other workspace");
+
+    mcpd3::PartitionCapacityUpdate update;
+    update.partition_id = 0;
+    update.arc_capacities = {12, 0};
+    update.terminal_capacities = {36, -36};
+    update.preserve_flow_state = true;
+    update.flow_scale_numerator = 2;
+    update.flow_scale_denominator = 1;
+    first->replacePartitionCapacities(update);
+    const auto first_refreshed = solve_namespace(first.get(), 3);
+    const auto second_preserved = solve_namespace(second.get(), 3);
+    require(first_refreshed.lower_bound == first_scaled.lower_bound * 2,
+            "TCP remapped capacity refresh should preserve scaled warm flow");
+    require(second_preserved.lower_bound == second_before.lower_bound,
+            "TCP remapped capacity refresh must preserve other workspaces");
+
+    remote_ptr->stop(/*reason=*/0, "namespace test complete");
+    client->joinAndRethrow();
+    delete client;
+    client = nullptr;
+  } catch (...) {
+    if (remote_ptr != nullptr) {
+      remote_ptr->stop(/*reason=*/1, "namespace test failed");
+    }
+    if (client != nullptr) {
+      client->joinAndRethrow();
+      delete client;
+    }
     throw;
   }
 }
@@ -1595,6 +1670,7 @@ int main() {
     loadPartitionDisconnectReportsWorkerAndPartitionContext();
     remoteWorkerScalesLoadedObjective();
     remoteWorkerScopesObjectiveScalingToSelectedPartitions();
+    remoteWorkerNamespacesPersistentWorkspaceState();
     remoteWorkerReplacesCapacitiesAndPreservesWarmState();
     remoteWorkerFileBacksCompleteSolverState();
     legacyStreamingAliasUsesPersistentFileBackedWorker();

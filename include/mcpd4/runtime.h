@@ -112,6 +112,9 @@ public:
       bool saturate_capacity_overflow = false) override;
   void replacePartitionCapacities(
       const mcpd3::PartitionCapacityUpdate &update) override;
+  void replacePartitionCapacitiesFor(
+      int target_partition_id,
+      const mcpd3::PartitionCapacityUpdate &update) override;
   void copyFullLabels(int partition_id, std::size_t offset,
                       mcpd3::NodeLabel *destination,
                       std::size_t count) override;
@@ -133,6 +136,9 @@ public:
   TcpPartitionWorkerStatusSnapshot statusSnapshot() const;
 
 private:
+  void replacePartitionCapacitiesImpl(
+      int target_partition_id,
+      const mcpd3::PartitionCapacityUpdate &update);
   SocketHandle socket_;
   HelloMessage hello_;
   TransportCompression compression_ = TransportCompression::NONE;

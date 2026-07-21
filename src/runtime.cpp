@@ -531,6 +531,18 @@ void TcpPartitionWorker::scaleObjectivePartitions(
 
 void TcpPartitionWorker::replacePartitionCapacities(
     const mcpd3::PartitionCapacityUpdate &update) {
+  replacePartitionCapacitiesImpl(update.partition_id, update);
+}
+
+void TcpPartitionWorker::replacePartitionCapacitiesFor(
+    int target_partition_id,
+    const mcpd3::PartitionCapacityUpdate &update) {
+  replacePartitionCapacitiesImpl(target_partition_id, update);
+}
+
+void TcpPartitionWorker::replacePartitionCapacitiesImpl(
+    int target_partition_id,
+    const mcpd3::PartitionCapacityUpdate &update) {
   const auto start = std::chrono::steady_clock::now();
   auto send_update_frame = [&](MessageType type,
                                const std::vector<std::uint8_t> &frame) {
@@ -538,7 +550,8 @@ void TcpPartitionWorker::replacePartitionCapacities(
     sendFrameBytes(socket_, frame, compression_, &transfer);
     recordFrameSent(&timing_stats_.rpc_bytes, type, transfer);
   };
-  const auto header = makePartitionCapacityUpdateTransferHeader(update);
+  auto header = makePartitionCapacityUpdateTransferHeader(update);
+  header.partition_id = target_partition_id;
   send_update_frame(
       MessageType::PARTITION_CAPACITY_UPDATE_BEGIN,
       encodePartitionCapacityUpdateTransferBegin(header));
@@ -553,17 +566,17 @@ void TcpPartitionWorker::replacePartitionCapacities(
           kPartitionCapacityChunkElements, total - offset));
       send_update_frame(
           MessageType::PARTITION_CAPACITY_UPDATE_CHUNK,
-          encodePartitionCapacityUpdateTransferChunk(update, section, offset,
-                                                     count));
+          encodePartitionCapacityUpdateTransferChunkFor(
+              target_partition_id, update, section, offset, count));
       offset += count;
     }
   }
   send_update_frame(
       MessageType::PARTITION_CAPACITY_UPDATE_END,
       encodePartitionCapacityUpdateTransferEnd(
-          PartitionCapacityUpdateTransferEnd{update.partition_id}));
+          PartitionCapacityUpdateTransferEnd{target_partition_id}));
   (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes, compression_);
-  temporal_state_.resetPartition(update.partition_id);
+  temporal_state_.resetPartition(target_partition_id);
   timing_stats_.capacity_update_rpc_wall_us += elapsedUs(start);
   ++timing_stats_.capacity_update_rpc_count;
 }

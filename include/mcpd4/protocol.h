@@ -337,6 +337,11 @@ std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferChunk(
     const mcpd3::PartitionCapacityUpdate &message,
     PartitionCapacityUpdateSection section, std::uint64_t offset,
     std::size_t count);
+std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferChunkFor(
+    int target_partition_id,
+    const mcpd3::PartitionCapacityUpdate &message,
+    PartitionCapacityUpdateSection section, std::uint64_t offset,
+    std::size_t count);
 PartitionCapacityUpdateTransferChunk decodePartitionCapacityUpdateTransferChunk(
     const std::vector<std::uint8_t> &frame);
 std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferEnd(
