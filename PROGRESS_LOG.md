@@ -2445,3 +2445,18 @@
 - A TCP regression proves a two-partition batch with limit one executes in the
   exact order start-0, complete-0, start-1, complete-1 while preserving result
   order. The process test covers CLI plumbing and status output.
+
+## 2026-07-21 16:31 PDT - Certified two-machine 100M-node PU execution
+
+- Completed a 10,000x10,000 weighted raster PU solve using four persistent,
+  file-backed partitions on three physical TCP workers across two machines.
+  The two local workers each solved one partition; the larger remote worker
+  solved two partitions concurrently. Snappy transport and static assignment
+  remained active for the full PU sequence without reconnecting workers.
+- Exact refinement certified objective `33,258,907` with `warm_optimal=1` after
+  8 PU cuts, 2,086 DD rounds, and 3 objective-scale promotions. The last
+  regularization warning (`59,546 >= 50,000`) was the trigger for the final
+  promotion, not the final certificate state.
+- End-to-end process wall time was 6:40:50. The coordinator peaked at 6,230,084
+  KiB RSS with zero swap; both local workers remained within their 7 GiB
+  no-swap cgroups, and coordinator shutdown released all worker processes.

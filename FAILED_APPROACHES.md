@@ -675,3 +675,15 @@
   partition-sized resident/mapped transfer the out-of-core path removes.
 - Carry the target partition ID separately through the worker and multipart
   encoders; preserve the original capacity backing unchanged.
+
+## 2026-07-21 - Inferring certificate proximity from worker status
+
+- Do not infer that a long, cheap DD tail is close to the zero-move upper bound
+  from worker round IDs or local maxflow times. Those observations describe
+  activity but do not expose the coordinator's normalized lower bound.
+- The embedded coordinator status currently omits lower bound, zero-move upper
+  bound, certified gap, and disagreement count. Add those fields before using
+  live status for certificate ETA; until then only the completed solver report
+  can establish `warm_optimal=1`.
+- Worker `last_error=scale_factor_10` is also stale/misclassified telemetry for
+  a successful promotion event and must not be interpreted as a live failure.
