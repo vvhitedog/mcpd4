@@ -2424,3 +2424,10 @@
   resident staging allocations from MCPD3-N/Phase file-backed execution.
 - MCPD3 passes 2/2 tests and the complete Phase integration suite passes
   58/58 with this dependency.
+
+## 2026-07-21 01:21 PDT - File-backed BK marker dependency
+
+- Advanced MCPD3 to place BK's edge-sized changed-arc marker array under the
+  same file-backed policy as residual nodes, arcs, flow, and labels, while
+  retaining lazy allocation for resident one-shot BK.
+- MCPD3 passes 2/2 tests, MCPD4 passes 8/8, and Phase passes 58/58.
