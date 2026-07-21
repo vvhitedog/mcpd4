@@ -789,6 +789,53 @@ void remoteWorkerScopesObjectiveScalingToSelectedPartitions() {
   }
 }
 
+void remoteWorkerUnloadsSelectedPartitionsAtomically() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(&listener, &client, "unload-worker");
+  try {
+    for (int partition_id = 0; partition_id < 2; ++partition_id) {
+      mcpd3::PartitionPackage package;
+      package.partition_id = partition_id;
+      package.local_node_count = 1;
+      package.terminal_capacities = {-7 - partition_id};
+      worker->loadPartition(package);
+    }
+    requireThrowsContaining(
+        [&] { worker->unloadPartitions({}); }, "at least one partition id",
+        "remote unload should reject an empty selection locally");
+    requireThrowsContaining(
+        [&] { worker->unloadPartitions({0, 0}); },
+        "duplicate partition unload id",
+        "remote unload should reject duplicate partition IDs");
+    requireThrowsContaining(
+        [&] { worker->unloadPartitions({0, 99}); },
+        "unknown partition id",
+        "remote unload should reject a partly unknown selection");
+
+    mcpd3::PartitionSolveRequest request;
+    request.partition_id = 0;
+    (void)worker->solveRound(request);
+    request.partition_id = 1;
+    const auto retained = worker->solveRound(request);
+    worker->unloadPartitions({0});
+    require(worker->statusSnapshot().partition_ids == std::vector<int>({1}),
+            "remote unload must remove the partition from status");
+    request.partition_id = 0;
+    requireThrowsContaining(
+        [&] { (void)worker->solveRound(request); },
+        "unknown solve request partition id",
+        "remote unloaded partition must become unknown");
+    request.partition_id = 1;
+    require(worker->solveRound(request).lower_bound == retained.lower_bound,
+            "remote unload must preserve an unselected partition");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
 void remoteWorkerNamespacesPersistentWorkspaceState() {
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
@@ -1670,6 +1717,7 @@ int main() {
     loadPartitionDisconnectReportsWorkerAndPartitionContext();
     remoteWorkerScalesLoadedObjective();
     remoteWorkerScopesObjectiveScalingToSelectedPartitions();
+    remoteWorkerUnloadsSelectedPartitionsAtomically();
     remoteWorkerNamespacesPersistentWorkspaceState();
     remoteWorkerReplacesCapacitiesAndPreservesWarmState();
     remoteWorkerFileBacksCompleteSolverState();

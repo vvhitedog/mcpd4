@@ -14,7 +14,7 @@
 
 namespace mcpd4 {
 
-constexpr std::uint32_t kProtocolVersion = 14;
+constexpr std::uint32_t kProtocolVersion = 15;
 constexpr std::uint64_t kFeatureSnappyCompression = 1ULL << 0;
 
 struct RpcByteStats {
@@ -100,6 +100,7 @@ public:
                          TransportCompression::NONE);
 
   void loadPartition(const mcpd3::PartitionPackage &package) override;
+  void unloadPartitions(const std::vector<int> &partition_ids) override;
   mcpd3::PartitionWorkerResourceEstimate resourceEstimate() const override;
   mcpd3::PartitionSolveResult solveRound(
       const mcpd3::PartitionSolveRequest &request) override;
@@ -159,6 +160,8 @@ struct WorkerRuntimeStatusHooks {
                      std::uint64_t logical_frame_bytes)>
       on_partition_loading;
   std::function<void(int partition_id)> on_partition_loaded;
+  std::function<void(const std::vector<int> &partition_ids)>
+      on_partitions_unloaded;
   std::function<void(long round_id, const std::vector<int> &partition_ids)>
       on_solve_start;
   std::function<void(std::uint64_t elapsed_us, long partition_solve_count,

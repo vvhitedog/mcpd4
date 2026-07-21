@@ -63,6 +63,7 @@ enum class MessageType : std::uint32_t {
   PARTITION_CAPACITY_UPDATE_BEGIN = 31,
   PARTITION_CAPACITY_UPDATE_CHUNK = 32,
   PARTITION_CAPACITY_UPDATE_END = 33,
+  UNLOAD_PARTITIONS = 34,
 };
 
 enum class PartitionPackageSection : std::uint32_t {
@@ -206,6 +207,10 @@ struct ScaleObjectiveMessage {
   std::vector<int> partition_ids;
   std::int64_t factor = 1;
   bool saturate_capacity_overflow = false;
+};
+
+struct UnloadPartitionsMessage {
+  std::vector<int> partition_ids;
 };
 
 struct AlphaUpdateMessage {
@@ -383,6 +388,11 @@ TimedSolveRoundBatchResult decodeTimedSolveRoundBatchResult(
 std::vector<std::uint8_t> encodeScaleObjective(
     const ScaleObjectiveMessage &message);
 ScaleObjectiveMessage decodeScaleObjective(
+    const std::vector<std::uint8_t> &frame);
+
+std::vector<std::uint8_t> encodeUnloadPartitions(
+    const UnloadPartitionsMessage &message);
+UnloadPartitionsMessage decodeUnloadPartitions(
     const std::vector<std::uint8_t> &frame);
 
 std::vector<std::uint8_t> encodePartitionCapacityUpdate(

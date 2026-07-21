@@ -2,6 +2,7 @@
 #include <mcpd4/runtime.h>
 #include <mcpd4/status.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cctype>
@@ -330,6 +331,16 @@ struct WorkerStatusState {
     current_load_constraint_endpoint_count = 0;
   }
 
+  void recordPartitionsUnloaded(const std::vector<int> &ids) {
+    std::lock_guard<std::mutex> lock(mutex);
+    for (const int id : ids) {
+      partition_ids.erase(
+          std::remove(partition_ids.begin(), partition_ids.end(), id),
+          partition_ids.end());
+    }
+    loaded_partition_count = static_cast<long>(partition_ids.size());
+  }
+
   void recordSolveStart(long round_id, const std::vector<int> &ids) {
     std::lock_guard<std::mutex> lock(mutex);
     phase = ids.size() > 1 ? "solving_batch" : "solving_round";
@@ -402,6 +413,7 @@ struct WorkerStatusState {
     case mcpd4::MessageType::STOP:
     case mcpd4::MessageType::SOLVE_ROUND_BATCH_REQUEST:
     case mcpd4::MessageType::FULL_LABELS_REQUEST:
+    case mcpd4::MessageType::UNLOAD_PARTITIONS:
       break;
     }
   }
@@ -437,6 +449,8 @@ struct WorkerStatusState {
       break;
     case mcpd4::MessageType::SCALE_OBJECTIVE:
       rpc_bytes.scale_objective_rx_bytes += bytes;
+      break;
+    case mcpd4::MessageType::UNLOAD_PARTITIONS:
       break;
     case mcpd4::MessageType::REPLACE_PARTITION_CAPACITIES:
     case mcpd4::MessageType::PARTITION_CAPACITY_UPDATE_BEGIN:
@@ -731,6 +745,10 @@ int main(int argc, char **argv) {
     hooks.on_partition_loaded = [&status_state](int partition_id) {
       status_state.recordPartitionLoaded(partition_id);
     };
+    hooks.on_partitions_unloaded =
+        [&status_state](const std::vector<int> &partition_ids) {
+          status_state.recordPartitionsUnloaded(partition_ids);
+        };
     hooks.on_solve_start =
         [&status_state](long round_id, const std::vector<int> &partition_ids) {
           status_state.recordSolveStart(round_id, partition_ids);

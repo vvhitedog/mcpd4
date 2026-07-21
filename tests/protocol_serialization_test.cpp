@@ -1125,6 +1125,21 @@ void roundTripsScaleObjective() {
           "empty scale objective partition ids should round-trip");
 }
 
+void roundTripsUnloadPartitions() {
+  mcpd4::UnloadPartitionsMessage message;
+  message.partition_ids = {3, 7};
+  const auto decoded = mcpd4::decodeUnloadPartitions(
+      mcpd4::encodeUnloadPartitions(message));
+  require(decoded.partition_ids == message.partition_ids,
+          "unload partition ids mismatch");
+
+  message.partition_ids.clear();
+  const auto empty = mcpd4::decodeUnloadPartitions(
+      mcpd4::encodeUnloadPartitions(message));
+  require(empty.partition_ids.empty(),
+          "empty unload partition ids should round-trip for validation");
+}
+
 void roundTripsPartitionCapacityUpdate() {
   mcpd3::PartitionCapacityUpdate update;
   update.partition_id = 17;
@@ -1539,6 +1554,7 @@ int main() {
     deltaSolveRoundResultReconstructsFullLabels();
     deltaSolveRoundBatchResultShrinksRepeatedLabels();
     roundTripsScaleObjective();
+    roundTripsUnloadPartitions();
     roundTripsPartitionCapacityUpdate();
     roundTripsMappedMultipartPartitionCapacityUpdate();
     rejectsMalformedMultipartPartitionCapacityUpdates();

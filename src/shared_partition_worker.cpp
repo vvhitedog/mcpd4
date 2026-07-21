@@ -32,6 +32,17 @@ public:
       std::shared_ptr<SharedPartitionWorkerConnection::State> state)
       : state_(std::move(state)) {}
 
+  ~NamespacePartitionWorker() override {
+    if (local_to_remote_.empty()) {
+      return;
+    }
+    try {
+      std::lock_guard<std::mutex> lock(state_->mutex);
+      state_->worker->unloadPartitions(remotePartitionIds());
+    } catch (...) {
+    }
+  }
+
   mcpd3::PartitionWorkerResourceEstimate resourceEstimate() const override {
     std::lock_guard<std::mutex> lock(state_->mutex);
     return state_->worker->resourceEstimate();
@@ -59,6 +70,29 @@ public:
     state_->worker->loadPartition(std::move(package));
     local_to_remote_.emplace(local_id, remote_id);
     remote_to_local_.emplace(remote_id, local_id);
+  }
+
+  void unloadPartitions(const std::vector<int> &partition_ids) override {
+    if (partition_ids.empty()) {
+      throw std::runtime_error(
+          "partition unload requires at least one partition id");
+    }
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    std::unordered_set<int> seen;
+    std::vector<int> remote_ids;
+    remote_ids.reserve(partition_ids.size());
+    for (const int local_id : partition_ids) {
+      if (!seen.insert(local_id).second) {
+        throw std::runtime_error("duplicate partition unload id " +
+                                 std::to_string(local_id));
+      }
+      remote_ids.push_back(remoteId(local_id));
+    }
+    state_->worker->unloadPartitions(remote_ids);
+    for (std::size_t index = 0; index < partition_ids.size(); ++index) {
+      local_to_remote_.erase(partition_ids[index]);
+      remote_to_local_.erase(remote_ids[index]);
+    }
   }
 
   mcpd3::PartitionSolveResult solveRound(
@@ -152,6 +186,16 @@ public:
   }
 
 private:
+  std::vector<int> remotePartitionIds() const {
+    std::vector<int> remote_ids;
+    remote_ids.reserve(local_to_remote_.size());
+    for (const auto &[local_id, remote_id] : local_to_remote_) {
+      (void)local_id;
+      remote_ids.push_back(remote_id);
+    }
+    return remote_ids;
+  }
+
   int remoteId(int local_id) const {
     const auto found = local_to_remote_.find(local_id);
     if (found == local_to_remote_.end()) {

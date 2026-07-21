@@ -2402,3 +2402,17 @@
   cleanly. Configuration validation covers invalid worker counts and timeouts.
 - The complete MCPD4 suite passes 8/8, including protocol, namespace, remote
   pool, TCP loopback, and process-level integration tests.
+## 2026-07-21 01:10 PDT - Remote workspace reclamation
+
+- Advanced the worker protocol to version 15 with a bounded control message
+  for atomically releasing selected persistent partitions.
+- TCP workers now remove released IDs from temporal delta state and status
+  snapshots. Worker-runtime status also reflects the live partition set.
+- Shared workspace proxies translate explicit release requests and
+  automatically release every remaining remote partition when a coordinator
+  workspace is destroyed. This prevents repeated PU solver construction from
+  accumulating complete obsolete graph and BK states on long-lived workers.
+- Tests cover protocol round trips, empty/duplicate/unknown selections,
+  preservation of unselected state, explicit local-ID reuse, automatic
+  destructor cleanup, direct TCP release, and status ownership. MCPD4 passes
+  8/8 and the Phase integration passes 58/58.

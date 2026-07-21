@@ -1,5 +1,6 @@
 #include <mcpd4/shared_partition_worker.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -49,6 +50,37 @@ mcpd3::PartitionSolveResult solve(mcpd3::PartitionWorker *worker,
   request.partition_id = 0;
   return worker->solveRound(request);
 }
+
+struct RecordingWorkerState {
+  std::vector<std::vector<int>> unloads;
+};
+
+class RecordingPartitionWorker final : public mcpd3::PartitionWorker {
+public:
+  explicit RecordingPartitionWorker(
+      std::shared_ptr<RecordingWorkerState> state)
+      : state_(std::move(state)) {}
+
+  void loadPartition(const mcpd3::PartitionPackage &package) override {
+    worker_.loadPartition(package);
+  }
+  void unloadPartitions(const std::vector<int> &partition_ids) override {
+    worker_.unloadPartitions(partition_ids);
+    state_->unloads.push_back(partition_ids);
+  }
+  mcpd3::PartitionSolveResult solveRound(
+      const mcpd3::PartitionSolveRequest &request) override {
+    return worker_.solveRound(request);
+  }
+  void scaleObjective(long factor,
+                      bool saturate_capacity_overflow = false) override {
+    worker_.scaleObjective(factor, saturate_capacity_overflow);
+  }
+
+private:
+  std::shared_ptr<RecordingWorkerState> state_;
+  mcpd3::InProcessPartitionWorker worker_;
+};
 
 void namespacesIsolateIdenticalLocalPartitionIds() {
   auto physical = std::make_unique<mcpd3::InProcessPartitionWorker>();
@@ -140,6 +172,52 @@ void namespaceRejectsInvalidLocalOperations() {
           "namespace must forward the physical worker resource estimate");
 }
 
+void namespaceExplicitlyAndAutomaticallyReleasesRemotePartitions() {
+  auto state = std::make_shared<RecordingWorkerState>();
+  auto connection =
+      std::make_shared<mcpd4::SharedPartitionWorkerConnection>(
+          std::make_unique<RecordingPartitionWorker>(state));
+  {
+    auto worker = connection->makeNamespace();
+    worker->loadPartition(makePackage(3, 9));
+    auto second_package = makePackage(5, 10);
+    second_package.partition_id = 1;
+    worker->loadPartition(second_package);
+
+    requireThrowsContaining(
+        [&] { worker->unloadPartitions({}); }, "at least one partition id",
+        "namespace must reject an empty unload selection");
+    requireThrowsContaining(
+        [&] { worker->unloadPartitions({0, 0}); },
+        "duplicate partition unload id",
+        "namespace must reject duplicate unload partition IDs");
+    requireThrowsContaining(
+        [&] { worker->unloadPartitions({0, 99}); },
+        "unknown namespace partition id",
+        "namespace must validate every unload ID before releasing any");
+    require(state->unloads.empty(),
+            "invalid namespace unload must not reach the physical worker");
+
+    worker->unloadPartitions({0});
+    require(state->unloads == std::vector<std::vector<int>>{{0}},
+            "explicit namespace unload must translate the remote ID");
+    requireThrowsContaining(
+        [&] { (void)solve(worker.get(), 1); },
+        "unknown namespace partition id",
+        "explicitly unloaded local ID must become unknown");
+    worker->loadPartition(makePackage(7, 11));
+    require(solve(worker.get(), 2).lower_bound != 0,
+            "an explicitly released local ID must be reusable");
+  }
+
+  require(state->unloads.size() == 2,
+          "namespace destruction must release all remaining partitions");
+  auto destructor_ids = state->unloads.back();
+  std::sort(destructor_ids.begin(), destructor_ids.end());
+  require(destructor_ids == std::vector<int>({1, 2}),
+          "namespace destruction must release exactly its remote IDs");
+}
+
 void poolCreatesOneNamespacePerPhysicalWorker() {
   mcpd4::SharedPartitionWorkerPool pool;
   requireThrowsContaining(
@@ -161,6 +239,7 @@ int main() {
   try {
     namespacesIsolateIdenticalLocalPartitionIds();
     namespaceRejectsInvalidLocalOperations();
+    namespaceExplicitlyAndAutomaticallyReleasesRemotePartitions();
     poolCreatesOneNamespacePerPhysicalWorker();
   } catch (const std::exception &error) {
     std::cerr << "shared_partition_worker_test failed: " << error.what()

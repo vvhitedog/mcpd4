@@ -12,6 +12,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <unistd.h>
 
 namespace mcpd4 {
@@ -107,6 +108,8 @@ void recordFrameSent(RpcByteStats *stats, MessageType type,
   case MessageType::SCALE_OBJECTIVE:
     stats->scale_objective_tx_bytes += bytes;
     break;
+  case MessageType::UNLOAD_PARTITIONS:
+    break;
   case MessageType::REPLACE_PARTITION_CAPACITIES:
   case MessageType::PARTITION_CAPACITY_UPDATE_BEGIN:
   case MessageType::PARTITION_CAPACITY_UPDATE_CHUNK:
@@ -187,6 +190,8 @@ void recordFrameReceived(RpcByteStats *stats, MessageType type,
     break;
   case MessageType::SCALE_OBJECTIVE:
     stats->scale_objective_rx_bytes += bytes;
+    break;
+  case MessageType::UNLOAD_PARTITIONS:
     break;
   case MessageType::REPLACE_PARTITION_CAPACITIES:
   case MessageType::PARTITION_CAPACITY_UPDATE_BEGIN:
@@ -405,6 +410,40 @@ void TcpPartitionWorker::loadPartition(
             << " frame_logical_bytes " << frame_logical_bytes
             << "): " << e.what();
     throw std::runtime_error(message.str());
+  }
+}
+
+void TcpPartitionWorker::unloadPartitions(
+    const std::vector<int> &partition_ids) {
+  if (partition_ids.empty()) {
+    throw std::runtime_error(
+        "partition unload requires at least one partition id");
+  }
+  std::unordered_set<int> seen;
+  for (const int partition_id : partition_ids) {
+    if (!seen.insert(partition_id).second) {
+      throw std::runtime_error("duplicate partition unload id " +
+                               std::to_string(partition_id));
+    }
+    if (std::find(partition_ids_.begin(), partition_ids_.end(), partition_id) ==
+        partition_ids_.end()) {
+      throw std::runtime_error("unknown partition id " +
+                               std::to_string(partition_id));
+    }
+  }
+
+  const auto frame = encodeUnloadPartitions(
+      UnloadPartitionsMessage{partition_ids});
+  FrameTransferStats transfer;
+  sendFrameBytes(socket_, frame, compression_, &transfer);
+  recordFrameSent(&timing_stats_.rpc_bytes,
+                  MessageType::UNLOAD_PARTITIONS, transfer);
+  (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes, compression_);
+  for (const int partition_id : partition_ids) {
+    temporal_state_.resetPartition(partition_id);
+    partition_ids_.erase(
+        std::remove(partition_ids_.begin(), partition_ids_.end(), partition_id),
+        partition_ids_.end());
   }
 }
 
@@ -1124,6 +1163,26 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
             for (const int partition_id : message.partition_ids) {
               temporal_state.resetPartition(partition_id);
             }
+          }
+          if (status_hooks.on_phase) {
+            status_hooks.on_phase("connected");
+          }
+          const auto transfer =
+              sendReady(socket, hello.worker_name, compression);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::READY, transfer);
+          }
+        }
+        break;
+      case MessageType::UNLOAD_PARTITIONS:
+        {
+          const auto message = decodeUnloadPartitions(frame_bytes);
+          worker->unloadPartitions(message.partition_ids);
+          for (const int partition_id : message.partition_ids) {
+            temporal_state.resetPartition(partition_id);
+          }
+          if (status_hooks.on_partitions_unloaded) {
+            status_hooks.on_partitions_unloaded(message.partition_ids);
           }
           if (status_hooks.on_phase) {
             status_hooks.on_phase("connected");
