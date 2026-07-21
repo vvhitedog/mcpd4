@@ -626,10 +626,11 @@
 ## 2026-07-20 - Treating a file-backed destination as bounded-memory transfer
 
 - Do not count a remote worker as out of core merely because it rehomes a
-  decoded package into mapped solver arrays. The current single-frame protocol
-  still materializes the complete encoded frame and decoded resident package
-  first. Bounded-memory TCP package transfer requires chunked encoding and
-  direct mapped assembly; it is the next transport unit.
+  decoded package into mapped solver arrays. A single-frame protocol still
+  materializes the complete encoded frame and decoded resident package first.
+- Partition loads now use bounded section chunks and direct mapped assembly.
+  Do not regress future large-array messages to whole-frame staging merely
+  because the eventual destination is file-backed.
 
 ## 2026-07-20 - Solver eviction under the streaming name
 

@@ -1,5 +1,7 @@
+#include <chrono>
 #include <cstdlib>
 #include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -312,6 +314,180 @@ void roundTripsPartitionPackage() {
   const auto decoded = mcpd4::decodePartitionPackage(
       mcpd4::encodePartitionPackage(message));
   requirePackageEqual(decoded, message);
+}
+
+void roundTripsMappedMultipartPartitionPackage() {
+  const auto message = makePackage();
+  const auto header = mcpd4::makePartitionPackageTransferHeader(message);
+  const auto decoded_header = mcpd4::decodePartitionPackageTransferBegin(
+      mcpd4::encodePartitionPackageTransferBegin(header));
+  require(decoded_header.partition_id == message.partition_id,
+          "multipart header partition mismatch");
+  require(decoded_header.section_counts == header.section_counts,
+          "multipart header section counts mismatch");
+
+  const auto scratch =
+      std::filesystem::temp_directory_path() /
+      ("mcpd4-multipart-protocol-test-" +
+       std::to_string(std::chrono::steady_clock::now()
+                          .time_since_epoch()
+                          .count()));
+  std::filesystem::create_directories(scratch);
+  mcpd3::SolverStorageOptions storage;
+  storage.mode = mcpd3::SolverStorageMode::FILE_BACKED_MMAP;
+  storage.directory = scratch.string();
+  mcpd4::PartitionPackageAssembler assembler(decoded_header, storage);
+  for (std::size_t section_index = 0;
+       section_index < mcpd4::kPartitionPackageSectionCount;
+       ++section_index) {
+    const auto section =
+        static_cast<mcpd4::PartitionPackageSection>(section_index);
+    const auto count = header.section_counts[section_index];
+    for (std::uint64_t offset = 0; offset < count; ++offset) {
+      auto chunk = mcpd4::decodePartitionPackageTransferChunk(
+          mcpd4::encodePartitionPackageTransferChunk(
+              message, section, offset, /*count=*/1));
+      assembler.append(std::move(chunk));
+    }
+  }
+  require(assembler.complete(), "multipart package should be complete");
+  auto decoded = assembler.finish();
+  requirePackageEqual(decoded, message);
+  require(decoded.arcs.isFileBacked() &&
+              decoded.arc_capacities.isFileBacked() &&
+              decoded.terminal_capacities.isFileBacked() &&
+              decoded.local_to_global.isFileBacked() &&
+              decoded.reference_cut_labels.isFileBacked(),
+          "multipart decoder should assemble arrays directly in mappings");
+  const auto end = mcpd4::decodePartitionPackageTransferEnd(
+      mcpd4::encodePartitionPackageTransferEnd(
+          mcpd4::PartitionPackageTransferEnd{message.partition_id}));
+  require(end.partition_id == message.partition_id,
+          "multipart end partition mismatch");
+  std::filesystem::remove_all(scratch);
+}
+
+void rejectsMalformedMultipartPartitionPackages() {
+  const auto message = makePackage();
+  const auto header = mcpd4::makePartitionPackageTransferHeader(message);
+  mcpd4::PartitionPackageAssembler incomplete(header, {});
+  requireThrows([&] { (void)incomplete.finish(); },
+                "incomplete multipart package should fail");
+
+  mcpd4::PartitionPackageAssembler wrong_id(header, {});
+  auto chunk = mcpd4::decodePartitionPackageTransferChunk(
+      mcpd4::encodePartitionPackageTransferChunk(
+          message, mcpd4::PartitionPackageSection::ARCS, 0, 1));
+  ++chunk.partition_id;
+  requireThrows([&] { wrong_id.append(std::move(chunk)); },
+                "multipart chunk partition mismatch should fail");
+
+  mcpd4::PartitionPackageAssembler wrong_offset(header, {});
+  auto later_chunk = mcpd4::decodePartitionPackageTransferChunk(
+      mcpd4::encodePartitionPackageTransferChunk(
+          message, mcpd4::PartitionPackageSection::ARCS, 1, 1));
+  requireThrows([&] { wrong_offset.append(std::move(later_chunk)); },
+                "out-of-order multipart chunk should fail");
+
+  mcpd4::PartitionPackageAssembler wrong_type(header, {});
+  mcpd4::PartitionPackageTransferChunk typed_wrong;
+  typed_wrong.partition_id = message.partition_id;
+  typed_wrong.section = mcpd4::PartitionPackageSection::ARCS;
+  typed_wrong.capacity_values = {1};
+  requireThrows([&] { wrong_type.append(std::move(typed_wrong)); },
+                "multipart chunk value type mismatch should fail");
+
+  mcpd4::PartitionPackageAssembler empty_chunk_assembler(header, {});
+  mcpd4::PartitionPackageTransferChunk empty_chunk;
+  empty_chunk.partition_id = message.partition_id;
+  empty_chunk.section = mcpd4::PartitionPackageSection::ARCS;
+  requireThrows(
+      [&] { empty_chunk_assembler.append(std::move(empty_chunk)); },
+      "empty multipart chunk should fail");
+
+  requireThrows(
+      [&] {
+        (void)mcpd4::encodePartitionPackageTransferChunk(
+            message, mcpd4::PartitionPackageSection::ARCS,
+            message.arcs.size(), 1);
+      },
+      "multipart chunk outside section should fail");
+
+  auto unknown_section = mcpd4::encodePartitionPackageTransferChunk(
+      message, mcpd4::PartitionPackageSection::ARCS, 0, 1);
+  unknown_section[16] = 99;
+  requireThrows(
+      [&] { mcpd4::decodePartitionPackageTransferChunk(unknown_section); },
+      "unknown multipart section should fail");
+
+  auto truncated_begin = mcpd4::encodePartitionPackageTransferBegin(header);
+  truncated_begin.pop_back();
+  requireThrows(
+      [&] { mcpd4::decodePartitionPackageTransferBegin(truncated_begin); },
+      "truncated multipart begin should fail");
+  auto truncated_chunk = mcpd4::encodePartitionPackageTransferChunk(
+      message, mcpd4::PartitionPackageSection::ARCS, 0, 1);
+  truncated_chunk.pop_back();
+  requireThrows(
+      [&] { mcpd4::decodePartitionPackageTransferChunk(truncated_chunk); },
+      "truncated multipart chunk should fail");
+  auto truncated_end = mcpd4::encodePartitionPackageTransferEnd(
+      mcpd4::PartitionPackageTransferEnd{message.partition_id});
+  truncated_end.pop_back();
+  requireThrows(
+      [&] { mcpd4::decodePartitionPackageTransferEnd(truncated_end); },
+      "truncated multipart end should fail");
+
+  auto invalid_header = header;
+  invalid_header.partition_id = -1;
+  requireThrows(
+      [&] { mcpd4::PartitionPackageAssembler assembler(invalid_header, {}); },
+      "negative multipart partition id should fail");
+  invalid_header = header;
+  invalid_header.local_node_count = -1;
+  requireThrows(
+      [&] { mcpd4::PartitionPackageAssembler assembler(invalid_header, {}); },
+      "negative multipart node count should fail");
+  invalid_header = header;
+  invalid_header.objective_multiplier = 0;
+  requireThrows(
+      [&] { mcpd4::PartitionPackageAssembler assembler(invalid_header, {}); },
+      "non-positive multipart objective multiplier should fail");
+  invalid_header = header;
+  invalid_header.reference_cut_check_interval = 0;
+  requireThrows(
+      [&] { mcpd4::PartitionPackageAssembler assembler(invalid_header, {}); },
+      "non-positive multipart reference interval should fail");
+  invalid_header = header;
+  ++invalid_header.section_counts[static_cast<std::size_t>(
+      mcpd4::PartitionPackageSection::ARCS)];
+  requireThrows(
+      [&] { mcpd4::PartitionPackageAssembler assembler(invalid_header, {}); },
+      "odd multipart arc count should fail");
+  invalid_header = header;
+  --invalid_header.section_counts[static_cast<std::size_t>(
+      mcpd4::PartitionPackageSection::ARC_CAPACITIES)];
+  requireThrows(
+      [&] { mcpd4::PartitionPackageAssembler assembler(invalid_header, {}); },
+      "multipart arc capacity mismatch should fail");
+  invalid_header = header;
+  --invalid_header.section_counts[static_cast<std::size_t>(
+      mcpd4::PartitionPackageSection::TERMINAL_CAPACITIES)];
+  requireThrows(
+      [&] { mcpd4::PartitionPackageAssembler assembler(invalid_header, {}); },
+      "multipart terminal capacity mismatch should fail");
+  invalid_header = header;
+  --invalid_header.section_counts[static_cast<std::size_t>(
+      mcpd4::PartitionPackageSection::LOCAL_TO_GLOBAL)];
+  requireThrows(
+      [&] { mcpd4::PartitionPackageAssembler assembler(invalid_header, {}); },
+      "multipart local-to-global mismatch should fail");
+  invalid_header = header;
+  --invalid_header.section_counts[static_cast<std::size_t>(
+      mcpd4::PartitionPackageSection::REFERENCE_CUT_LABELS)];
+  requireThrows(
+      [&] { mcpd4::PartitionPackageAssembler assembler(invalid_header, {}); },
+      "multipart reference label mismatch should fail");
 }
 
 void roundTripsReady() {
@@ -1111,6 +1287,8 @@ int main() {
     roundTripsConfiguredPrecisionExtremes();
     rejectsNonCanonicalAndOutOfRangeIntegers();
     roundTripsPartitionPackage();
+    roundTripsMappedMultipartPartitionPackage();
+    rejectsMalformedMultipartPartitionPackages();
     roundTripsReady();
     roundTripsSolveRoundRequest();
     roundTripsSolveRoundBatchRequest();

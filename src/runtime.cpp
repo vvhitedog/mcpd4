@@ -6,6 +6,7 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -15,6 +16,8 @@
 
 namespace mcpd4 {
 namespace {
+
+constexpr std::size_t kPartitionPackageChunkElements = 64 * 1024;
 
 bool hostIsLittleEndian() {
   const std::uint16_t value = 1;
@@ -77,7 +80,11 @@ void recordFrameSent(RpcByteStats *stats, MessageType type,
     stats->hello_tx_bytes += bytes;
     break;
   case MessageType::PARTITION_PACKAGE:
+  case MessageType::PARTITION_PACKAGE_BEGIN:
+  case MessageType::PARTITION_PACKAGE_CHUNK:
+  case MessageType::PARTITION_PACKAGE_END:
     stats->partition_load_tx_bytes += bytes;
+    ++stats->partition_load_tx_frame_count;
     break;
   case MessageType::SOLVE_ROUND_REQUEST:
   case MessageType::SOLVE_ROUND_BATCH_REQUEST:
@@ -142,7 +149,11 @@ void recordFrameReceived(RpcByteStats *stats, MessageType type,
     stats->hello_rx_bytes += bytes;
     break;
   case MessageType::PARTITION_PACKAGE:
+  case MessageType::PARTITION_PACKAGE_BEGIN:
+  case MessageType::PARTITION_PACKAGE_CHUNK:
+  case MessageType::PARTITION_PACKAGE_END:
     stats->partition_load_rx_bytes += bytes;
+    ++stats->partition_load_rx_frame_count;
     break;
   case MessageType::SOLVE_ROUND_REQUEST:
   case MessageType::SOLVE_ROUND_BATCH_REQUEST:
@@ -290,17 +301,48 @@ void TcpPartitionWorker::loadPartition(
     const mcpd3::PartitionPackage &package) {
   const auto start = std::chrono::steady_clock::now();
   const auto package_summary = partitionPackageSummary(package);
+  const auto starting_frame_count =
+      timing_stats_.rpc_bytes.partition_load_tx_frame_count;
   std::uint64_t frame_logical_bytes = 0;
-  FrameTransferStats transfer;
+  FrameTransferStats aggregate_transfer;
   try {
-    const auto frame = encodePartitionPackage(package);
-    frame_logical_bytes = static_cast<std::uint64_t>(frame.size());
+    auto send_package_frame = [&](MessageType type,
+                                  const std::vector<std::uint8_t> &frame) {
+      FrameTransferStats transfer;
+      sendFrameBytes(socket_, frame, compression_, &transfer);
+      recordFrameSent(&timing_stats_.rpc_bytes, type, transfer);
+      aggregate_transfer.logical_bytes += transfer.logical_bytes;
+      aggregate_transfer.wire_bytes += transfer.wire_bytes;
+      aggregate_transfer.compression_wall_us +=
+          transfer.compression_wall_us;
+    };
+    const auto header = makePartitionPackageTransferHeader(package);
+    send_package_frame(
+        MessageType::PARTITION_PACKAGE_BEGIN,
+        encodePartitionPackageTransferBegin(header));
+    for (std::size_t section_index = 0;
+         section_index < kPartitionPackageSectionCount; ++section_index) {
+      const auto section =
+          static_cast<PartitionPackageSection>(section_index);
+      const auto total = header.section_counts[section_index];
+      for (std::uint64_t offset = 0; offset < total;) {
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(
+            kPartitionPackageChunkElements, total - offset));
+        send_package_frame(
+            MessageType::PARTITION_PACKAGE_CHUNK,
+            encodePartitionPackageTransferChunk(package, section, offset,
+                                                count));
+        offset += count;
+      }
+    }
+    send_package_frame(
+        MessageType::PARTITION_PACKAGE_END,
+        encodePartitionPackageTransferEnd(
+            PartitionPackageTransferEnd{package.partition_id}));
+    frame_logical_bytes = aggregate_transfer.logical_bytes;
     std::cerr << "mcpd4_load_partition_begin worker "
               << hello_.worker_name << " " << package_summary
               << " frame_logical_bytes " << frame_logical_bytes << "\n";
-    sendFrameBytes(socket_, frame, compression_, &transfer);
-    recordFrameSent(&timing_stats_.rpc_bytes, MessageType::PARTITION_PACKAGE,
-                    transfer);
     (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes,
                               compression_);
     temporal_state_.resetPartition(package.partition_id);
@@ -311,8 +353,12 @@ void TcpPartitionWorker::loadPartition(
     std::cerr << "mcpd4_load_partition_done worker "
               << hello_.worker_name << " partition_id "
               << package.partition_id << " elapsed_us " << elapsed
-              << " frame_logical_bytes " << transfer.logical_bytes
-              << " frame_wire_bytes " << transfer.wire_bytes << "\n";
+              << " frame_logical_bytes " << aggregate_transfer.logical_bytes
+              << " frame_wire_bytes " << aggregate_transfer.wire_bytes
+              << " frame_count "
+              << timing_stats_.rpc_bytes.partition_load_tx_frame_count -
+                     starting_frame_count
+              << "\n";
   } catch (const std::exception &e) {
     std::cerr << "mcpd4_load_partition_failed worker "
               << hello_.worker_name << " " << package_summary
@@ -699,6 +745,34 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
   std::unordered_map<int, LinearStructureMessage> linear_structures;
   std::unordered_map<int, std::unique_ptr<ResidentLinearPartition>>
       linear_partitions;
+  std::optional<PartitionPackageAssembler> package_assembler;
+  std::uint64_t package_transfer_logical_bytes = 0;
+  auto load_complete_package = [&](mcpd3::PartitionPackage package,
+                                   std::uint64_t logical_bytes) {
+    const int partition_id = package.partition_id;
+    if (status_hooks.on_partition_loading) {
+      status_hooks.on_partition_loading(package, logical_bytes);
+    }
+    std::cerr << "mcpd4_worker_load_partition_begin worker "
+              << hello.worker_name << " "
+              << partitionPackageSummary(package)
+              << " frame_logical_bytes " << logical_bytes << "\n";
+    worker->loadPartition(std::move(package));
+    temporal_state.resetPartition(partition_id);
+    if (status_hooks.on_partition_loaded) {
+      status_hooks.on_partition_loaded(partition_id);
+    }
+    if (status_hooks.on_phase) {
+      status_hooks.on_phase("connected");
+    }
+    const auto transfer = sendReady(socket, hello.worker_name, compression);
+    if (status_hooks.on_frame_sent) {
+      status_hooks.on_frame_sent(MessageType::READY, transfer);
+    }
+    std::cerr << "mcpd4_worker_load_partition_done worker "
+              << hello.worker_name << " partition_id "
+              << partition_id << "\n";
+  };
   while (true) {
     try {
       FrameTransferStats receive_transfer;
@@ -709,6 +783,12 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
       if (status_hooks.on_frame_received) {
         status_hooks.on_frame_received(frame.type, receive_transfer);
       }
+      if (package_assembler.has_value() &&
+          frame.type != MessageType::PARTITION_PACKAGE_CHUNK &&
+          frame.type != MessageType::PARTITION_PACKAGE_END) {
+        throw std::runtime_error(
+            "partition package transfer was interrupted");
+      }
       switch (frame.type) {
       case MessageType::PARTITION_PACKAGE:
         {
@@ -716,31 +796,48 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
             status_hooks.on_phase("loading_partition");
           }
           auto package = decodePartitionPackage(frame_bytes);
-          const int partition_id = package.partition_id;
-          if (status_hooks.on_partition_loading) {
-            status_hooks.on_partition_loading(
-                package, static_cast<std::uint64_t>(frame_bytes.size()));
-          }
-          std::cerr << "mcpd4_worker_load_partition_begin worker "
-                    << hello.worker_name << " "
-                    << partitionPackageSummary(package)
-                    << " frame_logical_bytes " << frame_bytes.size() << "\n";
-          worker->loadPartition(std::move(package));
-          temporal_state.resetPartition(partition_id);
-          if (status_hooks.on_partition_loaded) {
-            status_hooks.on_partition_loaded(partition_id);
-          }
+          load_complete_package(
+              std::move(package),
+              static_cast<std::uint64_t>(frame_bytes.size()));
+        }
+        break;
+      case MessageType::PARTITION_PACKAGE_BEGIN:
+        {
           if (status_hooks.on_phase) {
-            status_hooks.on_phase("connected");
+            status_hooks.on_phase("loading_partition");
           }
-          const auto transfer =
-              sendReady(socket, hello.worker_name, compression);
-          if (status_hooks.on_frame_sent) {
-            status_hooks.on_frame_sent(MessageType::READY, transfer);
+          const auto header = decodePartitionPackageTransferBegin(frame_bytes);
+          package_assembler.emplace(header,
+                                    runtime_options.solver_storage);
+          package_transfer_logical_bytes = receive_transfer.logical_bytes;
+        }
+        break;
+      case MessageType::PARTITION_PACKAGE_CHUNK:
+        if (!package_assembler.has_value()) {
+          throw std::runtime_error(
+              "partition package chunk arrived before begin");
+        }
+        package_assembler->append(
+            decodePartitionPackageTransferChunk(frame_bytes));
+        package_transfer_logical_bytes += receive_transfer.logical_bytes;
+        break;
+      case MessageType::PARTITION_PACKAGE_END:
+        {
+          if (!package_assembler.has_value()) {
+            throw std::runtime_error(
+                "partition package end arrived before begin");
           }
-          std::cerr << "mcpd4_worker_load_partition_done worker "
-                    << hello.worker_name << " partition_id "
-                    << partition_id << "\n";
+          const auto end = decodePartitionPackageTransferEnd(frame_bytes);
+          package_transfer_logical_bytes += receive_transfer.logical_bytes;
+          auto package = package_assembler->finish();
+          if (end.partition_id != package.partition_id) {
+            throw std::runtime_error(
+                "partition package end id mismatch");
+          }
+          package_assembler.reset();
+          load_complete_package(std::move(package),
+                                package_transfer_logical_bytes);
+          package_transfer_logical_bytes = 0;
         }
         break;
       case MessageType::SOLVE_ROUND_REQUEST:
@@ -993,6 +1090,8 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
         break;
       }
     } catch (const std::exception &e) {
+      package_assembler.reset();
+      package_transfer_logical_bytes = 0;
       if (status_hooks.on_error) {
         status_hooks.on_error(e.what());
       }

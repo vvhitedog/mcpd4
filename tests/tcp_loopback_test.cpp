@@ -211,6 +211,71 @@ void stopAndJoin(mcpd4::TcpPartitionWorker *worker,
   }
 }
 
+void rawWorkerRejectsMultipartSequence(
+    const std::vector<std::vector<std::uint8_t>> &frames,
+    const std::string &expected_error, const std::string &worker_name) {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread client(mcpd4::localPort(listener), makeHello(worker_name));
+  auto socket = mcpd4::acceptTcp(&listener, 2s);
+  (void)mcpd4::decodeHello(mcpd4::receiveFrameBytes(socket));
+  for (const auto &frame : frames) {
+    mcpd4::sendFrameBytes(socket, frame);
+  }
+  const auto error =
+      mcpd4::decodeError(mcpd4::receiveFrameBytes(socket));
+  require(error.message.find(expected_error) != std::string::npos,
+          "worker multipart error mismatch: " + error.message);
+  mcpd4::sendFrameBytes(
+      socket, mcpd4::encodeStop(mcpd4::StopMessage{0, "test complete"}));
+  client.joinAndRethrow();
+}
+
+void remoteWorkerRejectsMalformedMultipartSequences() {
+  mcpd3::PartitionPackage package;
+  package.partition_id = 9;
+  package.local_node_count = 2;
+  package.arcs = {0, 1};
+  package.arc_capacities = {3, 3};
+  package.terminal_capacities = {5, -5};
+  package.local_to_global = {10, 11};
+  const auto header = mcpd4::makePartitionPackageTransferHeader(package);
+  const auto chunk = mcpd4::encodePartitionPackageTransferChunk(
+      package, mcpd4::PartitionPackageSection::ARCS, 0, 1);
+
+  rawWorkerRejectsMultipartSequence(
+      {chunk}, "chunk arrived before begin", "chunk-before-begin-worker");
+  rawWorkerRejectsMultipartSequence(
+      {mcpd4::encodePartitionPackageTransferEnd(
+          mcpd4::PartitionPackageTransferEnd{package.partition_id})},
+      "end arrived before begin", "end-before-begin-worker");
+
+  mcpd3::PartitionSolveRequest request;
+  request.partition_id = package.partition_id;
+  rawWorkerRejectsMultipartSequence(
+      {mcpd4::encodePartitionPackageTransferBegin(header),
+       mcpd4::encodeSolveRoundRequest(request)},
+      "transfer was interrupted", "interrupted-package-worker");
+
+  std::vector<std::vector<std::uint8_t>> wrong_end_frames;
+  wrong_end_frames.push_back(
+      mcpd4::encodePartitionPackageTransferBegin(header));
+  for (std::size_t section_index = 0;
+       section_index < mcpd4::kPartitionPackageSectionCount;
+       ++section_index) {
+    const auto count = header.section_counts[section_index];
+    if (count == 0) {
+      continue;
+    }
+    wrong_end_frames.push_back(mcpd4::encodePartitionPackageTransferChunk(
+        package, static_cast<mcpd4::PartitionPackageSection>(section_index),
+        0, static_cast<std::size_t>(count)));
+  }
+  wrong_end_frames.push_back(mcpd4::encodePartitionPackageTransferEnd(
+      mcpd4::PartitionPackageTransferEnd{package.partition_id + 1}));
+  rawWorkerRejectsMultipartSequence(
+      wrong_end_frames, "end id mismatch", "wrong-package-end-worker");
+}
+
 void receivesFrameSplitAcrossTcpPackets() {
   auto pair = makeConnectedPair();
   mcpd4::ReadyMessage ready;
@@ -790,6 +855,66 @@ void legacyStreamingAliasUsesPersistentFileBackedWorker() {
   }
 }
 
+void remoteWorkerChunksLargePartitionPayload(
+    mcpd4::TransportCompression compression,
+    const std::string &worker_name) {
+  if (compression == mcpd4::TransportCompression::SNAPPY &&
+      !mcpd4::snappyCompressionAvailable()) {
+    return;
+  }
+  const auto scratch =
+      std::filesystem::temp_directory_path() /
+      ("mcpd4-multipart-worker-test-" +
+       std::to_string(std::chrono::steady_clock::now()
+                          .time_since_epoch()
+                          .count()));
+  std::filesystem::create_directories(scratch);
+  mcpd4::WorkerRuntimeOptions runtime_options;
+  runtime_options.solver_storage.mode =
+      mcpd3::SolverStorageMode::FILE_BACKED_MMAP;
+  runtime_options.solver_storage.directory = scratch.string();
+
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(
+      &listener, &client, worker_name, compression, runtime_options);
+  try {
+    constexpr std::size_t edge_count = 70000;
+    mcpd3::PartitionPackage package;
+    package.partition_id = 0;
+    package.local_node_count = 2;
+    package.arcs.resize(2 * edge_count);
+    package.arc_capacities.resize(2 * edge_count);
+    for (std::size_t edge = 0; edge < edge_count; ++edge) {
+      package.arcs[2 * edge] = 0;
+      package.arcs[2 * edge + 1] = 1;
+      package.arc_capacities[2 * edge] = 1;
+      package.arc_capacities[2 * edge + 1] = 1;
+    }
+    package.terminal_capacities = {1, -1};
+    package.local_to_global = {0, 1};
+    worker->loadPartition(package);
+    require(worker->timingStats().rpc_bytes.partition_load_tx_frame_count >= 10,
+            "large package should use multiple bounded transport chunks");
+    if (compression == mcpd4::TransportCompression::SNAPPY) {
+      require(worker->timingStats().rpc_bytes.tx_compressed_frame_count > 0,
+              "large multipart package should compress individual chunks");
+    }
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = 0;
+    require(worker->solveRound(request).lower_bound == 1,
+            "multipart worker should preserve the exact local problem");
+    stopAndJoin(worker.get(), client);
+    std::filesystem::remove_all(scratch);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    std::filesystem::remove_all(scratch);
+    throw;
+  }
+}
+
 void remoteWorkerSolvesConfiguredPrecisionExtreme() {
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
@@ -1117,6 +1242,12 @@ int main() {
     remoteWorkerReplacesCapacitiesAndPreservesWarmState();
     remoteWorkerFileBacksCompleteSolverState();
     legacyStreamingAliasUsesPersistentFileBackedWorker();
+    remoteWorkerRejectsMalformedMultipartSequences();
+    remoteWorkerChunksLargePartitionPayload(
+        mcpd4::TransportCompression::NONE, "multipart-worker");
+    remoteWorkerChunksLargePartitionPayload(
+        mcpd4::TransportCompression::SNAPPY,
+        "multipart-snappy-worker");
     remoteWorkerSolvesConfiguredPrecisionExtreme();
     remoteWorkerSaturatesScaleObjectiveOverflow();
     remoteWorkerSolvesExplicitBatch();

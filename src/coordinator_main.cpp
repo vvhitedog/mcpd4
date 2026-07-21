@@ -143,6 +143,10 @@ void addRpcByteStats(mcpd4::RpcByteStats *total,
   total->hello_rx_bytes += stats.hello_rx_bytes;
   total->partition_load_tx_bytes += stats.partition_load_tx_bytes;
   total->partition_load_rx_bytes += stats.partition_load_rx_bytes;
+  total->partition_load_tx_frame_count +=
+      stats.partition_load_tx_frame_count;
+  total->partition_load_rx_frame_count +=
+      stats.partition_load_rx_frame_count;
   total->solve_request_tx_bytes += stats.solve_request_tx_bytes;
   total->solve_request_rx_bytes += stats.solve_request_rx_bytes;
   total->solve_result_tx_bytes += stats.solve_result_tx_bytes;
@@ -447,6 +451,9 @@ public:
     insertFinal("rpc_partition_load_tx_bytes",
                 std::to_string(rpc_bytes.partition_load_tx_bytes),
                 "Logical partition package bytes transmitted.");
+    insertFinal("rpc_partition_load_tx_frame_count",
+                std::to_string(rpc_bytes.partition_load_tx_frame_count),
+                "Partition package frames transmitted.");
     insertFinal("rpc_solve_request_tx_bytes",
                 std::to_string(rpc_bytes.solve_request_tx_bytes),
                 "Logical solve request bytes transmitted.");
@@ -1024,6 +1031,8 @@ private:
         << " rpc_hello_rx_bytes " << rpc_bytes.hello_rx_bytes
         << " rpc_partition_load_tx_bytes "
         << rpc_bytes.partition_load_tx_bytes
+        << " rpc_partition_load_tx_frame_count "
+        << rpc_bytes.partition_load_tx_frame_count
         << " rpc_solve_request_tx_bytes "
         << rpc_bytes.solve_request_tx_bytes
         << " rpc_solve_result_rx_bytes "
@@ -1714,6 +1723,8 @@ void printTiming(const RuntimeTiming &timing,
   std::cout << "rpc_hello_rx_bytes " << rpc_bytes.hello_rx_bytes << "\n";
   std::cout << "rpc_partition_load_tx_bytes "
             << rpc_bytes.partition_load_tx_bytes << "\n";
+  std::cout << "rpc_partition_load_tx_frame_count "
+            << rpc_bytes.partition_load_tx_frame_count << "\n";
   std::cout << "rpc_solve_request_tx_bytes "
             << rpc_bytes.solve_request_tx_bytes << "\n";
   std::cout << "rpc_solve_result_rx_bytes "
@@ -1825,6 +1836,8 @@ void printProgress(
             << rpc_bytes.rx_stored_frame_count
             << " rpc_partition_load_tx_bytes "
             << rpc_bytes.partition_load_tx_bytes
+            << " rpc_partition_load_tx_frame_count "
+            << rpc_bytes.partition_load_tx_frame_count
             << " rpc_solve_request_tx_bytes "
             << rpc_bytes.solve_request_tx_bytes
             << " rpc_solve_result_rx_bytes "
@@ -1869,6 +1882,8 @@ void printProgress(
               << stats.rpc_bytes.rx_compressed_frame_count
               << " rpc_partition_load_tx_bytes "
               << stats.rpc_bytes.partition_load_tx_bytes
+              << " rpc_partition_load_tx_frame_count "
+              << stats.rpc_bytes.partition_load_tx_frame_count
               << " rpc_solve_request_tx_bytes "
               << stats.rpc_bytes.solve_request_tx_bytes
               << " rpc_solve_result_rx_bytes "

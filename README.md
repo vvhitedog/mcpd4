@@ -737,8 +737,10 @@ With `--progress-every`, the coordinator also prints:
 RPC byte counters are cumulative. Logical byte counters include encoded
 protocol frame headers before transport compression. Wire byte counters report
 actual bytes written to the TCP connection, including any Snappy envelope.
-Logical frames are bounded by the runtime frame cap before compression, so a
-package must fit the cap even if Snappy would shrink it on the wire.
+Logical frames are bounded by the runtime frame cap before compression.
+Partition packages are sent as a metadata frame followed by bounded section
+chunks, so the complete package may be larger than the frame cap. Snappy is
+applied independently to each chunk.
 Useful fields:
 
 - `rpc_tx_bytes_total` and `rpc_rx_bytes_total`: total bytes sent and received
@@ -754,6 +756,8 @@ Useful fields:
   frames sent uncompressed because the compressed payload was not smaller.
 - `rpc_partition_load_tx_bytes`: one-time partition package bytes sent to
   workers.
+- `rpc_partition_load_tx_frame_count`: number of metadata, data-chunk, and end
+  frames used to send partition packages.
 - `rpc_solve_request_tx_bytes`: repeated solve request bytes sent during the
   optimization loop.
 - `rpc_solve_result_rx_bytes`: repeated solve result bytes received during

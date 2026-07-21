@@ -44,6 +44,9 @@ bool isKnownMessageType(std::uint32_t value) {
   case MessageType::LINEAR_SOLUTION_REQUEST:
   case MessageType::LINEAR_SOLUTION_RESULT:
   case MessageType::REPLACE_PARTITION_CAPACITIES:
+  case MessageType::PARTITION_PACKAGE_BEGIN:
+  case MessageType::PARTITION_PACKAGE_CHUNK:
+  case MessageType::PARTITION_PACKAGE_END:
     return true;
   }
   return false;
@@ -77,6 +80,66 @@ bool isKnownReferenceCutSelection(std::uint32_t value) {
     return true;
   }
   return false;
+}
+
+bool isKnownPartitionPackageSection(std::uint32_t value) {
+  switch (static_cast<PartitionPackageSection>(value)) {
+  case PartitionPackageSection::ARCS:
+  case PartitionPackageSection::ARC_CAPACITIES:
+  case PartitionPackageSection::TERMINAL_CAPACITIES:
+  case PartitionPackageSection::LOCAL_TO_GLOBAL:
+  case PartitionPackageSection::CONSTRAINT_ENDPOINTS:
+  case PartitionPackageSection::REFERENCE_CUT_LABELS:
+    return true;
+  }
+  return false;
+}
+
+std::size_t partitionPackageSectionIndex(PartitionPackageSection section) {
+  const auto index = static_cast<std::size_t>(section);
+  require(index < kPartitionPackageSectionCount,
+          "unknown partition package section");
+  return index;
+}
+
+std::size_t checkedContainerSize(std::uint64_t size) {
+  require(size <= std::numeric_limits<std::size_t>::max(),
+          "partition package section is too large");
+  return static_cast<std::size_t>(size);
+}
+
+void validatePartitionPackageTransferHeader(
+    const PartitionPackageTransferHeader &header) {
+  require(header.partition_id >= 0,
+          "partition package transfer id must be non-negative");
+  require(header.local_node_count >= 0,
+          "partition package transfer node count must be non-negative");
+  require(header.objective_multiplier > 0,
+          "partition package transfer objective multiplier must be positive");
+  require(header.reference_cut_check_interval > 0,
+          "partition package transfer reference interval must be positive");
+  const auto arcs = header.section_counts[static_cast<std::size_t>(
+      PartitionPackageSection::ARCS)];
+  const auto arc_capacities = header.section_counts[static_cast<std::size_t>(
+      PartitionPackageSection::ARC_CAPACITIES)];
+  const auto terminal_capacities =
+      header.section_counts[static_cast<std::size_t>(
+          PartitionPackageSection::TERMINAL_CAPACITIES)];
+  const auto local_to_global = header.section_counts[static_cast<std::size_t>(
+      PartitionPackageSection::LOCAL_TO_GLOBAL)];
+  const auto reference_labels = header.section_counts[static_cast<std::size_t>(
+      PartitionPackageSection::REFERENCE_CUT_LABELS)];
+  const auto node_count = static_cast<std::uint64_t>(header.local_node_count);
+  require(arcs % 2 == 0,
+          "partition package transfer arcs must contain endpoint pairs");
+  require(arc_capacities == arcs,
+          "partition package transfer arc capacity count mismatch");
+  require(terminal_capacities == node_count,
+          "partition package transfer terminal capacity count mismatch");
+  require(local_to_global == 0 || local_to_global == node_count,
+          "partition package transfer local-to-global count mismatch");
+  require(reference_labels == 0 || reference_labels == node_count,
+          "partition package transfer reference label count mismatch");
 }
 
 template <typename T> T checkedIntegerCast(std::int64_t value) {
@@ -568,6 +631,304 @@ mcpd3::PartitionPackage decodePartitionPackage(
       checkedIntegerCast<long>(reader.readI64());
   requireDone(reader);
   return message;
+}
+
+std::size_t PartitionPackageTransferChunk::size() const {
+  switch (section) {
+  case PartitionPackageSection::ARCS:
+  case PartitionPackageSection::LOCAL_TO_GLOBAL:
+  case PartitionPackageSection::REFERENCE_CUT_LABELS:
+    return int_values.size();
+  case PartitionPackageSection::ARC_CAPACITIES:
+  case PartitionPackageSection::TERMINAL_CAPACITIES:
+    return capacity_values.size();
+  case PartitionPackageSection::CONSTRAINT_ENDPOINTS:
+    return constraint_values.size();
+  }
+  throw std::runtime_error("unknown partition package section");
+}
+
+PartitionPackageTransferHeader makePartitionPackageTransferHeader(
+    const mcpd3::PartitionPackage &message) {
+  PartitionPackageTransferHeader header;
+  header.partition_id = message.partition_id;
+  header.local_node_count = message.local_node_count;
+  header.section_counts = {
+      static_cast<std::uint64_t>(message.arcs.size()),
+      static_cast<std::uint64_t>(message.arc_capacities.size()),
+      static_cast<std::uint64_t>(message.terminal_capacities.size()),
+      static_cast<std::uint64_t>(message.local_to_global.size()),
+      static_cast<std::uint64_t>(message.constraint_endpoints.size()),
+      static_cast<std::uint64_t>(message.reference_cut_labels.size())};
+  header.objective_multiplier = message.objective_multiplier;
+  header.canonical_cut_selection = message.canonical_cut_selection;
+  header.force_full_mincut_recompute = message.force_full_mincut_recompute;
+  header.reference_cut_selection = message.reference_cut_selection;
+  header.reference_cut_check_interval = message.reference_cut_check_interval;
+  return header;
+}
+
+std::vector<std::uint8_t> encodePartitionPackageTransferBegin(
+    const PartitionPackageTransferHeader &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writer.writeI32(message.local_node_count);
+  for (const auto count : message.section_counts) {
+    writer.writeU64(count);
+  }
+  writer.writeI64(message.objective_multiplier);
+  writer.writeU32(
+      static_cast<std::uint32_t>(message.canonical_cut_selection));
+  writer.writeBool(message.force_full_mincut_recompute);
+  writer.writeU32(
+      static_cast<std::uint32_t>(message.reference_cut_selection));
+  writer.writeI64(message.reference_cut_check_interval);
+  return encodeFrame(MessageType::PARTITION_PACKAGE_BEGIN, writer.bytes());
+}
+
+PartitionPackageTransferHeader decodePartitionPackageTransferBegin(
+    const std::vector<std::uint8_t> &frame) {
+  auto decoded =
+      decodeExpectedFrame(frame, MessageType::PARTITION_PACKAGE_BEGIN);
+  Reader reader(decoded.payload);
+  PartitionPackageTransferHeader message;
+  message.partition_id = reader.readI32();
+  message.local_node_count = reader.readI32();
+  for (auto &count : message.section_counts) {
+    count = reader.readU64();
+    (void)checkedContainerSize(count);
+  }
+  message.objective_multiplier =
+      checkedIntegerCast<long>(reader.readI64());
+  const auto canonical_selection = reader.readU32();
+  require(isKnownCanonicalCutSelection(canonical_selection),
+          "unknown canonical cut selection");
+  message.canonical_cut_selection =
+      static_cast<mcpd3::CanonicalCutSelection>(canonical_selection);
+  message.force_full_mincut_recompute = reader.readBool();
+  const auto reference_selection = reader.readU32();
+  require(isKnownReferenceCutSelection(reference_selection),
+          "unknown reference cut selection");
+  message.reference_cut_selection =
+      static_cast<mcpd3::ReferenceCutSelection>(reference_selection);
+  message.reference_cut_check_interval =
+      checkedIntegerCast<long>(reader.readI64());
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodePartitionPackageTransferChunk(
+    const mcpd3::PartitionPackage &message, PartitionPackageSection section,
+    std::uint64_t offset, std::size_t count) {
+  const auto header = makePartitionPackageTransferHeader(message);
+  const auto section_index = partitionPackageSectionIndex(section);
+  const auto total = header.section_counts[section_index];
+  require(offset <= total && count <= total - offset,
+          "partition package chunk is outside its section");
+  const auto begin = checkedContainerSize(offset);
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writer.writeU32(static_cast<std::uint32_t>(section));
+  writer.writeU64(offset);
+  writer.writeU32(checkedSize(count));
+  for (std::size_t i = 0; i < count; ++i) {
+    const auto index = begin + i;
+    switch (section) {
+    case PartitionPackageSection::ARCS:
+      writer.writeI32(message.arcs[index]);
+      break;
+    case PartitionPackageSection::ARC_CAPACITIES:
+      writer.writeInteger(message.arc_capacities[index]);
+      break;
+    case PartitionPackageSection::TERMINAL_CAPACITIES:
+      writer.writeInteger(message.terminal_capacities[index]);
+      break;
+    case PartitionPackageSection::LOCAL_TO_GLOBAL:
+      writer.writeI32(message.local_to_global[index]);
+      break;
+    case PartitionPackageSection::CONSTRAINT_ENDPOINTS:
+      writeConstraintEndpoint(&writer, message.constraint_endpoints[index]);
+      break;
+    case PartitionPackageSection::REFERENCE_CUT_LABELS:
+      writer.writeI32(message.reference_cut_labels[index]);
+      break;
+    }
+  }
+  return encodeFrame(MessageType::PARTITION_PACKAGE_CHUNK, writer.bytes());
+}
+
+PartitionPackageTransferChunk decodePartitionPackageTransferChunk(
+    const std::vector<std::uint8_t> &frame) {
+  auto decoded =
+      decodeExpectedFrame(frame, MessageType::PARTITION_PACKAGE_CHUNK);
+  Reader reader(decoded.payload);
+  PartitionPackageTransferChunk message;
+  message.partition_id = reader.readI32();
+  const auto section = reader.readU32();
+  require(isKnownPartitionPackageSection(section),
+          "unknown partition package section");
+  message.section = static_cast<PartitionPackageSection>(section);
+  message.offset = reader.readU64();
+  const auto count = reader.readU32();
+  switch (message.section) {
+  case PartitionPackageSection::ARCS:
+  case PartitionPackageSection::LOCAL_TO_GLOBAL:
+  case PartitionPackageSection::REFERENCE_CUT_LABELS:
+    message.int_values.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+      message.int_values.push_back(reader.readI32());
+    }
+    break;
+  case PartitionPackageSection::ARC_CAPACITIES:
+  case PartitionPackageSection::TERMINAL_CAPACITIES:
+    message.capacity_values.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+      message.capacity_values.push_back(reader.readCapacity());
+    }
+    break;
+  case PartitionPackageSection::CONSTRAINT_ENDPOINTS:
+    message.constraint_values.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+      message.constraint_values.push_back(readConstraintEndpoint(&reader));
+    }
+    break;
+  }
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodePartitionPackageTransferEnd(
+    const PartitionPackageTransferEnd &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  return encodeFrame(MessageType::PARTITION_PACKAGE_END, writer.bytes());
+}
+
+PartitionPackageTransferEnd decodePartitionPackageTransferEnd(
+    const std::vector<std::uint8_t> &frame) {
+  auto decoded =
+      decodeExpectedFrame(frame, MessageType::PARTITION_PACKAGE_END);
+  Reader reader(decoded.payload);
+  PartitionPackageTransferEnd message;
+  message.partition_id = reader.readI32();
+  requireDone(reader);
+  return message;
+}
+
+PartitionPackageAssembler::PartitionPackageAssembler(
+    PartitionPackageTransferHeader header,
+    mcpd3::SolverStorageOptions storage)
+    : header_(std::move(header)) {
+  validatePartitionPackageTransferHeader(header_);
+  package_.partition_id = header_.partition_id;
+  package_.local_node_count = header_.local_node_count;
+  package_.arcs = mcpd3::SolverArray<int>(
+      checkedContainerSize(header_.section_counts[0]), storage,
+      "transport_partition_arcs");
+  package_.arc_capacities = mcpd3::SolverArray<mcpd3::Capacity>(
+      checkedContainerSize(header_.section_counts[1]), storage,
+      "transport_partition_arc_capacities");
+  package_.terminal_capacities = mcpd3::SolverArray<mcpd3::Capacity>(
+      checkedContainerSize(header_.section_counts[2]), storage,
+      "transport_partition_terminal_capacities");
+  package_.local_to_global = mcpd3::SolverArray<int>(
+      checkedContainerSize(header_.section_counts[3]), storage,
+      "transport_partition_local_to_global");
+  package_.constraint_endpoints.resize(
+      checkedContainerSize(header_.section_counts[4]));
+  package_.reference_cut_labels = mcpd3::SolverArray<int>(
+      checkedContainerSize(header_.section_counts[5]), storage,
+      "transport_partition_reference_labels");
+  package_.objective_multiplier = header_.objective_multiplier;
+  package_.canonical_cut_selection = header_.canonical_cut_selection;
+  package_.force_full_mincut_recompute =
+      header_.force_full_mincut_recompute;
+  package_.reference_cut_selection = header_.reference_cut_selection;
+  package_.reference_cut_check_interval =
+      header_.reference_cut_check_interval;
+}
+
+void PartitionPackageAssembler::append(PartitionPackageTransferChunk chunk) {
+  if (finished_) {
+    throw std::runtime_error("partition package transfer is already finished");
+  }
+  if (chunk.partition_id != header_.partition_id) {
+    throw std::runtime_error("partition package chunk id mismatch");
+  }
+  const auto section_index = partitionPackageSectionIndex(chunk.section);
+  if (chunk.offset != next_offsets_[section_index]) {
+    throw std::runtime_error("partition package chunk offset is not contiguous");
+  }
+  const auto count = static_cast<std::uint64_t>(chunk.size());
+  if (count == 0) {
+    throw std::runtime_error("partition package chunk must not be empty");
+  }
+  const auto total = header_.section_counts[section_index];
+  if (count > total - chunk.offset) {
+    throw std::runtime_error("partition package chunk exceeds section size");
+  }
+  const auto offset = checkedContainerSize(chunk.offset);
+  switch (chunk.section) {
+  case PartitionPackageSection::ARCS:
+    if (!chunk.capacity_values.empty() || !chunk.constraint_values.empty()) {
+      throw std::runtime_error("partition package chunk value type mismatch");
+    }
+    std::copy(chunk.int_values.begin(), chunk.int_values.end(),
+              package_.arcs.begin() + offset);
+    break;
+  case PartitionPackageSection::ARC_CAPACITIES:
+    if (!chunk.int_values.empty() || !chunk.constraint_values.empty()) {
+      throw std::runtime_error("partition package chunk value type mismatch");
+    }
+    std::copy(chunk.capacity_values.begin(), chunk.capacity_values.end(),
+              package_.arc_capacities.begin() + offset);
+    break;
+  case PartitionPackageSection::TERMINAL_CAPACITIES:
+    if (!chunk.int_values.empty() || !chunk.constraint_values.empty()) {
+      throw std::runtime_error("partition package chunk value type mismatch");
+    }
+    std::copy(chunk.capacity_values.begin(), chunk.capacity_values.end(),
+              package_.terminal_capacities.begin() + offset);
+    break;
+  case PartitionPackageSection::LOCAL_TO_GLOBAL:
+    if (!chunk.capacity_values.empty() || !chunk.constraint_values.empty()) {
+      throw std::runtime_error("partition package chunk value type mismatch");
+    }
+    std::copy(chunk.int_values.begin(), chunk.int_values.end(),
+              package_.local_to_global.begin() + offset);
+    break;
+  case PartitionPackageSection::CONSTRAINT_ENDPOINTS:
+    if (!chunk.int_values.empty() || !chunk.capacity_values.empty()) {
+      throw std::runtime_error("partition package chunk value type mismatch");
+    }
+    std::copy(chunk.constraint_values.begin(), chunk.constraint_values.end(),
+              package_.constraint_endpoints.begin() + offset);
+    break;
+  case PartitionPackageSection::REFERENCE_CUT_LABELS:
+    if (!chunk.capacity_values.empty() || !chunk.constraint_values.empty()) {
+      throw std::runtime_error("partition package chunk value type mismatch");
+    }
+    std::copy(chunk.int_values.begin(), chunk.int_values.end(),
+              package_.reference_cut_labels.begin() + offset);
+    break;
+  }
+  next_offsets_[section_index] += count;
+}
+
+bool PartitionPackageAssembler::complete() const {
+  return next_offsets_ == header_.section_counts;
+}
+
+mcpd3::PartitionPackage PartitionPackageAssembler::finish() {
+  if (finished_) {
+    throw std::runtime_error("partition package transfer is already finished");
+  }
+  if (!complete()) {
+    throw std::runtime_error("partition package transfer is incomplete");
+  }
+  mcpd3::validatePartitionPackage(package_);
+  finished_ = true;
+  return std::move(package_);
 }
 
 std::vector<std::uint8_t> encodeReady(const ReadyMessage &message) {

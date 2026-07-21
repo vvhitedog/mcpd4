@@ -2300,3 +2300,21 @@
   describe operating-system paging rather than solver eviction.
 - MCPD4 passes all 6 CTest targets, including the process-level compatibility
   command and remote mmap diagnostics.
+
+## 2026-07-20 23:35 PDT - Bounded multipart partition transport
+
+- Advanced the wire protocol to version 11 and replaced whole-package TCP
+  loads with metadata, bounded 64K-element section chunks, and a validated end
+  marker. The worker assembles topology, capacities, local/global maps, and
+  reference labels directly into its configured final backing.
+- Kept legacy single-package decoding for compatibility while making all new
+  coordinator loads multipart. Malformed order, interruption, ID, offset,
+  value-type, size, and header-shape branches reject the transfer and discard
+  partial state.
+- Added package frame counts to coordinator/worker status and final telemetry.
+  Snappy now compresses each bounded chunk independently.
+- A 70,000-parallel-edge TCP regression forces ten package frames, solves the
+  exact local problem, and passes in both uncompressed and Snappy modes. The
+  700,375 logical bytes compressed to 33,407 wire bytes in the test run.
+- MCPD4 passes all 6 CTest targets, including protocol serialization, TCP
+  loopback, and process integration.

@@ -384,6 +384,9 @@ struct WorkerStatusState {
       rpc_bytes.error_tx_bytes += bytes;
       break;
     case mcpd4::MessageType::PARTITION_PACKAGE:
+    case mcpd4::MessageType::PARTITION_PACKAGE_BEGIN:
+    case mcpd4::MessageType::PARTITION_PACKAGE_CHUNK:
+    case mcpd4::MessageType::PARTITION_PACKAGE_END:
     case mcpd4::MessageType::SOLVE_ROUND_REQUEST:
     case mcpd4::MessageType::SCALE_OBJECTIVE:
     case mcpd4::MessageType::REPLACE_PARTITION_CAPACITIES:
@@ -410,7 +413,11 @@ struct WorkerStatusState {
     }
     switch (type) {
     case mcpd4::MessageType::PARTITION_PACKAGE:
+    case mcpd4::MessageType::PARTITION_PACKAGE_BEGIN:
+    case mcpd4::MessageType::PARTITION_PACKAGE_CHUNK:
+    case mcpd4::MessageType::PARTITION_PACKAGE_END:
       rpc_bytes.partition_load_rx_bytes += bytes;
+      ++rpc_bytes.partition_load_rx_frame_count;
       break;
     case mcpd4::MessageType::SOLVE_ROUND_REQUEST:
     case mcpd4::MessageType::SOLVE_ROUND_BATCH_REQUEST:
@@ -495,6 +502,8 @@ struct WorkerStatusState {
         << " rpc_hello_tx_bytes " << rpc_bytes.hello_tx_bytes
         << " rpc_partition_load_rx_bytes "
         << rpc_bytes.partition_load_rx_bytes
+        << " rpc_partition_load_rx_frame_count "
+        << rpc_bytes.partition_load_rx_frame_count
         << " rpc_solve_request_rx_bytes "
         << rpc_bytes.solve_request_rx_bytes
         << " rpc_solve_result_tx_bytes "

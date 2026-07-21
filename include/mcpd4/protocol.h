@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -53,6 +54,63 @@ enum class MessageType : std::uint32_t {
   LINEAR_SOLUTION_REQUEST = 22,
   LINEAR_SOLUTION_RESULT = 23,
   REPLACE_PARTITION_CAPACITIES = 24,
+  PARTITION_PACKAGE_BEGIN = 25,
+  PARTITION_PACKAGE_CHUNK = 26,
+  PARTITION_PACKAGE_END = 27,
+};
+
+enum class PartitionPackageSection : std::uint32_t {
+  ARCS = 0,
+  ARC_CAPACITIES = 1,
+  TERMINAL_CAPACITIES = 2,
+  LOCAL_TO_GLOBAL = 3,
+  CONSTRAINT_ENDPOINTS = 4,
+  REFERENCE_CUT_LABELS = 5,
+};
+
+inline constexpr std::size_t kPartitionPackageSectionCount = 6;
+
+struct PartitionPackageTransferHeader {
+  int partition_id = -1;
+  int local_node_count = 0;
+  std::array<std::uint64_t, kPartitionPackageSectionCount> section_counts{};
+  long objective_multiplier = 1;
+  mcpd3::CanonicalCutSelection canonical_cut_selection =
+      mcpd3::CanonicalCutSelection::SOLVER_DEFAULT;
+  bool force_full_mincut_recompute = false;
+  mcpd3::ReferenceCutSelection reference_cut_selection =
+      mcpd3::ReferenceCutSelection::CLOSEST_EXACT;
+  long reference_cut_check_interval = 1;
+};
+
+struct PartitionPackageTransferChunk {
+  int partition_id = -1;
+  PartitionPackageSection section = PartitionPackageSection::ARCS;
+  std::uint64_t offset = 0;
+  std::vector<int> int_values;
+  std::vector<mcpd3::Capacity> capacity_values;
+  std::vector<mcpd3::ConstraintEndpointBinding> constraint_values;
+
+  std::size_t size() const;
+};
+
+struct PartitionPackageTransferEnd {
+  int partition_id = -1;
+};
+
+class PartitionPackageAssembler {
+public:
+  PartitionPackageAssembler(PartitionPackageTransferHeader header,
+                            mcpd3::SolverStorageOptions storage);
+  void append(PartitionPackageTransferChunk chunk);
+  bool complete() const;
+  mcpd3::PartitionPackage finish();
+
+private:
+  PartitionPackageTransferHeader header_;
+  std::array<std::uint64_t, kPartitionPackageSectionCount> next_offsets_{};
+  mcpd3::PartitionPackage package_;
+  bool finished_ = false;
 };
 
 struct Frame {
@@ -171,6 +229,22 @@ HelloMessage decodeHello(const std::vector<std::uint8_t> &frame);
 std::vector<std::uint8_t> encodePartitionPackage(
     const mcpd3::PartitionPackage &message);
 mcpd3::PartitionPackage decodePartitionPackage(
+    const std::vector<std::uint8_t> &frame);
+
+PartitionPackageTransferHeader makePartitionPackageTransferHeader(
+    const mcpd3::PartitionPackage &message);
+std::vector<std::uint8_t> encodePartitionPackageTransferBegin(
+    const PartitionPackageTransferHeader &message);
+PartitionPackageTransferHeader decodePartitionPackageTransferBegin(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodePartitionPackageTransferChunk(
+    const mcpd3::PartitionPackage &message, PartitionPackageSection section,
+    std::uint64_t offset, std::size_t count);
+PartitionPackageTransferChunk decodePartitionPackageTransferChunk(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodePartitionPackageTransferEnd(
+    const PartitionPackageTransferEnd &message);
+PartitionPackageTransferEnd decodePartitionPackageTransferEnd(
     const std::vector<std::uint8_t> &frame);
 
 std::vector<std::uint8_t> encodeReady(const ReadyMessage &message);
