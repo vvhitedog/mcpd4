@@ -1,5 +1,6 @@
 #include <mcpd4/discovery.h>
 #include <mcpd4/runtime.h>
+#include <mcpd4/solver_policy.h>
 #include <mcpd4/status.h>
 
 #include <decomp/dualdecomp.h>
@@ -63,10 +64,7 @@ struct Config {
   std::uint16_t port = 0;
   int worker_count = 1;
   int partition_count = 1;
-  int max_iterations = 10000;
-  int schedule_levels = 5;
-  long schedule_start = 10000;
-  long objective_scale = 1;
+  mcpd4::SolverPolicy solver_policy;
   long accept_timeout_ms = 24L * 60L * 60L * 1000L;
   int progress_every = 0;
   std::string ready_file;
@@ -79,9 +77,6 @@ struct Config {
   std::string telemetry_csv_prefix;
   mcpd4::TransportCompression rpc_compression =
       mcpd4::TransportCompression::NONE;
-  bool exhaust_scale_iterations = false;
-  bool exhaust_regularized_scale_iterations = true;
-  bool saturate_capacity_overflow = false;
   bool directed = false;
 };
 
@@ -225,13 +220,13 @@ public:
                    "Requested number of worker processes.");
     insertMetadata("partition_count", std::to_string(config.partition_count),
                    "Requested number of graph partitions.");
-    insertMetadata("max_iterations", std::to_string(config.max_iterations),
+    insertMetadata("max_iterations", std::to_string(config.solver_policy.max_iteration_count),
                    "Maximum iterations per schedule level.");
-    insertMetadata("schedule_levels", std::to_string(config.schedule_levels),
+    insertMetadata("schedule_levels", std::to_string(config.solver_policy.num_optimization_scales),
                    "Number of base-10 schedule levels.");
-    insertMetadata("schedule_start", std::to_string(config.schedule_start),
+    insertMetadata("schedule_start", std::to_string(config.solver_policy.initial_step_size),
                    "Initial dual-decomposition schedule step.");
-    insertMetadata("objective_scale", std::to_string(config.objective_scale),
+    insertMetadata("objective_scale", std::to_string(config.solver_policy.objective_scale),
                    "Initial exact objective/regularization quantum.");
     insertMetadata("rpc_compression",
                    mcpd4::transportCompressionName(config.rpc_compression),
@@ -724,13 +719,13 @@ struct CoordinatorStatusState {
     std::lock_guard<std::mutex> lock(mutex);
     min_worker_count = config.worker_count;
     partition_count = config.partition_count;
-    objective_scale = config.objective_scale;
-    initial_objective_scale = config.objective_scale;
+    objective_scale = config.solver_policy.objective_scale;
+    initial_objective_scale = config.solver_policy.objective_scale;
     rpc_compression =
         mcpd4::transportCompressionName(config.rpc_compression);
     solve_iteration_budget =
-        static_cast<long>(config.max_iterations) *
-        static_cast<long>(config.schedule_levels);
+        static_cast<long>(config.solver_policy.max_iteration_count) *
+        static_cast<long>(config.solver_policy.num_optimization_scales);
     persistLocked();
   }
 
@@ -1221,6 +1216,18 @@ void usage(const char *argv0) {
       << " DIMACS --port PORT [--bind HOST] [--workers N] [--partitions N]\n"
       << "       [--max-iterations N] [--schedule-levels N]\n"
       << "       [--schedule-start N] [--objective-scale N]\n"
+      << "       [--max-total-iterations N] [--patience N]\n"
+      << "       [--regularization none|scaled-epsilon|plateau-epsilon]\n"
+      << "       [--regularization-cutoff N] [--regularization-cap N]\n"
+      << "       [--disagreement-patience N] [--regularization-budget N]\n"
+      << "       [--max-objective-scale-promotions N]\n"
+      << "       [--no-promote-objective-scale-on-overbudget]\n"
+      << "       [--no-momentum] [--group-stopping]\n"
+      << "       [--retry-unit-step-without-momentum]\n"
+      << "       [--random-alpha-radius N] [--random-alpha-seed N]\n"
+      << "       [--halo-depth N|infinite]\n"
+      << "       [--canonical-cut solver|min|max]\n"
+      << "       [--force-full-mincut-recompute]\n"
       << "       [--accept-timeout-ms N]\n"
       << "       [--progress-every N] [--ready-file PATH]\n"
       << "       [--discovery-port PORT] [--discovery-token TOKEN]\n"
@@ -1231,6 +1238,7 @@ void usage(const char *argv0) {
       << "       [--rpc-compression none|snappy]\n"
       << "       [--exhaust-scale-iterations]\n"
       << "       [--no-exhaust-regularized-scale-iterations]\n"
+      << "       [--no-retry-exhaust-regularized-scale-iterations]\n"
       << "       [--saturate-capacity-overflow]\n"
       << "       [--directed]\n";
 }
@@ -1259,13 +1267,96 @@ Config parseArgs(int argc, char **argv) {
     } else if (arg == "--partitions") {
       config.partition_count = parseInt(require_value(arg), arg);
     } else if (arg == "--max-iterations") {
-      config.max_iterations = parseInt(require_value(arg), arg);
+      config.solver_policy.max_iteration_count =
+          parseInt(require_value(arg), arg);
+    } else if (arg == "--max-total-iterations") {
+      config.solver_policy.max_total_iteration_count =
+          parseLong(require_value(arg), arg);
     } else if (arg == "--schedule-levels" || arg == "--num-scales") {
-      config.schedule_levels = parseInt(require_value(arg), arg);
+      config.solver_policy.num_optimization_scales =
+          parseInt(require_value(arg), arg);
     } else if (arg == "--schedule-start" || arg == "--initial-step") {
-      config.schedule_start = parseLong(require_value(arg), arg);
+      config.solver_policy.initial_step_size = parseLong(require_value(arg), arg);
     } else if (arg == "--objective-scale" || arg == "--capacity-multiplier") {
-      config.objective_scale = parseLong(require_value(arg), arg);
+      config.solver_policy.objective_scale = parseLong(require_value(arg), arg);
+    } else if (arg == "--patience") {
+      config.solver_policy.patience = parseNonNegativeInt(require_value(arg), arg);
+    } else if (arg == "--disagreement-patience") {
+      config.solver_policy.disagreement_patience =
+          parseNonNegativeInt(require_value(arg), arg);
+    } else if (arg == "--regularization") {
+      const auto value = require_value(arg);
+      if (value == "none") {
+        config.solver_policy.regularization_scheme =
+            mcpd4::SolverRegularizationScheme::NONE;
+      } else if (value == "scaled-epsilon") {
+        config.solver_policy.regularization_scheme =
+            mcpd4::SolverRegularizationScheme::SCALED_EPSILON;
+      } else if (value == "plateau-epsilon") {
+        config.solver_policy.regularization_scheme =
+            mcpd4::SolverRegularizationScheme::
+                DISAGREEMENT_PLATEAU_EPSILON;
+      } else {
+        throw std::runtime_error("invalid regularization scheme: " + value);
+      }
+    } else if (arg == "--regularization-cutoff") {
+      config.solver_policy.scaled_epsilon_max_step_size =
+          parseInt(require_value(arg), arg);
+    } else if (arg == "--regularization-cap") {
+      config.solver_policy.scaled_epsilon_strength_cap =
+          parseNonNegativeInt(require_value(arg), arg);
+    } else if (arg == "--regularization-budget") {
+      config.solver_policy.regularization_budget_limit =
+          parseLong(require_value(arg), arg);
+    } else if (arg == "--max-objective-scale-promotions") {
+      config.solver_policy.max_objective_scale_promotions =
+          parseNonNegativeInt(require_value(arg), arg);
+    } else if (arg == "--no-promote-objective-scale-on-overbudget") {
+      config.solver_policy.promote_objective_scale_on_overbudget = false;
+    } else if (arg == "--promote-objective-scale-on-overbudget") {
+      config.solver_policy.promote_objective_scale_on_overbudget = true;
+    } else if (arg == "--no-momentum") {
+      config.solver_policy.use_momentum = false;
+    } else if (arg == "--momentum") {
+      config.solver_policy.use_momentum = true;
+    } else if (arg == "--group-stopping") {
+      config.solver_policy.enable_group_stopping = true;
+    } else if (arg == "--no-group-stopping") {
+      config.solver_policy.enable_group_stopping = false;
+    } else if (arg == "--retry-unit-step-without-momentum") {
+      config.solver_policy.retry_unit_step_without_momentum = true;
+    } else if (arg == "--no-retry-unit-step-without-momentum") {
+      config.solver_policy.retry_unit_step_without_momentum = false;
+    } else if (arg == "--random-alpha-radius") {
+      config.solver_policy.initial_alpha_random_radius =
+          parseLong(require_value(arg), arg);
+      config.solver_policy.randomize_initial_alphas =
+          config.solver_policy.initial_alpha_random_radius > 0;
+    } else if (arg == "--random-alpha-seed") {
+      const int seed = parseNonNegativeInt(require_value(arg), arg);
+      config.solver_policy.initial_alpha_random_seed =
+          static_cast<unsigned int>(seed);
+    } else if (arg == "--halo-depth") {
+      const auto value = require_value(arg);
+      config.solver_policy.halo_depth =
+          value == "infinite" ? mcpd3::kInfiniteHaloDepth
+                              : parseInt(value, arg);
+    } else if (arg == "--canonical-cut") {
+      const auto value = require_value(arg);
+      if (value == "solver") {
+        config.solver_policy.canonical_cut_selection =
+            mcpd3::CanonicalCutSelection::SOLVER_DEFAULT;
+      } else if (value == "min") {
+        config.solver_policy.canonical_cut_selection =
+            mcpd3::CanonicalCutSelection::MINIMUM_LABELS;
+      } else if (value == "max") {
+        config.solver_policy.canonical_cut_selection =
+            mcpd3::CanonicalCutSelection::MAXIMUM_LABELS;
+      } else {
+        throw std::runtime_error("invalid canonical cut selection: " + value);
+      }
+    } else if (arg == "--force-full-mincut-recompute") {
+      config.solver_policy.force_full_mincut_recompute = true;
     } else if (arg == "--accept-timeout-ms") {
       config.accept_timeout_ms = parseLong(require_value(arg), arg);
     } else if (arg == "--progress-every") {
@@ -1290,14 +1381,18 @@ Config parseArgs(int argc, char **argv) {
       config.rpc_compression =
           mcpd4::parseTransportCompression(require_value(arg));
     } else if (arg == "--exhaust-scale-iterations") {
-      config.exhaust_scale_iterations = true;
+      config.solver_policy.exhaust_scale_iterations = true;
     } else if (arg == "--exhaust-regularized-scale-iterations") {
-      config.exhaust_regularized_scale_iterations = true;
+      config.solver_policy.exhaust_regularized_scale_iterations = true;
     } else if (arg == "--no-exhaust-regularized-scale-iterations") {
-      config.exhaust_regularized_scale_iterations = false;
+      config.solver_policy.exhaust_regularized_scale_iterations = false;
+    } else if (arg == "--retry-exhaust-regularized-scale-iterations") {
+      config.solver_policy.retry_exhaust_regularized_scale_iterations = true;
+    } else if (arg == "--no-retry-exhaust-regularized-scale-iterations") {
+      config.solver_policy.retry_exhaust_regularized_scale_iterations = false;
     } else if (arg == "--saturate-capacity-overflow" ||
                arg == "--truncate-capacity-overflow") {
-      config.saturate_capacity_overflow = true;
+      config.solver_policy.saturate_capacity_overflow = true;
     } else if (arg == "--directed") {
       config.directed = true;
     } else {
@@ -1307,6 +1402,7 @@ Config parseArgs(int argc, char **argv) {
   if (config.port == 0) {
     throw std::runtime_error("--port is required");
   }
+  mcpd4::validateSolverPolicy(config.solver_policy);
   if (config.rpc_compression == mcpd4::TransportCompression::SNAPPY &&
       !mcpd4::snappyCompressionAvailable()) {
     throw std::runtime_error(
@@ -1492,13 +1588,9 @@ std::vector<std::unique_ptr<mcpd3::PartitionWorker>> acceptDiscoveredWorkers(
 }
 
 std::vector<mcpd3::PartitionPackage> makePartitionPackages(
-    int partition_count, mcpd3::MinCutGraph graph, long objective_scale) {
-  mcpd3::DualDecompositionOptions package_options;
-  package_options.track_primal_upper_bound = false;
-  package_options.verbose = false;
-  package_options.thread_count = 1;
-  package_options.objective_scale = objective_scale;
-  package_options.construct_solvers = false;
+    int partition_count, mcpd3::MinCutGraph graph,
+    const mcpd4::SolverPolicy &solver_policy) {
+  auto package_options = mcpd4::makePackageOptions(solver_policy);
   mcpd3::DualDecomposition package_source(
       partition_count, graph.nnode, graph.narc, std::move(graph.arcs),
       std::move(graph.arc_capacities), std::move(graph.terminal_capacities),
@@ -1637,13 +1729,13 @@ void printObjectiveScaleStats(const Config &config,
                               const ObjectiveScaleStats &stats) {
   const long total_saturation_count =
       stats.arc_saturation_count + stats.terminal_saturation_count;
-  std::cout << "initial_objective_scale " << config.objective_scale
+  std::cout << "initial_objective_scale " << config.solver_policy.objective_scale
             << "\n";
   std::cout << "rpc_compression "
             << mcpd4::transportCompressionName(config.rpc_compression)
             << "\n";
   std::cout << "objective_scale_overflow_mode "
-            << (config.saturate_capacity_overflow ? "saturate" : "strict")
+            << (config.solver_policy.saturate_capacity_overflow ? "saturate" : "strict")
             << "\n";
   std::cout << "objective_scale_saturation_count "
             << total_saturation_count << "\n";
@@ -1829,13 +1921,14 @@ int main(int argc, char **argv) {
     const auto scale_graph_start = std::chrono::steady_clock::now();
     status_state.beginSegment(
         "scale_graph", "scaling_graph",
-        "objective_scale=" + std::to_string(config.objective_scale));
-    scaleGraph(&graph, config.objective_scale,
-               config.saturate_capacity_overflow, &objective_scale_stats);
+        "objective_scale=" + std::to_string(config.solver_policy.objective_scale));
+    scaleGraph(&graph, config.solver_policy.objective_scale,
+               config.solver_policy.saturate_capacity_overflow,
+               &objective_scale_stats);
     timing.scale_graph_wall_us = elapsedUs(scale_graph_start);
     status_state.finishSegment(
         "scale_graph",
-        "objective_scale=" + std::to_string(config.objective_scale) +
+        "objective_scale=" + std::to_string(config.solver_policy.objective_scale) +
             ":arc_saturations=" +
             std::to_string(objective_scale_stats.arc_saturation_count) +
             ":terminal_saturations=" +
@@ -1857,7 +1950,7 @@ int main(int argc, char **argv) {
         "partitioning", "partitioning",
         "requested_partitions=" + std::to_string(config.partition_count));
     auto packages = makePartitionPackages(
-        config.partition_count, std::move(graph), config.objective_scale);
+        config.partition_count, std::move(graph), config.solver_policy);
     telemetry.recordPackages(packages);
     timing.partition_wall_us = elapsedUs(partition_start);
     long package_boundary_count = 0;
@@ -1928,16 +2021,7 @@ int main(int argc, char **argv) {
             ":mode=" + (config.discovery_port == 0 ? std::string("fixed")
                                                     : std::string("discovery")));
 
-    mcpd3::PartitionWorkerCoordinatorOptions solve_options;
-    solve_options.max_iteration_count = config.max_iterations;
-    solve_options.num_optimization_scales = config.schedule_levels;
-    solve_options.initial_step_size = config.schedule_start;
-    solve_options.objective_scale = config.objective_scale;
-    solve_options.exhaust_scale_iterations = config.exhaust_scale_iterations;
-    solve_options.exhaust_regularized_scale_iterations =
-        config.exhaust_regularized_scale_iterations;
-    solve_options.saturate_capacity_overflow =
-        config.saturate_capacity_overflow;
+    auto solve_options = mcpd4::makeCoordinatorOptions(config.solver_policy);
     solve_options.progress_report_interval =
         (config.status_port != 0 || telemetry.enabled()) ? 1
                                                          : config.progress_every;
@@ -1967,13 +2051,28 @@ int main(int argc, char **argv) {
     telemetry.beginSolve(remote_workers);
     const auto solve_start = std::chrono::steady_clock::now();
     const long solve_iteration_budget =
-        static_cast<long>(config.max_iterations) *
-        static_cast<long>(config.schedule_levels);
+        config.solver_policy.max_total_iteration_count > 0
+            ? config.solver_policy.max_total_iteration_count
+            : static_cast<long>(config.solver_policy.max_iteration_count) *
+                  static_cast<long>(
+                      config.solver_policy.num_optimization_scales);
     status_state.beginSegment(
         "solve", "solving",
         "max_total_iterations=" + std::to_string(solve_iteration_budget),
         0, solve_iteration_budget);
-    const auto result = coordinator.solve();
+    auto result = coordinator.solve();
+    if (result.status !=
+            mcpd3::PartitionWorkerOptimizationStatus::OPTIMAL &&
+        config.solver_policy.retry_exhaust_regularized_scale_iterations &&
+        mcpd4::usesRegularization(config.solver_policy) &&
+        !config.solver_policy.exhaust_regularized_scale_iterations) {
+      std::cout << "solve_retry exhaustive_regularized_scales\n";
+      std::cout.flush();
+      mcpd4::configureCoordinatorSchedule(
+          &coordinator, config.solver_policy,
+          /*exhaust_regularized_scale_iterations=*/true);
+      result = coordinator.solve();
+    }
     status_state.recordWorkerDetails(remote_workers);
     status_state.recordFinal(result);
     timing.solve_wall_us = elapsedUs(solve_start);

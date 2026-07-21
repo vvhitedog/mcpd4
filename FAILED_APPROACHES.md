@@ -610,3 +610,15 @@
 - Backing files are unlinked immediately after mapping by design. A scratch
   directory listing is therefore not a valid test for active file backing;
   use solver diagnostics in-process or inspect `/proc/self/fd` remotely.
+
+## 2026-07-20 - Replacing neutral library defaults with product tuning
+
+- Do not put the validated `500/5000/12/2` product profile directly into
+  `DualDecompositionOptions` or `PartitionWorkerCoordinatorOptions`. Generic
+  low-level callers rely on unit objective scale; changing it broke the halo
+  certificate regression. Keep neutral library defaults and apply the product
+  profile at MCPD3-N/MCPD4 entry points through the shared policy adapter.
+- Do not randomize exported package alphas and then ask the coordinator to
+  randomize initial alphas again. Production package generation emits the
+  base alpha state; randomized initialization is applied exactly once by the
+  active solver/coordinator.

@@ -2,6 +2,7 @@
 #include <decomp/partition_coordinator.h>
 #include <graph/dimacs.h>
 #include <io/memory.h>
+#include <mcpd4/solver_policy.h>
 
 #include <algorithm>
 #include <chrono>
@@ -39,17 +40,11 @@ struct Config {
   std::string stop_after;
   int worker_count = 1;
   int partition_count = 10;
-  int max_iterations = 10000;
-  int schedule_levels = 5;
-  long schedule_start = 10000;
-  long objective_scale = 1;
+  mcpd4::SolverPolicy solver_policy;
   int progress_every = 0;
   std::string streaming_dir;
   std::uint64_t streaming_cache_bytes = 0;
-  bool exhaust_scale_iterations = false;
-  bool exhaust_regularized_scale_iterations = true;
   bool directed = false;
-  bool saturate_capacity_overflow = false;
   bool streaming_workers = false;
 };
 
@@ -95,6 +90,14 @@ int parseInt(const std::string &value, const std::string &name) {
   return static_cast<int>(parsed);
 }
 
+int parseNonNegativeInt(const std::string &value, const std::string &name) {
+  const int parsed = parseInt(value, name);
+  if (parsed < 0) {
+    throw std::runtime_error(name + " must be nonnegative");
+  }
+  return parsed;
+}
+
 std::uint64_t parsePositiveU64(const std::string &value,
                                const std::string &name) {
   const auto parsed = std::stoull(value);
@@ -135,14 +138,97 @@ Config parseArgs(int argc, char **argv) {
     } else if (arg == "--partitions") {
       config.partition_count = parseInt(requireValue(arg), arg);
     } else if (arg == "--max-iterations") {
-      config.max_iterations = parseInt(requireValue(arg), arg);
+      config.solver_policy.max_iteration_count = parseInt(requireValue(arg), arg);
+    } else if (arg == "--max-total-iterations") {
+      config.solver_policy.max_total_iteration_count =
+          parseLong(requireValue(arg), arg);
     } else if (arg == "--schedule-levels" || arg == "--num-scales") {
-      config.schedule_levels = parseInt(requireValue(arg), arg);
+      config.solver_policy.num_optimization_scales =
+          parseInt(requireValue(arg), arg);
     } else if (arg == "--schedule-start" || arg == "--initial-step") {
-      config.schedule_start = parseLong(requireValue(arg), arg);
+      config.solver_policy.initial_step_size = parseLong(requireValue(arg), arg);
     } else if (arg == "--objective-scale" ||
                arg == "--capacity-multiplier") {
-      config.objective_scale = parseLong(requireValue(arg), arg);
+      config.solver_policy.objective_scale = parseLong(requireValue(arg), arg);
+    } else if (arg == "--patience") {
+      config.solver_policy.patience =
+          parseNonNegativeInt(requireValue(arg), arg);
+    } else if (arg == "--disagreement-patience") {
+      config.solver_policy.disagreement_patience =
+          parseNonNegativeInt(requireValue(arg), arg);
+    } else if (arg == "--regularization") {
+      const auto value = requireValue(arg);
+      if (value == "none") {
+        config.solver_policy.regularization_scheme =
+            mcpd4::SolverRegularizationScheme::NONE;
+      } else if (value == "scaled-epsilon") {
+        config.solver_policy.regularization_scheme =
+            mcpd4::SolverRegularizationScheme::SCALED_EPSILON;
+      } else if (value == "plateau-epsilon") {
+        config.solver_policy.regularization_scheme =
+            mcpd4::SolverRegularizationScheme::
+                DISAGREEMENT_PLATEAU_EPSILON;
+      } else {
+        throw std::runtime_error("invalid regularization scheme: " + value);
+      }
+    } else if (arg == "--regularization-cutoff") {
+      config.solver_policy.scaled_epsilon_max_step_size =
+          parseInt(requireValue(arg), arg);
+    } else if (arg == "--regularization-cap") {
+      config.solver_policy.scaled_epsilon_strength_cap =
+          parseNonNegativeInt(requireValue(arg), arg);
+    } else if (arg == "--regularization-budget") {
+      config.solver_policy.regularization_budget_limit =
+          parseLong(requireValue(arg), arg);
+    } else if (arg == "--max-objective-scale-promotions") {
+      config.solver_policy.max_objective_scale_promotions =
+          parseNonNegativeInt(requireValue(arg), arg);
+    } else if (arg == "--no-promote-objective-scale-on-overbudget") {
+      config.solver_policy.promote_objective_scale_on_overbudget = false;
+    } else if (arg == "--promote-objective-scale-on-overbudget") {
+      config.solver_policy.promote_objective_scale_on_overbudget = true;
+    } else if (arg == "--no-momentum") {
+      config.solver_policy.use_momentum = false;
+    } else if (arg == "--momentum") {
+      config.solver_policy.use_momentum = true;
+    } else if (arg == "--group-stopping") {
+      config.solver_policy.enable_group_stopping = true;
+    } else if (arg == "--no-group-stopping") {
+      config.solver_policy.enable_group_stopping = false;
+    } else if (arg == "--retry-unit-step-without-momentum") {
+      config.solver_policy.retry_unit_step_without_momentum = true;
+    } else if (arg == "--no-retry-unit-step-without-momentum") {
+      config.solver_policy.retry_unit_step_without_momentum = false;
+    } else if (arg == "--random-alpha-radius") {
+      config.solver_policy.initial_alpha_random_radius =
+          parseLong(requireValue(arg), arg);
+      config.solver_policy.randomize_initial_alphas =
+          config.solver_policy.initial_alpha_random_radius > 0;
+    } else if (arg == "--random-alpha-seed") {
+      config.solver_policy.initial_alpha_random_seed =
+          static_cast<unsigned int>(
+              parseNonNegativeInt(requireValue(arg), arg));
+    } else if (arg == "--halo-depth") {
+      const auto value = requireValue(arg);
+      config.solver_policy.halo_depth =
+          value == "infinite" ? mcpd3::kInfiniteHaloDepth
+                              : parseInt(value, arg);
+    } else if (arg == "--canonical-cut") {
+      const auto value = requireValue(arg);
+      if (value == "solver") {
+        config.solver_policy.canonical_cut_selection =
+            mcpd3::CanonicalCutSelection::SOLVER_DEFAULT;
+      } else if (value == "min") {
+        config.solver_policy.canonical_cut_selection =
+            mcpd3::CanonicalCutSelection::MINIMUM_LABELS;
+      } else if (value == "max") {
+        config.solver_policy.canonical_cut_selection =
+            mcpd3::CanonicalCutSelection::MAXIMUM_LABELS;
+      } else {
+        throw std::runtime_error("invalid canonical cut selection: " + value);
+      }
+    } else if (arg == "--force-full-mincut-recompute") {
+      config.solver_policy.force_full_mincut_recompute = true;
     } else if (arg == "--progress-every") {
       config.progress_every = parseInt(requireValue(arg), arg);
     } else if (arg == "--streaming-workers" ||
@@ -154,16 +240,20 @@ Config parseArgs(int argc, char **argv) {
       config.streaming_cache_bytes =
           parsePositiveU64(requireValue(arg), arg);
     } else if (arg == "--exhaust-scale-iterations") {
-      config.exhaust_scale_iterations = true;
+      config.solver_policy.exhaust_scale_iterations = true;
     } else if (arg == "--exhaust-regularized-scale-iterations") {
-      config.exhaust_regularized_scale_iterations = true;
+      config.solver_policy.exhaust_regularized_scale_iterations = true;
     } else if (arg == "--no-exhaust-regularized-scale-iterations") {
-      config.exhaust_regularized_scale_iterations = false;
+      config.solver_policy.exhaust_regularized_scale_iterations = false;
+    } else if (arg == "--retry-exhaust-regularized-scale-iterations") {
+      config.solver_policy.retry_exhaust_regularized_scale_iterations = true;
+    } else if (arg == "--no-retry-exhaust-regularized-scale-iterations") {
+      config.solver_policy.retry_exhaust_regularized_scale_iterations = false;
     } else if (arg == "--directed") {
       config.directed = true;
     } else if (arg == "--saturate-capacity-overflow" ||
                arg == "--truncate-capacity-overflow") {
-      config.saturate_capacity_overflow = true;
+      config.solver_policy.saturate_capacity_overflow = true;
     } else {
       throw std::runtime_error("unknown argument: " + arg);
     }
@@ -174,18 +264,7 @@ Config parseArgs(int argc, char **argv) {
   if (config.partition_count <= 0) {
     throw std::runtime_error("--partitions must be positive");
   }
-  if (config.max_iterations <= 0) {
-    throw std::runtime_error("--max-iterations must be positive");
-  }
-  if (config.schedule_levels <= 0) {
-    throw std::runtime_error("--schedule-levels must be positive");
-  }
-  if (config.schedule_start <= 0) {
-    throw std::runtime_error("--schedule-start must be positive");
-  }
-  if (config.objective_scale <= 0) {
-    throw std::runtime_error("--objective-scale must be positive");
-  }
+  mcpd4::validateSolverPolicy(config.solver_policy);
   if (!config.stop_after.empty() && config.stop_after != "read" &&
       config.stop_after != "scale" && config.stop_after != "partition" &&
       config.stop_after != "setup") {
@@ -213,14 +292,8 @@ void scaleGraph(mcpd3::MinCutGraph *graph, long factor, bool saturate) {
 
 std::vector<mcpd3::PartitionPackage>
 makePartitionPackages(int partition_count, mcpd3::MinCutGraph graph,
-                      long objective_scale) {
-  mcpd3::DualDecompositionOptions package_options;
-  package_options.track_primal_upper_bound = false;
-  package_options.verbose = false;
-  package_options.thread_count = 1;
-  package_options.objective_scale = objective_scale;
-  package_options.saturate_capacity_overflow = false;
-  package_options.construct_solvers = false;
+                      const mcpd4::SolverPolicy &solver_policy) {
+  auto package_options = mcpd4::makePackageOptions(solver_policy);
   mcpd3::DualDecomposition package_source(
       partition_count, graph.nnode, graph.narc, std::move(graph.arcs),
       std::move(graph.arc_capacities), std::move(graph.terminal_capacities),
@@ -233,10 +306,13 @@ void printConfig(const Config &config) {
   std::cout << "dimacs_path " << config.dimacs_path << "\n";
   std::cout << "worker_count " << config.worker_count << "\n";
   std::cout << "partition_count " << config.partition_count << "\n";
-  std::cout << "schedule_start " << config.schedule_start << "\n";
-  std::cout << "schedule_levels " << config.schedule_levels << "\n";
-  std::cout << "max_iterations " << config.max_iterations << "\n";
-  std::cout << "objective_scale " << config.objective_scale << "\n";
+  std::cout << "schedule_start " << config.solver_policy.initial_step_size << "\n";
+  std::cout << "schedule_levels "
+            << config.solver_policy.num_optimization_scales << "\n";
+  std::cout << "max_iterations " << config.solver_policy.max_iteration_count
+            << "\n";
+  std::cout << "objective_scale " << config.solver_policy.objective_scale
+            << "\n";
   std::cout << "progress_every " << config.progress_every << "\n";
   std::cout << "streaming_workers " << config.streaming_workers << "\n";
   std::cout << "streaming_dir "
@@ -246,7 +322,7 @@ void printConfig(const Config &config) {
             << "\n";
   std::cout << "directed " << config.directed << "\n";
   std::cout << "saturate_capacity_overflow "
-            << config.saturate_capacity_overflow << "\n";
+            << config.solver_policy.saturate_capacity_overflow << "\n";
   std::cout << "stop_after "
             << (config.stop_after.empty() ? "none" : config.stop_after)
             << "\n";
@@ -590,8 +666,8 @@ int main(int argc, char **argv) {
     }
 
     const auto scale_start = std::chrono::steady_clock::now();
-    scaleGraph(&graph, config.objective_scale,
-               config.saturate_capacity_overflow);
+    scaleGraph(&graph, config.solver_policy.objective_scale,
+               config.solver_policy.saturate_capacity_overflow);
     timing.scale_graph_wall_us = elapsedUs(scale_start);
     const auto after_scale_memory = memorySnapshot();
     peak_rss_kb = std::max(peak_rss_kb, after_scale_memory.rss_kb);
@@ -605,7 +681,7 @@ int main(int argc, char **argv) {
     const auto partition_start = std::chrono::steady_clock::now();
     auto packages =
         makePartitionPackages(config.partition_count, std::move(graph),
-                              config.objective_scale);
+                              config.solver_policy);
     timing.partition_wall_us = elapsedUs(partition_start);
     const auto after_partition_memory = memorySnapshot();
     peak_rss_kb = std::max(peak_rss_kb, after_partition_memory.rss_kb);
@@ -617,16 +693,7 @@ int main(int argc, char **argv) {
       return EXIT_SUCCESS;
     }
 
-    mcpd3::PartitionWorkerCoordinatorOptions solve_options;
-    solve_options.max_iteration_count = config.max_iterations;
-    solve_options.num_optimization_scales = config.schedule_levels;
-    solve_options.initial_step_size = config.schedule_start;
-    solve_options.objective_scale = config.objective_scale;
-    solve_options.exhaust_scale_iterations = config.exhaust_scale_iterations;
-    solve_options.exhaust_regularized_scale_iterations =
-        config.exhaust_regularized_scale_iterations;
-    solve_options.saturate_capacity_overflow =
-        config.saturate_capacity_overflow;
+    auto solve_options = mcpd4::makeCoordinatorOptions(config.solver_policy);
     solve_options.progress_report_interval =
         config.progress_every > 0 ? config.progress_every : 0;
     if (config.progress_every > 0) {
@@ -649,7 +716,17 @@ int main(int argc, char **argv) {
     }
 
     const auto solve_start = std::chrono::steady_clock::now();
-    const auto result = coordinator.solve();
+    auto result = coordinator.solve();
+    if (result.status !=
+            mcpd3::PartitionWorkerOptimizationStatus::OPTIMAL &&
+        config.solver_policy.retry_exhaust_regularized_scale_iterations &&
+        mcpd4::usesRegularization(config.solver_policy) &&
+        !config.solver_policy.exhaust_regularized_scale_iterations) {
+      mcpd4::configureCoordinatorSchedule(
+          &coordinator, config.solver_policy,
+          /*exhaust_regularized_scale_iterations=*/true);
+      result = coordinator.solve();
+    }
     timing.solve_wall_us = elapsedUs(solve_start);
     timing.total_wall_us = elapsedUs(total_start);
     const auto after_solve_memory = memorySnapshot();

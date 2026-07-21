@@ -2252,3 +2252,26 @@
 - Added live TCP tests for capacity replacement with and without warm-flow
   preservation and temporal-state reset. The full MCPD4 suite passes 5/5,
   including protocol, loopback, and process integration tests.
+
+## 2026-07-20 21:35 PDT - Product-policy and branch-level parity
+
+- Added one shared MCPD4 solver-policy adapter for package generation,
+  in-process workers, and TCP coordinator execution. The validated product
+  defaults are now `objective_scale=500`, `initial_step=5000`, five scales,
+  patience 10, momentum enabled, group stopping disabled, and scaled-epsilon
+  cutoff/cap 12/2.
+- Forwarded every common schedule, regularization, promotion, retry,
+  randomized-alpha, halo, canonical-cut, and overflow option instead of the
+  former six-field subset. Both standalone front ends now perform the same
+  preserved-state exhaustive-regularization retry as MCPD3-N.
+- Package construction now materializes isolated nodes and carries canonical
+  local-solve behavior, so worker execution sees the same local problems as
+  native execution.
+- Added policy translation tests covering all regularization branches and
+  invalid domains. Added end-to-end native/coordinator trajectory checks that
+  exercise unregularized random starts, scaled epsilon, plateau activation,
+  group/exhaustion policy, and objective-scale promotion.
+- Aligned progress best-bound semantics across schedule levels and corrected
+  native plateau telemetry to report the regularization actually used in the
+  completed round. MCPD4 passes 6/6 CTest targets; the Phase integration passes
+  58/58 tests.

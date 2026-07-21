@@ -106,6 +106,13 @@ if (BUILD_TESTING)
   add_test(NAME linear_worker_test
     COMMAND linear_worker_test)
 
+  add_executable(solver_policy_test
+    tests/solver_policy_test.cpp)
+  target_link_libraries(solver_policy_test PRIVATE
+    mcpd4_runtime)
+  add_test(NAME solver_policy_test
+    COMMAND solver_policy_test)
+
   add_executable(tcp_loopback_test
     tests/tcp_loopback_test.cpp)
   target_link_libraries(tcp_loopback_test PRIVATE
