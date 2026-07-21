@@ -38,6 +38,7 @@ target_link_libraries(mcpd4_protocol PUBLIC mcpd3_capacity_config)
 add_library(mcpd4_runtime
   src/discovery.cpp
   src/linear_worker.cpp
+  src/remote_worker_pool.cpp
   src/shared_partition_worker.cpp
   src/runtime.cpp
   src/status.cpp
@@ -120,6 +121,13 @@ if (BUILD_TESTING)
     mcpd4_runtime)
   add_test(NAME shared_partition_worker_test
     COMMAND shared_partition_worker_test)
+
+  add_executable(remote_worker_pool_test
+    tests/remote_worker_pool_test.cpp)
+  target_link_libraries(remote_worker_pool_test PRIVATE
+    mcpd4_runtime)
+  add_test(NAME remote_worker_pool_test
+    COMMAND remote_worker_pool_test)
 
   add_executable(tcp_loopback_test
     tests/tcp_loopback_test.cpp)

@@ -2388,3 +2388,17 @@
 - Empty-pool and multi-worker/multi-workspace branches are covered. This is
   the injection boundary used by Phase to retain remote workers across all PU
   cuts instead of reconnecting per min-cut.
+
+## 2026-07-21 00:54 PDT - Reusable discovery worker pool
+
+- Added a reusable remote-worker pool that owns the TCP listener, optional UDP
+  discovery endpoint, accepted worker connections, and the shared namespaced
+  worker pool used by application-level coordinators.
+- The pool reports dynamic listening ports and worker capabilities, waits for
+  both the requested worker count and an explicit discovery close, exposes
+  worker status snapshots, and stops all accepted workers on shutdown.
+- A real worker-runtime regression discovers a dynamic coordinator, connects,
+  survives discovery closure, executes a namespaced exact min-cut, and exits
+  cleanly. Configuration validation covers invalid worker counts and timeouts.
+- The complete MCPD4 suite passes 8/8, including protocol, namespace, remote
+  pool, TCP loopback, and process-level integration tests.
