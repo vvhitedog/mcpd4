@@ -153,20 +153,19 @@ comparing against mcpd4 defaults, pass
 
 ## Out-Of-Core Worker Storage
 
-Workers normally keep every assigned partition solver resident in memory. For
-large graphs, enable disk-backed streaming storage on workers so nonresident
-partition payloads are kept on local disk and only a bounded set of BK solver
-instances is materialized at once.
+Workers keep every assigned partition solver alive so alpha, primal-dual flow,
+and BK residual/search-tree state remain warm. For large graphs, put every
+significant solver array in file-backed mappings and let the operating system
+page those live mappings.
 
 Use this on each process-level worker:
 
 ```bash
 ./build/mcpd4_worker 10.0.0.10 50051 \
   --name worker-a \
-  --bk-mmap-dir /fast-disk/mcpd4-bk-worker-a \
-  --streaming-partitions \
-  --streaming-dir /fast-disk/mcpd4-worker-a \
-  --streaming-cache-bytes 4000000000
+  --bk-storage file_mmap \
+  --bk-mmap-dir /fast-disk/mcpd4-worker-a \
+  --bk-mmap-advise sequential
 ```
 
 Use the same mode in the local in-process benchmark:
@@ -182,20 +181,13 @@ MCPD3_PARTITIONER=basic \
   --schedule-levels 5 \
   --max-iterations 10000 \
   --streaming-workers \
-  --streaming-dir /fast-disk/mcpd4-stream \
-  --streaming-cache-bytes 4000000000
+  --streaming-dir /fast-disk/mcpd4-stream
 ```
 
-`--streaming-cache-bytes 0` means no explicit resident-byte limit. A positive
-limit is approximate and based on BK array plus solver-vector estimates; one
-oversized partition is still allowed to load when the cache is otherwise empty.
-The streaming worker preserves alpha state and the previous local cut labels
-across eviction, which is required by the current scaled-epsilon
-regularization. It also spills warm solver state on cache eviction, including
-primal-dual flow vectors and BK residual/tree state, then restores it when the
-partition is materialized again. Evicted warm snapshots are invalidated across
-objective-scale promotions; resident solvers still scale in place and will
-write a fresh warm snapshot on later eviction.
+The historical `--streaming-partitions`/`--streaming-workers` names remain as
+compatibility aliases for complete file-backed storage. They no longer evict
+or reconstruct partition solvers because that changed the native algorithm's
+warm-state execution. `--streaming-cache-bytes` is accepted but ignored.
 
 ## Quick Localhost Run
 
@@ -582,19 +574,19 @@ usage: mcpd4_worker HOST PORT [--name NAME]
   `mcpd4`.
 - `--rpc-compression none|snappy`: transport compression mode. Must match the
   coordinator's setting.
-- `--streaming-partitions`: keep partition payloads on disk and materialize
-  assigned solvers on demand.
-- `--streaming-dir DIR`: directory for disk-backed partition payloads. If
-  omitted, the worker uses a temporary directory it owns.
-- `--streaming-cache-bytes N`: approximate maximum resident solver bytes for
-  materialized partitions. `0` disables eviction.
+- `--streaming-partitions`: compatibility alias for
+  `--bk-storage file_mmap`; no solver eviction occurs.
+- `--streaming-dir DIR`: compatibility alias for `--bk-mmap-dir DIR`.
+- `--streaming-cache-bytes N`: deprecated and ignored; live mapped state is
+  paged by the operating system.
 - `--name NAME`: optional worker name used in logs and progress output.
-- `--bk-storage MODE`: choose BK graph node/arc-array backing for resident
-  local max-flow solvers. `file_mmap` is the mcpd4 worker default and stores BK
-  arrays in unlinked files under `--bk-mmap-dir`; when no directory is supplied,
-  the worker creates `/var/tmp/mcpd4-bk-mmap-<pid>`. `malloc` is an explicit
-  opt-out for heap-backed BK arrays, and `anon_mmap` uses anonymous mappings.
-  Existing `MCPD3_BK_STORAGE` is still respected when this flag is omitted.
+- `--bk-storage MODE`: choose backing for the complete local solver state,
+  including topology, capacities, primal-dual flow, labels, and BK residual
+  arrays. `file_mmap` is the mcpd4 worker default and stores arrays in unlinked
+  files under `--bk-mmap-dir`; when no directory is supplied, the worker creates
+  `/var/tmp/mcpd4-bk-mmap-<pid>`. `malloc` is an explicit heap-backed opt-out,
+  and `anon_mmap` uses anonymous mappings. Existing `MCPD3_BK_STORAGE` is still
+  respected when this flag is omitted.
 - `--bk-mmap-dir DIR`: directory for `file_mmap` BK storage. Passing this
   without `--bk-storage` implies `file_mmap`. This must be on a disk-backed
   filesystem; the worker rejects memory-backed filesystems such as `tmpfs`,
@@ -605,14 +597,12 @@ usage: mcpd4_worker HOST PORT [--name NAME]
   Supported values include `none`, `willneed`, `populate`, `dontdump`,
   `lock_onfault`, and `lock` where supported by the OS.
 
-For large resident distributed runs, keep the default `file_mmap` storage and
+For large distributed runs, keep the default `file_mmap` storage and
 pass `--bk-mmap-dir` on each worker so it uses a fast local disk with enough
 free space. Do not use `/tmp` unless `findmnt -T /tmp` confirms it is a
 disk-backed filesystem on that machine; prefer an explicit path under a known
-disk mount such as `/var/tmp` or a data volume. This is separate from
-`--streaming-partitions`: BK mmap keeps assigned solvers resident but backs
-their largest internal arrays with files, while streaming workers evict whole
-partition solvers and reload them on demand.
+disk mount such as `/var/tmp` or a data volume. The complete solver object stays
+alive; only the backing of its arrays changes.
 
 Workers receive all partition data from the coordinator after connecting. They
 do not need the DIMACS file.

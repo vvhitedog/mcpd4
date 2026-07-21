@@ -2287,3 +2287,16 @@
 - A remote file-backed worker now rehomes decoded resident payloads into its
   configured mappings before constructing the solver. MCPD4 passes all 6 CTest
   targets, including TCP loopback and process integration.
+
+## 2026-07-20 23:13 PDT - Removed the algorithmically distinct worker mode
+
+- Removed MCPD4's runtime and in-process benchmark selection of
+  `StreamingPartitionWorker`, which evicted and reconstructed local solvers.
+- Historical streaming flags now select complete file-backed
+  `InProcessPartitionWorker` storage. Alpha, momentum, primal-dual flow, local
+  labels, and BK residual/search-tree state remain live exactly as in MCPD3-N.
+- Added a TCP regression proving the compatibility alias maps complete
+  persistent state and still solves exactly. Updated user documentation to
+  describe operating-system paging rather than solver eviction.
+- MCPD4 passes all 6 CTest targets, including the process-level compatibility
+  command and remote mmap diagnostics.

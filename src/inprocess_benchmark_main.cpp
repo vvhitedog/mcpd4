@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <unistd.h>
 
 namespace {
 
@@ -500,21 +501,20 @@ makeInProcessWorkers(const Config &config) {
   std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
   workers.reserve(config.worker_count);
   for (int i = 0; i < config.worker_count; ++i) {
+    mcpd3::SolverStorageOptions storage;
     if (config.streaming_workers) {
-      mcpd3::StreamingPartitionWorker::Options options;
-      options.resident_byte_limit = config.streaming_cache_bytes;
-      if (!config.streaming_dir.empty()) {
-        options.storage_directory =
-            (std::filesystem::path(config.streaming_dir) /
-             ("worker_" + std::to_string(i)))
-                .string();
-        options.remove_storage_on_destroy = false;
-      }
-      workers.push_back(
-          std::make_unique<mcpd3::StreamingPartitionWorker>(std::move(options)));
-    } else {
-      workers.push_back(std::make_unique<mcpd3::InProcessPartitionWorker>());
+      storage.mode = mcpd3::SolverStorageMode::FILE_BACKED_MMAP;
+      const auto root = config.streaming_dir.empty()
+                            ? std::filesystem::path("/var/tmp") /
+                                  ("mcpd4-inprocess-mmap-" +
+                                   std::to_string(::getpid()))
+                            : std::filesystem::path(config.streaming_dir);
+      storage.directory =
+          (root / ("worker_" + std::to_string(i))).string();
+      std::filesystem::create_directories(storage.directory);
     }
+    workers.push_back(
+        std::make_unique<mcpd3::InProcessPartitionWorker>(storage));
   }
   return workers;
 }

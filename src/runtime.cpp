@@ -671,18 +671,30 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
     status_hooks.on_phase("connected");
   }
 
-  std::unique_ptr<mcpd3::PartitionWorker> worker;
+  // The historical streaming worker evicted and reconstructed solvers, which
+  // changes warm-state execution. Keep legacy runtime options as a storage
+  // alias, but always execute the same persistent worker algorithm.
   if (runtime_options.streaming_partitions) {
-    mcpd3::StreamingPartitionWorker::Options options;
-    options.storage_directory = runtime_options.streaming_directory;
-    options.resident_byte_limit = runtime_options.streaming_resident_bytes;
-    options.solver_storage = runtime_options.solver_storage;
-    worker = std::make_unique<mcpd3::StreamingPartitionWorker>(
-        std::move(options));
-  } else {
-    worker = std::make_unique<mcpd3::InProcessPartitionWorker>(
-        runtime_options.solver_storage);
+    if (runtime_options.solver_storage.mode ==
+        mcpd3::SolverStorageMode::RESIDENT) {
+      runtime_options.solver_storage.mode =
+          mcpd3::SolverStorageMode::FILE_BACKED_MMAP;
+    }
+    if (runtime_options.solver_storage.mode ==
+            mcpd3::SolverStorageMode::FILE_BACKED_MMAP &&
+        runtime_options.solver_storage.directory.empty()) {
+      runtime_options.solver_storage.directory =
+          runtime_options.streaming_directory;
+    }
+    if (runtime_options.solver_storage.mode ==
+            mcpd3::SolverStorageMode::FILE_BACKED_MMAP &&
+        runtime_options.solver_storage.directory.empty()) {
+      throw std::runtime_error(
+          "legacy streaming alias requires a file-backed storage directory");
+    }
   }
+  auto worker = std::make_unique<mcpd3::InProcessPartitionWorker>(
+      runtime_options.solver_storage);
   TemporalSolveCodecState temporal_state;
   std::unordered_map<int, LinearStructureMessage> linear_structures;
   std::unordered_map<int, std::unique_ptr<ResidentLinearPartition>>

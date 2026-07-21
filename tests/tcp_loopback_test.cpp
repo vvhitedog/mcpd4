@@ -729,6 +729,67 @@ void remoteWorkerFileBacksCompleteSolverState() {
   }
 }
 
+void legacyStreamingAliasUsesPersistentFileBackedWorker() {
+  if constexpr (!(mcpd3::solver_storage_mmap_compatible_v<mcpd3::Capacity> &&
+                  mcpd3::solver_storage_mmap_compatible_v<mcpd3::NodeFlow> &&
+                  mcpd3::solver_storage_mmap_compatible_v<
+                      mcpd3::TerminalResidual> &&
+                  mcpd3::solver_storage_mmap_compatible_v<mcpd3::Objective>)) {
+    return;
+  }
+  const auto scratch =
+      std::filesystem::temp_directory_path() /
+      ("mcpd4-legacy-streaming-alias-test-" +
+       std::to_string(std::chrono::steady_clock::now()
+                          .time_since_epoch()
+                          .count()));
+  std::filesystem::create_directories(scratch);
+  mcpd4::WorkerRuntimeOptions runtime_options;
+  runtime_options.streaming_partitions = true;
+  runtime_options.streaming_directory = scratch.string();
+
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(
+      &listener, &client, "legacy-streaming-alias-worker",
+      mcpd4::TransportCompression::NONE, runtime_options);
+  try {
+    mcpd3::PartitionPackage package;
+    package.partition_id = 0;
+    package.local_node_count = 2;
+    package.arcs = {0, 1};
+    package.arc_capacities = {7, 7};
+    package.terminal_capacities = {11, -11};
+    package.local_to_global = {0, 1};
+    worker->loadPartition(package);
+
+    std::size_t mapped_file_count = 0;
+    for (const auto &entry :
+         std::filesystem::directory_iterator("/proc/self/fd")) {
+      std::error_code error;
+      const auto target = std::filesystem::read_symlink(entry.path(), error);
+      if (!error && target.string().find(scratch.string()) !=
+                        std::string::npos) {
+        ++mapped_file_count;
+      }
+    }
+    require(mapped_file_count >= 8,
+            "legacy streaming alias must map complete persistent state");
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = 0;
+    require(worker->solveRound(request).lower_bound == 7,
+            "legacy streaming alias should solve exactly");
+    stopAndJoin(worker.get(), client);
+    std::filesystem::remove_all(scratch);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    std::filesystem::remove_all(scratch);
+    throw;
+  }
+}
+
 void remoteWorkerSolvesConfiguredPrecisionExtreme() {
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
@@ -1055,6 +1116,7 @@ int main() {
     remoteWorkerScalesLoadedObjective();
     remoteWorkerReplacesCapacitiesAndPreservesWarmState();
     remoteWorkerFileBacksCompleteSolverState();
+    legacyStreamingAliasUsesPersistentFileBackedWorker();
     remoteWorkerSolvesConfiguredPrecisionExtreme();
     remoteWorkerSaturatesScaleObjectiveOverflow();
     remoteWorkerSolvesExplicitBatch();

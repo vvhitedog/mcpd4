@@ -630,3 +630,13 @@
   still materializes the complete encoded frame and decoded resident package
   first. Bounded-memory TCP package transfer requires chunked encoding and
   direct mapped assembly; it is the next transport unit.
+
+## 2026-07-20 - Solver eviction under the streaming name
+
+- Do not use `StreamingPartitionWorker` as MCPD4's out-of-core execution mode.
+  Evicting and reconstructing local solvers is an algorithmic change because
+  it serializes/rebuilds flow and BK residual state instead of retaining the
+  exact native object throughout the schedule.
+- Keep assigned solvers alive and change only array backing. The old streaming
+  CLI names may remain as compatibility aliases, but cache-size requests must
+  not re-enable eviction.

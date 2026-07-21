@@ -283,10 +283,10 @@ struct WorkerStatusState {
     rpc_compression = mcpd4::transportCompressionName(compression);
   }
 
-  void setStorageMode(bool streaming, const std::string &directory,
+  void setStorageMode(const std::string &mode, const std::string &directory,
                       std::uint64_t cache_bytes) {
     std::lock_guard<std::mutex> lock(mutex);
-    worker_storage_mode = streaming ? "streaming" : "memory";
+    worker_storage_mode = mode;
     streaming_dir = directory.empty() ? "-" : directory;
     streaming_cache_bytes = cache_bytes;
   }
@@ -591,6 +591,30 @@ int main(int argc, char **argv) {
     if (!bk_storage.empty() && !isValidBkStorageMode(bk_storage)) {
       throw std::runtime_error("unknown --bk-storage mode: " + bk_storage);
     }
+    if (streaming_partitions) {
+      if (!bk_storage.empty() && bk_storage != "file_mmap") {
+        throw std::runtime_error(
+            "--streaming-partitions is a file-mmap compatibility alias and "
+            "cannot be combined with --bk-storage " +
+            bk_storage);
+      }
+      if (!streaming_dir.empty()) {
+        if (!bk_mmap_dir.empty() && bk_mmap_dir != streaming_dir) {
+          throw std::runtime_error(
+              "--streaming-dir and --bk-mmap-dir must name the same "
+              "directory");
+        }
+        bk_mmap_dir = streaming_dir;
+      }
+      bk_storage = "file_mmap";
+      std::cerr
+          << "warning: --streaming-partitions now aliases complete "
+             "file-backed solver storage; partition eviction is disabled\n";
+      if (streaming_cache_bytes != 0) {
+        std::cerr << "warning: --streaming-cache-bytes is ignored because "
+                     "solver state remains persistent\n";
+      }
+    }
     OwnedDirectory owned_bk_mmap_dir;
     configureBkStorageDefaults(&bk_storage, &bk_mmap_dir,
                                &owned_bk_mmap_dir);
@@ -617,8 +641,9 @@ int main(int argc, char **argv) {
     }
     status_state.setIdentity(hello);
     status_state.setCompression(rpc_compression);
-    status_state.setStorageMode(streaming_partitions, streaming_dir,
-                                streaming_cache_bytes);
+    status_state.setStorageMode(
+        effectiveBkStorageMode() == "file_mmap" ? "file_mmap" : "resident",
+        envValue("MCPD3_BK_MMAP_DIR"), 0);
     status_state.setBkStorage(effectiveBkStorageMode(),
                               envValue("MCPD3_BK_MMAP_DIR"),
                               envValue("MCPD3_BK_MMAP_ADVISE"));
@@ -690,7 +715,7 @@ int main(int argc, char **argv) {
 
     mcpd4::WorkerRuntimeOptions runtime_options;
     runtime_options.streaming_partitions = streaming_partitions;
-    runtime_options.streaming_directory = streaming_dir;
+    runtime_options.streaming_directory = envValue("MCPD3_BK_MMAP_DIR");
     runtime_options.streaming_resident_bytes = streaming_cache_bytes;
     const std::string solver_storage_mode = effectiveBkStorageMode();
     if (solver_storage_mode == "file_mmap") {
