@@ -14,7 +14,7 @@
 
 namespace mcpd4 {
 
-constexpr std::uint32_t kProtocolVersion = 9;
+constexpr std::uint32_t kProtocolVersion = 10;
 constexpr std::uint64_t kFeatureSnappyCompression = 1ULL << 0;
 
 struct RpcByteStats {
@@ -38,6 +38,8 @@ struct RpcByteStats {
   std::uint64_t solve_result_rx_bytes = 0;
   std::uint64_t scale_objective_tx_bytes = 0;
   std::uint64_t scale_objective_rx_bytes = 0;
+  std::uint64_t capacity_update_tx_bytes = 0;
+  std::uint64_t capacity_update_rx_bytes = 0;
   std::uint64_t ready_tx_bytes = 0;
   std::uint64_t ready_rx_bytes = 0;
   std::uint64_t stop_tx_bytes = 0;
@@ -53,10 +55,12 @@ struct TcpPartitionWorkerTimingStats {
   std::uint64_t solve_round_rpc_wall_us = 0;
   std::uint64_t solve_round_worker_wall_us = 0;
   std::uint64_t scale_objective_rpc_wall_us = 0;
+  std::uint64_t capacity_update_rpc_wall_us = 0;
   long load_partition_rpc_count = 0;
   long partition_solve_call_count = 0;
   long solve_batch_rpc_count = 0;
   long scale_objective_rpc_count = 0;
+  long capacity_update_rpc_count = 0;
   std::uint64_t linear_rpc_wall_us = 0;
   long linear_structure_rpc_count = 0;
   long linear_system_rpc_count = 0;
@@ -91,6 +95,8 @@ public:
       const std::vector<mcpd3::PartitionSolveRequest> &requests) override;
   void scaleObjective(long factor,
                       bool saturate_capacity_overflow = false) override;
+  void replacePartitionCapacities(
+      const mcpd3::PartitionCapacityUpdate &update) override;
 
   void loadLinearStructure(const LinearStructureMessage &message);
   void loadLinearSystem(const LinearSystemValuesMessage &message);
@@ -143,6 +149,7 @@ struct WorkerRuntimeOptions {
   bool streaming_partitions = false;
   std::string streaming_directory;
   std::uint64_t streaming_resident_bytes = 0;
+  mcpd3::SolverStorageOptions solver_storage;
 };
 
 void runWorkerClient(const std::string &host, std::uint16_t port,

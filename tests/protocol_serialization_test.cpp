@@ -103,6 +103,19 @@ void requirePackageEqual(const mcpd3::PartitionPackage &lhs,
           "package terminal capacities mismatch");
   require(lhs.local_to_global == rhs.local_to_global,
           "package local-to-global mismatch");
+  require(lhs.objective_multiplier == rhs.objective_multiplier,
+          "package objective multiplier mismatch");
+  require(lhs.canonical_cut_selection == rhs.canonical_cut_selection,
+          "package canonical cut selection mismatch");
+  require(lhs.force_full_mincut_recompute == rhs.force_full_mincut_recompute,
+          "package full recompute policy mismatch");
+  require(lhs.reference_cut_labels == rhs.reference_cut_labels,
+          "package reference labels mismatch");
+  require(lhs.reference_cut_selection == rhs.reference_cut_selection,
+          "package reference selection mismatch");
+  require(lhs.reference_cut_check_interval ==
+              rhs.reference_cut_check_interval,
+          "package reference check interval mismatch");
   require(lhs.constraint_endpoints.size() == rhs.constraint_endpoints.size(),
           "package endpoint count mismatch");
   for (size_t i = 0; i < lhs.constraint_endpoints.size(); ++i) {
@@ -119,6 +132,14 @@ mcpd3::PartitionPackage makePackage() {
   package.arc_capacities = {3, 5, 7, 11};
   package.terminal_capacities = {13, -17, 19};
   package.local_to_global = {100, 200, 300};
+  package.objective_multiplier = 6;
+  package.canonical_cut_selection =
+      mcpd3::CanonicalCutSelection::MAXIMUM_LABELS;
+  package.force_full_mincut_recompute = true;
+  package.reference_cut_labels = {1, 0, 1};
+  package.reference_cut_selection =
+      mcpd3::ReferenceCutSelection::EXACT_REFERENCE_IF_OPTIMAL;
+  package.reference_cut_check_interval = 7;
   package.constraint_endpoints.push_back(
       mcpd3::ConstraintEndpointBinding{/*constraint_id=*/41,
                                         /*global_node_id=*/200,
@@ -844,6 +865,31 @@ void roundTripsScaleObjective() {
           "scale objective saturation flag mismatch");
 }
 
+void roundTripsPartitionCapacityUpdate() {
+  mcpd3::PartitionCapacityUpdate update;
+  update.partition_id = 17;
+  update.arc_capacities = {3, 4, 5, 6};
+  update.terminal_capacities = {-7, 8, 0};
+  update.preserve_flow_state = false;
+  update.flow_scale_numerator = 13;
+  update.flow_scale_denominator = 9;
+
+  const auto decoded = mcpd4::decodePartitionCapacityUpdate(
+      mcpd4::encodePartitionCapacityUpdate(update));
+  require(decoded.partition_id == update.partition_id,
+          "capacity update partition mismatch");
+  require(decoded.arc_capacities == update.arc_capacities,
+          "capacity update arc capacities mismatch");
+  require(decoded.terminal_capacities == update.terminal_capacities,
+          "capacity update terminal capacities mismatch");
+  require(decoded.preserve_flow_state == update.preserve_flow_state,
+          "capacity update preserve-flow flag mismatch");
+  require(decoded.flow_scale_numerator == update.flow_scale_numerator,
+          "capacity update flow numerator mismatch");
+  require(decoded.flow_scale_denominator == update.flow_scale_denominator,
+          "capacity update flow denominator mismatch");
+}
+
 void roundTripsAlphaUpdate() {
   mcpd4::AlphaUpdateMessage message;
   message.partition_id = 5;
@@ -1047,6 +1093,13 @@ void rejectsMalformedFrames() {
   requireThrows([&] {
     mcpd4::decodeScaleObjective(trailing_payload);
   }, "trailing payload bytes should fail");
+
+  auto truncated_capacity_update = mcpd4::encodePartitionCapacityUpdate(
+      mcpd3::PartitionCapacityUpdate{});
+  truncated_capacity_update.pop_back();
+  requireThrows(
+      [&] { mcpd4::decodePartitionCapacityUpdate(truncated_capacity_update); },
+      "truncated capacity update should fail");
 }
 
 } // namespace
@@ -1068,6 +1121,7 @@ int main() {
     deltaSolveRoundResultReconstructsFullLabels();
     deltaSolveRoundBatchResultShrinksRepeatedLabels();
     roundTripsScaleObjective();
+    roundTripsPartitionCapacityUpdate();
     roundTripsAlphaUpdate();
     roundTripsStop();
     roundTripsError();

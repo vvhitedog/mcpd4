@@ -90,6 +90,9 @@ void recordFrameSent(RpcByteStats *stats, MessageType type,
   case MessageType::SCALE_OBJECTIVE:
     stats->scale_objective_tx_bytes += bytes;
     break;
+  case MessageType::REPLACE_PARTITION_CAPACITIES:
+    stats->capacity_update_tx_bytes += bytes;
+    break;
   case MessageType::READY:
     stats->ready_tx_bytes += bytes;
     break;
@@ -151,6 +154,9 @@ void recordFrameReceived(RpcByteStats *stats, MessageType type,
     break;
   case MessageType::SCALE_OBJECTIVE:
     stats->scale_objective_rx_bytes += bytes;
+    break;
+  case MessageType::REPLACE_PARTITION_CAPACITIES:
+    stats->capacity_update_rx_bytes += bytes;
     break;
   case MessageType::READY:
     stats->ready_rx_bytes += bytes;
@@ -418,6 +424,20 @@ void TcpPartitionWorker::scaleObjective(long factor,
   ++timing_stats_.scale_objective_rpc_count;
 }
 
+void TcpPartitionWorker::replacePartitionCapacities(
+    const mcpd3::PartitionCapacityUpdate &update) {
+  const auto start = std::chrono::steady_clock::now();
+  const auto frame = encodePartitionCapacityUpdate(update);
+  FrameTransferStats transfer;
+  sendFrameBytes(socket_, frame, compression_, &transfer);
+  recordFrameSent(&timing_stats_.rpc_bytes,
+                  MessageType::REPLACE_PARTITION_CAPACITIES, transfer);
+  (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes, compression_);
+  temporal_state_.resetPartition(update.partition_id);
+  timing_stats_.capacity_update_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.capacity_update_rpc_count;
+}
+
 void TcpPartitionWorker::loadLinearStructure(
     const LinearStructureMessage &message) {
   const auto start = std::chrono::steady_clock::now();
@@ -656,10 +676,12 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
     mcpd3::StreamingPartitionWorker::Options options;
     options.storage_directory = runtime_options.streaming_directory;
     options.resident_byte_limit = runtime_options.streaming_resident_bytes;
+    options.solver_storage = runtime_options.solver_storage;
     worker = std::make_unique<mcpd3::StreamingPartitionWorker>(
         std::move(options));
   } else {
-    worker = std::make_unique<mcpd3::InProcessPartitionWorker>();
+    worker = std::make_unique<mcpd3::InProcessPartitionWorker>(
+        runtime_options.solver_storage);
   }
   TemporalSolveCodecState temporal_state;
   std::unordered_map<int, LinearStructureMessage> linear_structures;
@@ -776,6 +798,21 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
           worker->scaleObjective(message.factor,
                                  message.saturate_capacity_overflow);
           temporal_state.reset();
+          if (status_hooks.on_phase) {
+            status_hooks.on_phase("connected");
+          }
+          const auto transfer =
+              sendReady(socket, hello.worker_name, compression);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::READY, transfer);
+          }
+        }
+        break;
+      case MessageType::REPLACE_PARTITION_CAPACITIES:
+        {
+          const auto update = decodePartitionCapacityUpdate(frame_bytes);
+          worker->replacePartitionCapacities(update);
+          temporal_state.resetPartition(update.partition_id);
           if (status_hooks.on_phase) {
             status_hooks.on_phase("connected");
           }

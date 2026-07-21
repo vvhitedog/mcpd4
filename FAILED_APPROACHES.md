@@ -600,3 +600,13 @@
   Another partition can have a nonzero direction whose cross-boundary matrix
   product makes the locally exact partition's next residual nonzero. Only the
   coordinator's global residual reduction may stop collective PCG.
+
+## 2026-07-20 - Calling BK-only mmap complete worker streaming
+
+- Do not claim `--bk-storage file_mmap` makes a worker out-of-core when only
+  BK node and residual arrays honor it. The primal-dual solver's topology,
+  capacities, flow, labels, and changed-node state are also significant and
+  must use the same allocation policy.
+- Backing files are unlinked immediately after mapping by design. A scratch
+  directory listing is therefore not a valid test for active file backing;
+  use solver diagnostics in-process or inspect `/proc/self/fd` remotely.

@@ -43,6 +43,7 @@ bool isKnownMessageType(std::uint32_t value) {
   case MessageType::LINEAR_BETA_RESULT:
   case MessageType::LINEAR_SOLUTION_REQUEST:
   case MessageType::LINEAR_SOLUTION_RESULT:
+  case MessageType::REPLACE_PARTITION_CAPACITIES:
     return true;
   }
   return false;
@@ -54,6 +55,25 @@ bool isKnownCapacityMode(std::uint32_t value) {
   case CapacityMode::BITS_64:
   case CapacityMode::BITS_128:
   case CapacityMode::GMP:
+    return true;
+  }
+  return false;
+}
+
+bool isKnownCanonicalCutSelection(std::uint32_t value) {
+  switch (static_cast<mcpd3::CanonicalCutSelection>(value)) {
+  case mcpd3::CanonicalCutSelection::SOLVER_DEFAULT:
+  case mcpd3::CanonicalCutSelection::MINIMUM_LABELS:
+  case mcpd3::CanonicalCutSelection::MAXIMUM_LABELS:
+    return true;
+  }
+  return false;
+}
+
+bool isKnownReferenceCutSelection(std::uint32_t value) {
+  switch (static_cast<mcpd3::ReferenceCutSelection>(value)) {
+  case mcpd3::ReferenceCutSelection::CLOSEST_EXACT:
+  case mcpd3::ReferenceCutSelection::EXACT_REFERENCE_IF_OPTIMAL:
     return true;
   }
   return false;
@@ -500,6 +520,15 @@ std::vector<std::uint8_t> encodePartitionPackage(
   writer.writeVector<mcpd3::ConstraintEndpointBinding>(
       message.constraint_endpoints,
       [&](const auto &binding) { writeConstraintEndpoint(&writer, binding); });
+  writer.writeI64(message.objective_multiplier);
+  writer.writeU32(
+      static_cast<std::uint32_t>(message.canonical_cut_selection));
+  writer.writeBool(message.force_full_mincut_recompute);
+  writer.writeVector<int>(message.reference_cut_labels,
+                          [&](int value) { writer.writeI32(value); });
+  writer.writeU32(
+      static_cast<std::uint32_t>(message.reference_cut_selection));
+  writer.writeI64(message.reference_cut_check_interval);
   return encodeFrame(MessageType::PARTITION_PACKAGE, writer.bytes());
 }
 
@@ -520,6 +549,23 @@ mcpd3::PartitionPackage decodePartitionPackage(
   message.constraint_endpoints =
       reader.readVector<mcpd3::ConstraintEndpointBinding>(
           [&] { return readConstraintEndpoint(&reader); });
+  message.objective_multiplier =
+      checkedIntegerCast<long>(reader.readI64());
+  const std::uint32_t canonical_selection = reader.readU32();
+  require(isKnownCanonicalCutSelection(canonical_selection),
+          "unknown canonical cut selection");
+  message.canonical_cut_selection =
+      static_cast<mcpd3::CanonicalCutSelection>(canonical_selection);
+  message.force_full_mincut_recompute = reader.readBool();
+  message.reference_cut_labels =
+      reader.readVector<int>([&] { return reader.readI32(); });
+  const std::uint32_t reference_selection = reader.readU32();
+  require(isKnownReferenceCutSelection(reference_selection),
+          "unknown reference cut selection");
+  message.reference_cut_selection =
+      static_cast<mcpd3::ReferenceCutSelection>(reference_selection);
+  message.reference_cut_check_interval =
+      checkedIntegerCast<long>(reader.readI64());
   requireDone(reader);
   return message;
 }
@@ -662,6 +708,41 @@ ScaleObjectiveMessage decodeScaleObjective(
   ScaleObjectiveMessage message;
   message.factor = reader.readI64();
   message.saturate_capacity_overflow = reader.readBool();
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodePartitionCapacityUpdate(
+    const mcpd3::PartitionCapacityUpdate &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writer.writeVector<mcpd3::Capacity>(
+      message.arc_capacities,
+      [&](const auto &value) { writer.writeInteger(value); });
+  writer.writeVector<mcpd3::Capacity>(
+      message.terminal_capacities,
+      [&](const auto &value) { writer.writeInteger(value); });
+  writer.writeBool(message.preserve_flow_state);
+  writer.writeInteger(message.flow_scale_numerator);
+  writer.writeInteger(message.flow_scale_denominator);
+  return encodeFrame(MessageType::REPLACE_PARTITION_CAPACITIES,
+                     writer.bytes());
+}
+
+mcpd3::PartitionCapacityUpdate decodePartitionCapacityUpdate(
+    const std::vector<std::uint8_t> &frame) {
+  auto decoded = decodeExpectedFrame(
+      frame, MessageType::REPLACE_PARTITION_CAPACITIES);
+  Reader reader(decoded.payload);
+  mcpd3::PartitionCapacityUpdate message;
+  message.partition_id = reader.readI32();
+  message.arc_capacities = reader.readVector<mcpd3::Capacity>(
+      [&] { return reader.readCapacity(); });
+  message.terminal_capacities = reader.readVector<mcpd3::Capacity>(
+      [&] { return reader.readCapacity(); });
+  message.preserve_flow_state = reader.readBool();
+  message.flow_scale_numerator = reader.readObjective();
+  message.flow_scale_denominator = reader.readObjective();
   requireDone(reader);
   return message;
 }

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -89,11 +90,12 @@ public:
   WorkerClientThread(std::uint16_t port,
                      mcpd4::HelloMessage hello,
                      mcpd4::TransportCompression compression =
-                         mcpd4::TransportCompression::NONE)
-      : thread_([this, port, hello, compression] {
+                         mcpd4::TransportCompression::NONE,
+                     mcpd4::WorkerRuntimeOptions runtime_options = {})
+      : thread_([this, port, hello, compression, runtime_options] {
           try {
             mcpd4::runWorkerClient("127.0.0.1", port, hello, {},
-                                   compression);
+                                   compression, runtime_options);
           } catch (...) {
             exception_ = std::current_exception();
           }
@@ -186,13 +188,15 @@ std::unique_ptr<mcpd4::TcpPartitionWorker> startRemoteWorker(
     mcpd4::SocketHandle *listener, WorkerClientThread **client,
     const std::string &worker_name,
     mcpd4::TransportCompression compression =
-        mcpd4::TransportCompression::NONE) {
+        mcpd4::TransportCompression::NONE,
+    mcpd4::WorkerRuntimeOptions runtime_options = {}) {
   const auto port = mcpd4::localPort(*listener);
   auto hello = makeHello(worker_name);
   if (compression == mcpd4::TransportCompression::SNAPPY) {
     hello.feature_bits |= mcpd4::kFeatureSnappyCompression;
   }
-  *client = new WorkerClientThread(port, hello, compression);
+  *client = new WorkerClientThread(port, hello, compression,
+                                   std::move(runtime_options));
   return mcpd4::acceptTcpPartitionWorker(listener, 2s, compression);
 }
 
@@ -602,6 +606,129 @@ void remoteWorkerScalesLoadedObjective() {
   }
 }
 
+void remoteWorkerReplacesCapacitiesAndPreservesWarmState() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(&listener, &client, "capacity-worker");
+  try {
+    mcpd3::PartitionPackage package;
+    package.partition_id = 0;
+    package.local_node_count = 2;
+    package.arcs = {0, 1};
+    package.arc_capacities = {5, 0};
+    package.terminal_capacities = {9, -9};
+    package.local_to_global = {0, 1};
+    worker->loadPartition(package);
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = 0;
+    request.return_full_labels = true;
+    const auto before = worker->solveRound(request);
+    require(before.lower_bound == 5,
+            "capacity replacement test needs a nonzero warm flow");
+
+    mcpd3::PartitionCapacityUpdate update;
+    update.partition_id = 0;
+    update.arc_capacities = {10, 0};
+    update.terminal_capacities = {18, -18};
+    update.preserve_flow_state = true;
+    update.flow_scale_numerator = 2;
+    update.flow_scale_denominator = 1;
+    worker->replacePartitionCapacities(update);
+
+    request.round_id = 2;
+    const auto after = worker->solveRound(request);
+    require(after.lower_bound == before.lower_bound * 2,
+            "remote capacity replacement should preserve and scale flow");
+    require(after.full_labels.size() == before.full_labels.size(),
+            "remote capacity replacement should preserve label count");
+    for (std::size_t i = 0; i < after.full_labels.size(); ++i) {
+      require(after.full_labels[i].global_node_id ==
+                  before.full_labels[i].global_node_id &&
+                  after.full_labels[i].local_index ==
+                      before.full_labels[i].local_index &&
+                  after.full_labels[i].label == before.full_labels[i].label,
+              "remote capacity replacement should preserve the cut");
+    }
+
+    update.preserve_flow_state = false;
+    update.flow_scale_numerator = 1;
+    update.flow_scale_denominator = 1;
+    worker->replacePartitionCapacities(update);
+    request.round_id = 3;
+    const auto reset = worker->solveRound(request);
+    require(reset.lower_bound == after.lower_bound,
+            "remote capacity replacement should recompute after flow reset");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
+void remoteWorkerFileBacksCompleteSolverState() {
+  if constexpr (!(mcpd3::solver_storage_mmap_compatible_v<mcpd3::Capacity> &&
+                  mcpd3::solver_storage_mmap_compatible_v<mcpd3::NodeFlow> &&
+                  mcpd3::solver_storage_mmap_compatible_v<
+                      mcpd3::TerminalResidual> &&
+                  mcpd3::solver_storage_mmap_compatible_v<mcpd3::Objective>)) {
+    return;
+  }
+  const auto scratch =
+      std::filesystem::temp_directory_path() /
+      ("mcpd4-worker-file-backed-test-" +
+       std::to_string(std::chrono::steady_clock::now()
+                          .time_since_epoch()
+                          .count()));
+  std::filesystem::create_directories(scratch);
+  mcpd4::WorkerRuntimeOptions runtime_options;
+  runtime_options.solver_storage.mode =
+      mcpd3::SolverStorageMode::FILE_BACKED_MMAP;
+  runtime_options.solver_storage.directory = scratch.string();
+
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(
+      &listener, &client, "file-backed-worker",
+      mcpd4::TransportCompression::NONE, runtime_options);
+  try {
+    mcpd3::PartitionPackage package;
+    package.partition_id = 0;
+    package.local_node_count = 2;
+    package.arcs = {0, 1};
+    package.arc_capacities = {7, 7};
+    package.terminal_capacities = {11, -11};
+    package.local_to_global = {0, 1};
+    worker->loadPartition(package);
+
+    std::size_t mapped_file_count = 0;
+    for (const auto &entry :
+         std::filesystem::directory_iterator("/proc/self/fd")) {
+      std::error_code error;
+      const auto target = std::filesystem::read_symlink(entry.path(), error);
+      if (!error && target.string().find(scratch.string()) !=
+                        std::string::npos) {
+        ++mapped_file_count;
+      }
+    }
+    require(mapped_file_count >= 8,
+            "remote file-backed worker should map all persistent arrays");
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = 0;
+    require(worker->solveRound(request).lower_bound == 7,
+            "remote file-backed worker should solve exactly");
+    stopAndJoin(worker.get(), client);
+    std::filesystem::remove_all(scratch);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    std::filesystem::remove_all(scratch);
+    throw;
+  }
+}
+
 void remoteWorkerSolvesConfiguredPrecisionExtreme() {
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
@@ -926,6 +1053,8 @@ int main() {
     twoRemoteWorkersSolveCollectivePcgSystem();
     loadPartitionDisconnectReportsWorkerAndPartitionContext();
     remoteWorkerScalesLoadedObjective();
+    remoteWorkerReplacesCapacitiesAndPreservesWarmState();
+    remoteWorkerFileBacksCompleteSolverState();
     remoteWorkerSolvesConfiguredPrecisionExtreme();
     remoteWorkerSaturatesScaleObjectiveOverflow();
     remoteWorkerSolvesExplicitBatch();

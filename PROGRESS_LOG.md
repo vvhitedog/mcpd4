@@ -2236,3 +2236,19 @@
   regression now covers the initialized-zero invariant.
 - The fixed TCP loopback test passed 100 consecutive runs. The complete mcpd4
   Release suite passes 5/5, including process integration.
+
+## 2026-07-20 20:17 PDT - Persistent MCPD3-N algorithm parity over TCP
+
+- Advanced the MCPD3 backend to the shared native/distributed scheduling and
+  regularization policy, complete file-backed worker state, and exact
+  flow-preserving capacity refresh API.
+- Extended protocol version 10 with all behavior-affecting package policy and
+  `REPLACE_PARTITION_CAPACITIES`. The new request carries capacities, flow
+  preservation, and an exact rational flow scale; malformed and truncated
+  branches are covered.
+- Wired `--bk-storage file_mmap` through the entire worker solver state rather
+  than only BK internals. A remote TCP test verifies the live unlinked backing
+  mappings through `/proc/self/fd` and compares the exact result.
+- Added live TCP tests for capacity replacement with and without warm-flow
+  preservation and temporal-state reset. The full MCPD4 suite passes 5/5,
+  including protocol, loopback, and process integration tests.

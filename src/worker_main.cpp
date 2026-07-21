@@ -386,6 +386,7 @@ struct WorkerStatusState {
     case mcpd4::MessageType::PARTITION_PACKAGE:
     case mcpd4::MessageType::SOLVE_ROUND_REQUEST:
     case mcpd4::MessageType::SCALE_OBJECTIVE:
+    case mcpd4::MessageType::REPLACE_PARTITION_CAPACITIES:
     case mcpd4::MessageType::ALPHA_UPDATE:
     case mcpd4::MessageType::STOP:
     case mcpd4::MessageType::SOLVE_ROUND_BATCH_REQUEST:
@@ -417,6 +418,9 @@ struct WorkerStatusState {
       break;
     case mcpd4::MessageType::SCALE_OBJECTIVE:
       rpc_bytes.scale_objective_rx_bytes += bytes;
+      break;
+    case mcpd4::MessageType::REPLACE_PARTITION_CAPACITIES:
+      rpc_bytes.capacity_update_rx_bytes += bytes;
       break;
     case mcpd4::MessageType::STOP:
       rpc_bytes.stop_rx_bytes += bytes;
@@ -688,6 +692,22 @@ int main(int argc, char **argv) {
     runtime_options.streaming_partitions = streaming_partitions;
     runtime_options.streaming_directory = streaming_dir;
     runtime_options.streaming_resident_bytes = streaming_cache_bytes;
+    const std::string solver_storage_mode = effectiveBkStorageMode();
+    if (solver_storage_mode == "file_mmap") {
+      runtime_options.solver_storage.mode =
+          mcpd3::SolverStorageMode::FILE_BACKED_MMAP;
+    } else if (solver_storage_mode == "anon_mmap" ||
+               solver_storage_mode == "anonymous_mmap") {
+      runtime_options.solver_storage.mode =
+          mcpd3::SolverStorageMode::ANONYMOUS_MMAP;
+    } else {
+      runtime_options.solver_storage.mode =
+          mcpd3::SolverStorageMode::RESIDENT;
+    }
+    runtime_options.solver_storage.directory =
+        envValue("MCPD3_BK_MMAP_DIR");
+    runtime_options.solver_storage.mmap_advice =
+        envValue("MCPD3_BK_MMAP_ADVISE");
     mcpd4::runWorkerClient(host, port, hello, hooks, rpc_compression,
                            runtime_options);
   } catch (const std::exception &e) {

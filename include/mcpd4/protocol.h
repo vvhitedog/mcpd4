@@ -52,6 +52,7 @@ enum class MessageType : std::uint32_t {
   LINEAR_BETA_RESULT = 21,
   LINEAR_SOLUTION_REQUEST = 22,
   LINEAR_SOLUTION_RESULT = 23,
+  REPLACE_PARTITION_CAPACITIES = 24,
 };
 
 struct Frame {
@@ -206,6 +207,11 @@ TimedSolveRoundBatchResult decodeTimedSolveRoundBatchResult(
 std::vector<std::uint8_t> encodeScaleObjective(
     const ScaleObjectiveMessage &message);
 ScaleObjectiveMessage decodeScaleObjective(
+    const std::vector<std::uint8_t> &frame);
+
+std::vector<std::uint8_t> encodePartitionCapacityUpdate(
+    const mcpd3::PartitionCapacityUpdate &message);
+mcpd3::PartitionCapacityUpdate decodePartitionCapacityUpdate(
     const std::vector<std::uint8_t> &frame);
 
 std::vector<std::uint8_t> encodeAlphaUpdate(
