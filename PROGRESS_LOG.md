@@ -2416,3 +2416,11 @@
   preservation of unselected state, explicit local-ID reuse, automatic
   destructor cleanup, direct TCP release, and status ownership. MCPD4 passes
   8/8 and the Phase integration passes 58/58.
+
+## 2026-07-21 01:12 PDT - Mapped native recovery dependency
+
+- Advanced the MCPD3 dependency to direct agreed-label recovery and
+  backing-aware partition validation, removing two remaining node-sized
+  resident staging allocations from MCPD3-N/Phase file-backed execution.
+- MCPD3 passes 2/2 tests and the complete Phase integration suite passes
+  58/58 with this dependency.
