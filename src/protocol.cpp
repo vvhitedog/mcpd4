@@ -153,8 +153,8 @@ public:
     bytes_.insert(bytes_.end(), value.begin(), value.end());
   }
 
-  template <typename T, typename Fn>
-  void writeVector(const std::vector<T> &values, Fn write_one) {
+  template <typename T, typename Container, typename Fn>
+  void writeVector(const Container &values, Fn write_one) {
     writeU32(checkedSize(values.size()));
     for (const auto &value : values) {
       write_one(value);

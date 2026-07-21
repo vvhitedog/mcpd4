@@ -1595,7 +1595,7 @@ std::vector<mcpd3::PartitionPackage> makePartitionPackages(
       partition_count, graph.nnode, graph.narc, std::move(graph.arcs),
       std::move(graph.arc_capacities), std::move(graph.terminal_capacities),
       package_options);
-  return package_source.getPartitionPackages();
+  return package_source.takePartitionPackages();
 }
 
 struct SolveCounterStats {

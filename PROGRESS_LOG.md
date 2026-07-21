@@ -2275,3 +2275,15 @@
   native plateau telemetry to report the regularization actually used in the
   completed round. MCPD4 passes 6/6 CTest targets; the Phase integration passes
   58/58 tests.
+
+## 2026-07-20 23:04 PDT - Backing-preserving package handoff
+
+- Advanced MCPD3 package topology, capacities, local/global maps, reference
+  labels, and capacity-refresh data to backing-preserving arrays.
+- MCPD4 package builders now consume the generated packages by move rather
+  than retaining and copying a second partition payload.
+- Generalized protocol serialization over contiguous package containers while
+  preserving the existing wire representation and exact arithmetic.
+- A remote file-backed worker now rehomes decoded resident payloads into its
+  configured mappings before constructing the solver. MCPD4 passes all 6 CTest
+  targets, including TCP loopback and process integration.

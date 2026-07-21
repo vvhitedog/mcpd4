@@ -622,3 +622,11 @@
   randomize initial alphas again. Production package generation emits the
   base alpha state; randomized initialization is applied exactly once by the
   active solver/coordinator.
+
+## 2026-07-20 - Treating a file-backed destination as bounded-memory transfer
+
+- Do not count a remote worker as out of core merely because it rehomes a
+  decoded package into mapped solver arrays. The current single-frame protocol
+  still materializes the complete encoded frame and decoded resident package
+  first. Bounded-memory TCP package transfer requires chunked encoding and
+  direct mapped assembly; it is the next transport unit.

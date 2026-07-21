@@ -298,7 +298,7 @@ makePartitionPackages(int partition_count, mcpd3::MinCutGraph graph,
       partition_count, graph.nnode, graph.narc, std::move(graph.arcs),
       std::move(graph.arc_capacities), std::move(graph.terminal_capacities),
       package_options);
-  return package_source.getPartitionPackages();
+  return package_source.takePartitionPackages();
 }
 
 void printConfig(const Config &config) {
