@@ -2379,3 +2379,12 @@
   covered.
 - MCPD3 passes 2/2 tests; the focused MCPD4 protocol, namespace, and TCP tests
   pass 3/3.
+
+## 2026-07-21 00:52 PDT - Reusable physical-worker pool
+
+- Added a pool that owns physical workers for the lifetime of a complete
+  application solve and issues one isolated proxy per physical worker to each
+  coordinator workspace.
+- Empty-pool and multi-worker/multi-workspace branches are covered. This is
+  the injection boundary used by Phase to retain remote workers across all PU
+  cuts instead of reconnecting per min-cut.

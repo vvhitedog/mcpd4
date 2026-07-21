@@ -186,4 +186,23 @@ SharedPartitionWorkerConnection::makeNamespace() {
   return std::make_unique<NamespacePartitionWorker>(state_);
 }
 
+void SharedPartitionWorkerPool::addWorker(
+    std::unique_ptr<mcpd3::PartitionWorker> worker) {
+  connections_.push_back(
+      std::make_shared<SharedPartitionWorkerConnection>(std::move(worker)));
+}
+
+std::vector<std::unique_ptr<mcpd3::PartitionWorker>>
+SharedPartitionWorkerPool::makeNamespaceWorkers() const {
+  if (connections_.empty()) {
+    throw std::runtime_error("shared partition worker pool is empty");
+  }
+  std::vector<std::unique_ptr<mcpd3::PartitionWorker>> workers;
+  workers.reserve(connections_.size());
+  for (const auto &connection : connections_) {
+    workers.push_back(connection->makeNamespace());
+  }
+  return workers;
+}
+
 } // namespace mcpd4

@@ -140,12 +140,28 @@ void namespaceRejectsInvalidLocalOperations() {
           "namespace must forward the physical worker resource estimate");
 }
 
+void poolCreatesOneNamespacePerPhysicalWorker() {
+  mcpd4::SharedPartitionWorkerPool pool;
+  requireThrowsContaining(
+      [&] { (void)pool.makeNamespaceWorkers(); }, "pool is empty",
+      "empty shared worker pool must reject workspace creation");
+  pool.addWorker(std::make_unique<mcpd3::InProcessPartitionWorker>());
+  pool.addWorker(std::make_unique<mcpd3::InProcessPartitionWorker>());
+  require(pool.workerCount() == 2,
+          "shared worker pool should count physical workers");
+  auto first_workspace = pool.makeNamespaceWorkers();
+  auto second_workspace = pool.makeNamespaceWorkers();
+  require(first_workspace.size() == 2 && second_workspace.size() == 2,
+          "each workspace should receive one proxy per physical worker");
+}
+
 } // namespace
 
 int main() {
   try {
     namespacesIsolateIdenticalLocalPartitionIds();
     namespaceRejectsInvalidLocalOperations();
+    poolCreatesOneNamespacePerPhysicalWorker();
   } catch (const std::exception &error) {
     std::cerr << "shared_partition_worker_test failed: " << error.what()
               << "\n";
