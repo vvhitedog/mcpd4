@@ -14,7 +14,7 @@
 
 namespace mcpd4 {
 
-constexpr std::uint32_t kProtocolVersion = 12;
+constexpr std::uint32_t kProtocolVersion = 13;
 constexpr std::uint64_t kFeatureSnappyCompression = 1ULL << 0;
 
 struct RpcByteStats {
@@ -42,6 +42,8 @@ struct RpcByteStats {
   std::uint64_t scale_objective_rx_bytes = 0;
   std::uint64_t capacity_update_tx_bytes = 0;
   std::uint64_t capacity_update_rx_bytes = 0;
+  std::uint64_t capacity_update_tx_frame_count = 0;
+  std::uint64_t capacity_update_rx_frame_count = 0;
   std::uint64_t full_labels_request_tx_bytes = 0;
   std::uint64_t full_labels_request_rx_bytes = 0;
   std::uint64_t full_labels_result_tx_bytes = 0;

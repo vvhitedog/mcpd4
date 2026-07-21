@@ -1141,6 +1141,150 @@ void roundTripsPartitionCapacityUpdate() {
           "capacity update flow denominator mismatch");
 }
 
+void roundTripsMappedMultipartPartitionCapacityUpdate() {
+  mcpd3::PartitionCapacityUpdate update;
+  update.partition_id = 17;
+  update.arc_capacities = {3, 4, 5, 6};
+  update.terminal_capacities = {-7, 8, 0};
+  update.preserve_flow_state = false;
+  update.flow_scale_numerator = 13;
+  update.flow_scale_denominator = 9;
+  const auto header =
+      mcpd4::makePartitionCapacityUpdateTransferHeader(update);
+  const auto decoded_header =
+      mcpd4::decodePartitionCapacityUpdateTransferBegin(
+          mcpd4::encodePartitionCapacityUpdateTransferBegin(header));
+
+  const auto scratch =
+      std::filesystem::temp_directory_path() /
+      ("mcpd4-capacity-update-protocol-test-" +
+       std::to_string(std::chrono::steady_clock::now()
+                          .time_since_epoch()
+                          .count()));
+  std::filesystem::create_directories(scratch);
+  mcpd3::SolverStorageOptions storage;
+  storage.mode = mcpd3::SolverStorageMode::FILE_BACKED_MMAP;
+  storage.directory = scratch.string();
+  mcpd4::PartitionCapacityUpdateAssembler assembler(decoded_header, storage);
+  for (std::size_t section_index = 0;
+       section_index < mcpd4::kPartitionCapacityUpdateSectionCount;
+       ++section_index) {
+    const auto section =
+        static_cast<mcpd4::PartitionCapacityUpdateSection>(section_index);
+    for (std::uint64_t offset = 0;
+         offset < header.section_counts[section_index]; ++offset) {
+      assembler.append(mcpd4::decodePartitionCapacityUpdateTransferChunk(
+          mcpd4::encodePartitionCapacityUpdateTransferChunk(
+              update, section, offset, /*count=*/1)));
+    }
+  }
+  require(assembler.complete(), "multipart capacity update should complete");
+  auto decoded = assembler.finish();
+  require(decoded.partition_id == update.partition_id &&
+              decoded.arc_capacities == update.arc_capacities &&
+              decoded.terminal_capacities == update.terminal_capacities &&
+              decoded.preserve_flow_state == update.preserve_flow_state &&
+              decoded.flow_scale_numerator == update.flow_scale_numerator &&
+              decoded.flow_scale_denominator == update.flow_scale_denominator,
+          "multipart capacity update mismatch");
+  require(decoded.arc_capacities.isFileBacked() &&
+              decoded.terminal_capacities.isFileBacked(),
+          "multipart capacity update should assemble directly in mappings");
+  const auto end = mcpd4::decodePartitionCapacityUpdateTransferEnd(
+      mcpd4::encodePartitionCapacityUpdateTransferEnd(
+          mcpd4::PartitionCapacityUpdateTransferEnd{update.partition_id}));
+  require(end.partition_id == update.partition_id,
+          "multipart capacity update end mismatch");
+  std::filesystem::remove_all(scratch);
+}
+
+void rejectsMalformedMultipartPartitionCapacityUpdates() {
+  mcpd3::PartitionCapacityUpdate update;
+  update.partition_id = 17;
+  update.arc_capacities = {3, 4};
+  update.terminal_capacities = {-7};
+  auto header = mcpd4::makePartitionCapacityUpdateTransferHeader(update);
+  mcpd4::PartitionCapacityUpdateAssembler incomplete(header, {});
+  requireThrows([&] { (void)incomplete.finish(); },
+                "incomplete multipart capacity update should fail");
+
+  auto chunk = mcpd4::decodePartitionCapacityUpdateTransferChunk(
+      mcpd4::encodePartitionCapacityUpdateTransferChunk(
+          update, mcpd4::PartitionCapacityUpdateSection::ARC_CAPACITIES,
+          /*offset=*/0, /*count=*/1));
+  mcpd4::PartitionCapacityUpdateAssembler wrong_id(header, {});
+  ++chunk.partition_id;
+  requireThrows([&] { wrong_id.append(std::move(chunk)); },
+                "multipart capacity update id mismatch should fail");
+
+  mcpd4::PartitionCapacityUpdateAssembler wrong_offset(header, {});
+  auto later = mcpd4::decodePartitionCapacityUpdateTransferChunk(
+      mcpd4::encodePartitionCapacityUpdateTransferChunk(
+          update, mcpd4::PartitionCapacityUpdateSection::ARC_CAPACITIES,
+          /*offset=*/1, /*count=*/1));
+  requireThrows([&] { wrong_offset.append(std::move(later)); },
+                "multipart capacity update offset mismatch should fail");
+
+  mcpd4::PartitionCapacityUpdateAssembler empty(header, {});
+  mcpd4::PartitionCapacityUpdateTransferChunk empty_chunk;
+  empty_chunk.partition_id = update.partition_id;
+  requireThrows([&] { empty.append(std::move(empty_chunk)); },
+                "empty multipart capacity update chunk should fail");
+  requireThrows(
+      [&] {
+        (void)mcpd4::encodePartitionCapacityUpdateTransferChunk(
+            update,
+            mcpd4::PartitionCapacityUpdateSection::ARC_CAPACITIES,
+            update.arc_capacities.size(), 1);
+      },
+      "out-of-range multipart capacity update chunk should fail");
+
+  auto unknown_section =
+      mcpd4::encodePartitionCapacityUpdateTransferChunk(
+          update, mcpd4::PartitionCapacityUpdateSection::ARC_CAPACITIES,
+          0, 1);
+  unknown_section[16] = 99;
+  requireThrows(
+      [&] {
+        (void)mcpd4::decodePartitionCapacityUpdateTransferChunk(
+            unknown_section);
+      },
+      "unknown multipart capacity update section should fail");
+
+  header.partition_id = -1;
+  requireThrows(
+      [&] { mcpd4::PartitionCapacityUpdateAssembler value(header, {}); },
+      "negative multipart capacity update id should fail");
+  header = mcpd4::makePartitionCapacityUpdateTransferHeader(update);
+  header.flow_scale_numerator = 0;
+  requireThrows(
+      [&] { mcpd4::PartitionCapacityUpdateAssembler value(header, {}); },
+      "non-positive multipart capacity numerator should fail");
+  header = mcpd4::makePartitionCapacityUpdateTransferHeader(update);
+  header.flow_scale_denominator = 0;
+  requireThrows(
+      [&] { mcpd4::PartitionCapacityUpdateAssembler value(header, {}); },
+      "non-positive multipart capacity denominator should fail");
+
+  auto truncated_begin =
+      mcpd4::encodePartitionCapacityUpdateTransferBegin(header);
+  truncated_begin.pop_back();
+  requireThrows(
+      [&] {
+        (void)mcpd4::decodePartitionCapacityUpdateTransferBegin(
+            truncated_begin);
+      },
+      "truncated multipart capacity begin should fail");
+  auto truncated_end = mcpd4::encodePartitionCapacityUpdateTransferEnd(
+      mcpd4::PartitionCapacityUpdateTransferEnd{update.partition_id});
+  truncated_end.pop_back();
+  requireThrows(
+      [&] {
+        (void)mcpd4::decodePartitionCapacityUpdateTransferEnd(truncated_end);
+      },
+      "truncated multipart capacity end should fail");
+}
+
 void roundTripsAlphaUpdate() {
   mcpd4::AlphaUpdateMessage message;
   message.partition_id = 5;
@@ -1377,6 +1521,8 @@ int main() {
     deltaSolveRoundBatchResultShrinksRepeatedLabels();
     roundTripsScaleObjective();
     roundTripsPartitionCapacityUpdate();
+    roundTripsMappedMultipartPartitionCapacityUpdate();
+    rejectsMalformedMultipartPartitionCapacityUpdates();
     roundTripsAlphaUpdate();
     roundTripsStop();
     roundTripsError();

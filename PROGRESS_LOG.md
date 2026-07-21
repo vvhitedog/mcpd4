@@ -2336,3 +2336,18 @@
   and unexpected response frames are covered.
 - MCPD4 passes 6/6 and the Phase integration passes 58/58 with explicit mapped
   final-label diagnostics.
+
+## 2026-07-21 00:06 PDT - Bounded persistent-capacity refresh
+
+- Advanced the wire protocol to version 13 and replaced whole-frame persistent
+  capacity updates with metadata, bounded 64K-capacity arc/terminal chunks,
+  and a validated end marker.
+- Workers assemble refresh arrays directly in their configured backing and
+  then call the unchanged exact capacity-replacement API. Flow preservation,
+  exact rational flow scaling, alpha state, local labels, and BK state retain
+  their prior semantics.
+- Added refresh bytes/frame telemetry and malformed header, type, range,
+  order, interruption, and end-ID coverage.
+- The 70,000-parallel-edge remote test forces six update frames in both plain
+  and Snappy modes and verifies that a 2:1 warm-flow scale doubles the exact
+  lower bound.

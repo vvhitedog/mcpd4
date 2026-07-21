@@ -50,6 +50,9 @@ bool isKnownMessageType(std::uint32_t value) {
   case MessageType::FULL_LABELS_REQUEST:
   case MessageType::FULL_LABELS_CHUNK:
   case MessageType::FULL_LABELS_END:
+  case MessageType::PARTITION_CAPACITY_UPDATE_BEGIN:
+  case MessageType::PARTITION_CAPACITY_UPDATE_CHUNK:
+  case MessageType::PARTITION_CAPACITY_UPDATE_END:
     return true;
   }
   return false;
@@ -98,10 +101,27 @@ bool isKnownPartitionPackageSection(std::uint32_t value) {
   return false;
 }
 
+bool isKnownPartitionCapacityUpdateSection(std::uint32_t value) {
+  switch (static_cast<PartitionCapacityUpdateSection>(value)) {
+  case PartitionCapacityUpdateSection::ARC_CAPACITIES:
+  case PartitionCapacityUpdateSection::TERMINAL_CAPACITIES:
+    return true;
+  }
+  return false;
+}
+
 std::size_t partitionPackageSectionIndex(PartitionPackageSection section) {
   const auto index = static_cast<std::size_t>(section);
   require(index < kPartitionPackageSectionCount,
           "unknown partition package section");
+  return index;
+}
+
+std::size_t partitionCapacityUpdateSectionIndex(
+    PartitionCapacityUpdateSection section) {
+  const auto index = static_cast<std::size_t>(section);
+  require(index < kPartitionCapacityUpdateSectionCount,
+          "unknown partition capacity update section");
   return index;
 }
 
@@ -1187,6 +1207,199 @@ mcpd3::PartitionCapacityUpdate decodePartitionCapacityUpdate(
   message.flow_scale_denominator = reader.readObjective();
   requireDone(reader);
   return message;
+}
+
+PartitionCapacityUpdateTransferHeader makePartitionCapacityUpdateTransferHeader(
+    const mcpd3::PartitionCapacityUpdate &message) {
+  PartitionCapacityUpdateTransferHeader header;
+  header.partition_id = message.partition_id;
+  header.section_counts = {
+      static_cast<std::uint64_t>(message.arc_capacities.size()),
+      static_cast<std::uint64_t>(message.terminal_capacities.size())};
+  header.preserve_flow_state = message.preserve_flow_state;
+  header.flow_scale_numerator = message.flow_scale_numerator;
+  header.flow_scale_denominator = message.flow_scale_denominator;
+  return header;
+}
+
+std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferBegin(
+    const PartitionCapacityUpdateTransferHeader &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  for (const auto count : message.section_counts) {
+    writer.writeU64(count);
+  }
+  writer.writeBool(message.preserve_flow_state);
+  writer.writeInteger(message.flow_scale_numerator);
+  writer.writeInteger(message.flow_scale_denominator);
+  return encodeFrame(MessageType::PARTITION_CAPACITY_UPDATE_BEGIN,
+                     writer.bytes());
+}
+
+PartitionCapacityUpdateTransferHeader decodePartitionCapacityUpdateTransferBegin(
+    const std::vector<std::uint8_t> &frame) {
+  auto decoded = decodeExpectedFrame(
+      frame, MessageType::PARTITION_CAPACITY_UPDATE_BEGIN);
+  Reader reader(decoded.payload);
+  PartitionCapacityUpdateTransferHeader message;
+  message.partition_id = reader.readI32();
+  for (auto &count : message.section_counts) {
+    count = reader.readU64();
+    (void)checkedContainerSize(count);
+  }
+  message.preserve_flow_state = reader.readBool();
+  message.flow_scale_numerator = reader.readObjective();
+  message.flow_scale_denominator = reader.readObjective();
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferChunk(
+    const mcpd3::PartitionCapacityUpdate &message,
+    PartitionCapacityUpdateSection section, std::uint64_t offset,
+    std::size_t count) {
+  const auto header = makePartitionCapacityUpdateTransferHeader(message);
+  const auto section_index = partitionCapacityUpdateSectionIndex(section);
+  const auto total = header.section_counts[section_index];
+  require(offset <= total && count <= total - offset,
+          "partition capacity update chunk is outside its section");
+  const auto begin = checkedContainerSize(offset);
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writer.writeU32(static_cast<std::uint32_t>(section));
+  writer.writeU64(offset);
+  writer.writeU32(checkedSize(count));
+  for (std::size_t i = 0; i < count; ++i) {
+    const auto index = begin + i;
+    switch (section) {
+    case PartitionCapacityUpdateSection::ARC_CAPACITIES:
+      writer.writeInteger(message.arc_capacities[index]);
+      break;
+    case PartitionCapacityUpdateSection::TERMINAL_CAPACITIES:
+      writer.writeInteger(message.terminal_capacities[index]);
+      break;
+    }
+  }
+  return encodeFrame(MessageType::PARTITION_CAPACITY_UPDATE_CHUNK,
+                     writer.bytes());
+}
+
+PartitionCapacityUpdateTransferChunk decodePartitionCapacityUpdateTransferChunk(
+    const std::vector<std::uint8_t> &frame) {
+  auto decoded = decodeExpectedFrame(
+      frame, MessageType::PARTITION_CAPACITY_UPDATE_CHUNK);
+  Reader reader(decoded.payload);
+  PartitionCapacityUpdateTransferChunk message;
+  message.partition_id = reader.readI32();
+  const auto section = reader.readU32();
+  require(isKnownPartitionCapacityUpdateSection(section),
+          "unknown partition capacity update section");
+  message.section = static_cast<PartitionCapacityUpdateSection>(section);
+  message.offset = reader.readU64();
+  const auto count = reader.readU32();
+  message.values.reserve(count);
+  for (std::uint32_t i = 0; i < count; ++i) {
+    message.values.push_back(reader.readCapacity());
+  }
+  requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferEnd(
+    const PartitionCapacityUpdateTransferEnd &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  return encodeFrame(MessageType::PARTITION_CAPACITY_UPDATE_END,
+                     writer.bytes());
+}
+
+PartitionCapacityUpdateTransferEnd decodePartitionCapacityUpdateTransferEnd(
+    const std::vector<std::uint8_t> &frame) {
+  auto decoded = decodeExpectedFrame(
+      frame, MessageType::PARTITION_CAPACITY_UPDATE_END);
+  Reader reader(decoded.payload);
+  PartitionCapacityUpdateTransferEnd message;
+  message.partition_id = reader.readI32();
+  requireDone(reader);
+  return message;
+}
+
+PartitionCapacityUpdateAssembler::PartitionCapacityUpdateAssembler(
+    PartitionCapacityUpdateTransferHeader header,
+    mcpd3::SolverStorageOptions storage)
+    : header_(std::move(header)) {
+  require(header_.partition_id >= 0,
+          "partition capacity update id must be non-negative");
+  require(header_.flow_scale_numerator > 0,
+          "partition capacity update flow numerator must be positive");
+  require(header_.flow_scale_denominator > 0,
+          "partition capacity update flow denominator must be positive");
+  update_.partition_id = header_.partition_id;
+  update_.arc_capacities = mcpd3::SolverArray<mcpd3::Capacity>(
+      checkedContainerSize(header_.section_counts[0]), storage,
+      "transport_update_arc_capacities");
+  update_.terminal_capacities = mcpd3::SolverArray<mcpd3::Capacity>(
+      checkedContainerSize(header_.section_counts[1]), storage,
+      "transport_update_terminal_capacities");
+  update_.preserve_flow_state = header_.preserve_flow_state;
+  update_.flow_scale_numerator = header_.flow_scale_numerator;
+  update_.flow_scale_denominator = header_.flow_scale_denominator;
+}
+
+void PartitionCapacityUpdateAssembler::append(
+    PartitionCapacityUpdateTransferChunk chunk) {
+  if (finished_) {
+    throw std::runtime_error(
+        "partition capacity update transfer is already finished");
+  }
+  if (chunk.partition_id != header_.partition_id) {
+    throw std::runtime_error("partition capacity update chunk id mismatch");
+  }
+  const auto section_index =
+      partitionCapacityUpdateSectionIndex(chunk.section);
+  if (chunk.offset != next_offsets_[section_index]) {
+    throw std::runtime_error(
+        "partition capacity update chunk offset is not contiguous");
+  }
+  if (chunk.values.empty()) {
+    throw std::runtime_error(
+        "partition capacity update chunk must not be empty");
+  }
+  const auto count = static_cast<std::uint64_t>(chunk.values.size());
+  const auto total = header_.section_counts[section_index];
+  if (count > total - chunk.offset) {
+    throw std::runtime_error(
+        "partition capacity update chunk exceeds section size");
+  }
+  const auto offset = checkedContainerSize(chunk.offset);
+  switch (chunk.section) {
+  case PartitionCapacityUpdateSection::ARC_CAPACITIES:
+    std::copy(chunk.values.begin(), chunk.values.end(),
+              update_.arc_capacities.begin() + offset);
+    break;
+  case PartitionCapacityUpdateSection::TERMINAL_CAPACITIES:
+    std::copy(chunk.values.begin(), chunk.values.end(),
+              update_.terminal_capacities.begin() + offset);
+    break;
+  }
+  next_offsets_[section_index] += count;
+}
+
+bool PartitionCapacityUpdateAssembler::complete() const {
+  return next_offsets_ == header_.section_counts;
+}
+
+mcpd3::PartitionCapacityUpdate PartitionCapacityUpdateAssembler::finish() {
+  if (finished_) {
+    throw std::runtime_error(
+        "partition capacity update transfer is already finished");
+  }
+  if (!complete()) {
+    throw std::runtime_error(
+        "partition capacity update transfer is incomplete");
+  }
+  finished_ = true;
+  return std::move(update_);
 }
 
 std::vector<std::uint8_t> encodeAlphaUpdate(

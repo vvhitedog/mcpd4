@@ -277,6 +277,50 @@ void remoteWorkerRejectsMalformedMultipartSequences() {
       wrong_end_frames, "end id mismatch", "wrong-package-end-worker");
 }
 
+void remoteWorkerRejectsMalformedCapacityUpdateSequences() {
+  mcpd3::PartitionCapacityUpdate update;
+  update.partition_id = 9;
+  update.arc_capacities = {3, 3};
+  update.terminal_capacities = {5, -5};
+  const auto header =
+      mcpd4::makePartitionCapacityUpdateTransferHeader(update);
+  const auto chunk = mcpd4::encodePartitionCapacityUpdateTransferChunk(
+      update, mcpd4::PartitionCapacityUpdateSection::ARC_CAPACITIES,
+      /*offset=*/0, /*count=*/1);
+  rawWorkerRejectsMultipartSequence(
+      {chunk}, "chunk arrived before begin", "capacity-chunk-before-worker");
+  rawWorkerRejectsMultipartSequence(
+      {mcpd4::encodePartitionCapacityUpdateTransferEnd(
+          mcpd4::PartitionCapacityUpdateTransferEnd{update.partition_id})},
+      "end arrived before begin", "capacity-end-before-worker");
+
+  mcpd3::PartitionSolveRequest request;
+  request.partition_id = update.partition_id;
+  rawWorkerRejectsMultipartSequence(
+      {mcpd4::encodePartitionCapacityUpdateTransferBegin(header),
+       mcpd4::encodeSolveRoundRequest(request)},
+      "transfer was interrupted", "interrupted-capacity-worker");
+
+  std::vector<std::vector<std::uint8_t>> wrong_end_frames;
+  wrong_end_frames.push_back(
+      mcpd4::encodePartitionCapacityUpdateTransferBegin(header));
+  for (std::size_t section_index = 0;
+       section_index < mcpd4::kPartitionCapacityUpdateSectionCount;
+       ++section_index) {
+    const auto count = header.section_counts[section_index];
+    wrong_end_frames.push_back(
+        mcpd4::encodePartitionCapacityUpdateTransferChunk(
+            update,
+            static_cast<mcpd4::PartitionCapacityUpdateSection>(section_index),
+            /*offset=*/0, static_cast<std::size_t>(count)));
+  }
+  wrong_end_frames.push_back(
+      mcpd4::encodePartitionCapacityUpdateTransferEnd(
+          mcpd4::PartitionCapacityUpdateTransferEnd{update.partition_id + 1}));
+  rawWorkerRejectsMultipartSequence(
+      wrong_end_frames, "end id mismatch", "wrong-capacity-end-worker");
+}
+
 void receivesFrameSplitAcrossTcpPackets() {
   auto pair = makeConnectedPair();
   mcpd4::ReadyMessage ready;
@@ -907,6 +951,27 @@ void remoteWorkerChunksLargePartitionPayload(
     request.partition_id = 0;
     require(worker->solveRound(request).lower_bound == 1,
             "multipart worker should preserve the exact local problem");
+
+    mcpd3::SolverStorageOptions update_storage;
+    update_storage.mode = mcpd3::SolverStorageMode::FILE_BACKED_MMAP;
+    update_storage.directory = scratch.string();
+    mcpd3::PartitionCapacityUpdate update;
+    update.partition_id = package.partition_id;
+    update.arc_capacities = mcpd3::SolverArray<mcpd3::Capacity>(
+        package.arc_capacities.size(), mcpd3::Capacity(2), update_storage,
+        "large_update_arcs");
+    update.terminal_capacities = mcpd3::SolverArray<mcpd3::Capacity>(
+        /*count=*/2, update_storage, "large_update_terminals");
+    update.terminal_capacities[0] = 2;
+    update.terminal_capacities[1] = -2;
+    update.flow_scale_numerator = 2;
+    update.flow_scale_denominator = 1;
+    worker->replacePartitionCapacities(update);
+    require(worker->timingStats().rpc_bytes.capacity_update_tx_frame_count == 6,
+            "large capacity refresh should use bounded multipart frames");
+    request.round_id = 2;
+    require(worker->solveRound(request).lower_bound == 2,
+            "multipart capacity refresh should preserve and scale warm flow");
     stopAndJoin(worker.get(), client);
     std::filesystem::remove_all(scratch);
   } catch (...) {
@@ -1461,6 +1526,7 @@ int main() {
     remoteWorkerFileBacksCompleteSolverState();
     legacyStreamingAliasUsesPersistentFileBackedWorker();
     remoteWorkerRejectsMalformedMultipartSequences();
+    remoteWorkerRejectsMalformedCapacityUpdateSequences();
     remoteWorkerChunksLargePartitionPayload(
         mcpd4::TransportCompression::NONE, "multipart-worker");
     remoteWorkerChunksLargePartitionPayload(

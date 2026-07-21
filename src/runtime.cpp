@@ -19,6 +19,7 @@ namespace {
 
 constexpr std::size_t kPartitionPackageChunkElements = 64 * 1024;
 constexpr std::size_t kFullLabelChunkElements = 64 * 1024;
+constexpr std::size_t kPartitionCapacityChunkElements = 64 * 1024;
 
 bool hostIsLittleEndian() {
   const std::uint16_t value = 1;
@@ -107,7 +108,11 @@ void recordFrameSent(RpcByteStats *stats, MessageType type,
     stats->scale_objective_tx_bytes += bytes;
     break;
   case MessageType::REPLACE_PARTITION_CAPACITIES:
+  case MessageType::PARTITION_CAPACITY_UPDATE_BEGIN:
+  case MessageType::PARTITION_CAPACITY_UPDATE_CHUNK:
+  case MessageType::PARTITION_CAPACITY_UPDATE_END:
     stats->capacity_update_tx_bytes += bytes;
+    ++stats->capacity_update_tx_frame_count;
     break;
   case MessageType::READY:
     stats->ready_tx_bytes += bytes;
@@ -184,7 +189,11 @@ void recordFrameReceived(RpcByteStats *stats, MessageType type,
     stats->scale_objective_rx_bytes += bytes;
     break;
   case MessageType::REPLACE_PARTITION_CAPACITIES:
+  case MessageType::PARTITION_CAPACITY_UPDATE_BEGIN:
+  case MessageType::PARTITION_CAPACITY_UPDATE_CHUNK:
+  case MessageType::PARTITION_CAPACITY_UPDATE_END:
     stats->capacity_update_rx_bytes += bytes;
+    ++stats->capacity_update_rx_frame_count;
     break;
   case MessageType::READY:
     stats->ready_rx_bytes += bytes;
@@ -497,11 +506,36 @@ void TcpPartitionWorker::scaleObjective(long factor,
 void TcpPartitionWorker::replacePartitionCapacities(
     const mcpd3::PartitionCapacityUpdate &update) {
   const auto start = std::chrono::steady_clock::now();
-  const auto frame = encodePartitionCapacityUpdate(update);
-  FrameTransferStats transfer;
-  sendFrameBytes(socket_, frame, compression_, &transfer);
-  recordFrameSent(&timing_stats_.rpc_bytes,
-                  MessageType::REPLACE_PARTITION_CAPACITIES, transfer);
+  auto send_update_frame = [&](MessageType type,
+                               const std::vector<std::uint8_t> &frame) {
+    FrameTransferStats transfer;
+    sendFrameBytes(socket_, frame, compression_, &transfer);
+    recordFrameSent(&timing_stats_.rpc_bytes, type, transfer);
+  };
+  const auto header = makePartitionCapacityUpdateTransferHeader(update);
+  send_update_frame(
+      MessageType::PARTITION_CAPACITY_UPDATE_BEGIN,
+      encodePartitionCapacityUpdateTransferBegin(header));
+  for (std::size_t section_index = 0;
+       section_index < kPartitionCapacityUpdateSectionCount;
+       ++section_index) {
+    const auto section =
+        static_cast<PartitionCapacityUpdateSection>(section_index);
+    const auto total = header.section_counts[section_index];
+    for (std::uint64_t offset = 0; offset < total;) {
+      const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(
+          kPartitionCapacityChunkElements, total - offset));
+      send_update_frame(
+          MessageType::PARTITION_CAPACITY_UPDATE_CHUNK,
+          encodePartitionCapacityUpdateTransferChunk(update, section, offset,
+                                                     count));
+      offset += count;
+    }
+  }
+  send_update_frame(
+      MessageType::PARTITION_CAPACITY_UPDATE_END,
+      encodePartitionCapacityUpdateTransferEnd(
+          PartitionCapacityUpdateTransferEnd{update.partition_id}));
   (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes, compression_);
   temporal_state_.resetPartition(update.partition_id);
   timing_stats_.capacity_update_rpc_wall_us += elapsedUs(start);
@@ -829,6 +863,7 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
   std::unordered_map<int, std::unique_ptr<ResidentLinearPartition>>
       linear_partitions;
   std::optional<PartitionPackageAssembler> package_assembler;
+  std::optional<PartitionCapacityUpdateAssembler> capacity_update_assembler;
   std::uint64_t package_transfer_logical_bytes = 0;
   auto load_complete_package = [&](mcpd3::PartitionPackage package,
                                    std::uint64_t logical_bytes) {
@@ -871,6 +906,12 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
           frame.type != MessageType::PARTITION_PACKAGE_END) {
         throw std::runtime_error(
             "partition package transfer was interrupted");
+      }
+      if (capacity_update_assembler.has_value() &&
+          frame.type != MessageType::PARTITION_CAPACITY_UPDATE_CHUNK &&
+          frame.type != MessageType::PARTITION_CAPACITY_UPDATE_END) {
+        throw std::runtime_error(
+            "partition capacity update transfer was interrupted");
       }
       switch (frame.type) {
       case MessageType::PARTITION_PACKAGE:
@@ -1061,6 +1102,48 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
           }
         }
         break;
+      case MessageType::PARTITION_CAPACITY_UPDATE_BEGIN:
+        {
+          const auto header =
+              decodePartitionCapacityUpdateTransferBegin(frame_bytes);
+          capacity_update_assembler.emplace(
+              header, runtime_options.solver_storage);
+        }
+        break;
+      case MessageType::PARTITION_CAPACITY_UPDATE_CHUNK:
+        if (!capacity_update_assembler.has_value()) {
+          throw std::runtime_error(
+              "partition capacity update chunk arrived before begin");
+        }
+        capacity_update_assembler->append(
+            decodePartitionCapacityUpdateTransferChunk(frame_bytes));
+        break;
+      case MessageType::PARTITION_CAPACITY_UPDATE_END:
+        {
+          if (!capacity_update_assembler.has_value()) {
+            throw std::runtime_error(
+                "partition capacity update end arrived before begin");
+          }
+          const auto end =
+              decodePartitionCapacityUpdateTransferEnd(frame_bytes);
+          auto update = capacity_update_assembler->finish();
+          if (end.partition_id != update.partition_id) {
+            throw std::runtime_error(
+                "partition capacity update end id mismatch");
+          }
+          capacity_update_assembler.reset();
+          worker->replacePartitionCapacities(update);
+          temporal_state.resetPartition(update.partition_id);
+          if (status_hooks.on_phase) {
+            status_hooks.on_phase("connected");
+          }
+          const auto transfer =
+              sendReady(socket, hello.worker_name, compression);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::READY, transfer);
+          }
+        }
+        break;
       case MessageType::LINEAR_STRUCTURE:
         {
           auto message = decodeLinearStructure(frame_bytes);
@@ -1220,6 +1303,7 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
       }
     } catch (const std::exception &e) {
       package_assembler.reset();
+      capacity_update_assembler.reset();
       package_transfer_logical_bytes = 0;
       if (status_hooks.on_error) {
         status_hooks.on_error(e.what());

@@ -60,6 +60,9 @@ enum class MessageType : std::uint32_t {
   FULL_LABELS_REQUEST = 28,
   FULL_LABELS_CHUNK = 29,
   FULL_LABELS_END = 30,
+  PARTITION_CAPACITY_UPDATE_BEGIN = 31,
+  PARTITION_CAPACITY_UPDATE_CHUNK = 32,
+  PARTITION_CAPACITY_UPDATE_END = 33,
 };
 
 enum class PartitionPackageSection : std::uint32_t {
@@ -129,6 +132,51 @@ private:
   PartitionPackageTransferHeader header_;
   std::array<std::uint64_t, kPartitionPackageSectionCount> next_offsets_{};
   mcpd3::PartitionPackage package_;
+  bool finished_ = false;
+};
+
+enum class PartitionCapacityUpdateSection : std::uint32_t {
+  ARC_CAPACITIES = 0,
+  TERMINAL_CAPACITIES = 1,
+};
+
+inline constexpr std::size_t kPartitionCapacityUpdateSectionCount = 2;
+
+struct PartitionCapacityUpdateTransferHeader {
+  int partition_id = -1;
+  std::array<std::uint64_t, kPartitionCapacityUpdateSectionCount>
+      section_counts{};
+  bool preserve_flow_state = true;
+  mcpd3::Objective flow_scale_numerator = 1;
+  mcpd3::Objective flow_scale_denominator = 1;
+};
+
+struct PartitionCapacityUpdateTransferChunk {
+  int partition_id = -1;
+  PartitionCapacityUpdateSection section =
+      PartitionCapacityUpdateSection::ARC_CAPACITIES;
+  std::uint64_t offset = 0;
+  std::vector<mcpd3::Capacity> values;
+};
+
+struct PartitionCapacityUpdateTransferEnd {
+  int partition_id = -1;
+};
+
+class PartitionCapacityUpdateAssembler {
+public:
+  PartitionCapacityUpdateAssembler(
+      PartitionCapacityUpdateTransferHeader header,
+      mcpd3::SolverStorageOptions storage);
+  void append(PartitionCapacityUpdateTransferChunk chunk);
+  bool complete() const;
+  mcpd3::PartitionCapacityUpdate finish();
+
+private:
+  PartitionCapacityUpdateTransferHeader header_;
+  std::array<std::uint64_t, kPartitionCapacityUpdateSectionCount>
+      next_offsets_{};
+  mcpd3::PartitionCapacityUpdate update_;
   bool finished_ = false;
 };
 
@@ -276,6 +324,23 @@ FullLabelsChunk decodeFullLabelsChunk(const std::vector<std::uint8_t> &frame);
 std::vector<std::uint8_t> encodeFullLabelsEnd(
     const FullLabelsEnd &message);
 FullLabelsEnd decodeFullLabelsEnd(const std::vector<std::uint8_t> &frame);
+
+PartitionCapacityUpdateTransferHeader makePartitionCapacityUpdateTransferHeader(
+    const mcpd3::PartitionCapacityUpdate &message);
+std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferBegin(
+    const PartitionCapacityUpdateTransferHeader &message);
+PartitionCapacityUpdateTransferHeader decodePartitionCapacityUpdateTransferBegin(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferChunk(
+    const mcpd3::PartitionCapacityUpdate &message,
+    PartitionCapacityUpdateSection section, std::uint64_t offset,
+    std::size_t count);
+PartitionCapacityUpdateTransferChunk decodePartitionCapacityUpdateTransferChunk(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodePartitionCapacityUpdateTransferEnd(
+    const PartitionCapacityUpdateTransferEnd &message);
+PartitionCapacityUpdateTransferEnd decodePartitionCapacityUpdateTransferEnd(
+    const std::vector<std::uint8_t> &frame);
 
 std::vector<std::uint8_t> encodeReady(const ReadyMessage &message);
 ReadyMessage decodeReady(const std::vector<std::uint8_t> &frame);

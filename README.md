@@ -762,6 +762,10 @@ Useful fields:
   `rpc_full_labels_result_rx_frame_count`: bounded final-cut recovery traffic.
   Full labels stream directly into the coordinator's configured result
   backing; they are not embedded in the final solve-result frame.
+- `rpc_capacity_update_tx_bytes` and
+  `rpc_capacity_update_tx_frame_count`: persistent PU capacity refresh traffic.
+  Refresh capacities use bounded section chunks and assemble directly in the
+  worker's configured backing while retaining the exact flow-rescale ratio.
 - `rpc_solve_request_tx_bytes`: repeated solve request bytes sent during the
   optimization loop.
 - `rpc_solve_result_rx_bytes`: repeated solve result bytes received during

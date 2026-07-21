@@ -651,3 +651,12 @@
   the already-solved labeling in bounded ranges into the configured final
   backing. Final-label transport must validate contiguous offsets and exact
   completion before exposing the result.
+
+## 2026-07-21 - Whole-frame persistent capacity refresh
+
+- Do not preserve mapped PU continuation state while sending the next cut's
+  arc and terminal capacities through one encoded/decoded resident frame. On a
+  large cut, that transient defeats out-of-core execution between solves.
+- Keep the exact refresh operation unchanged, but transfer each capacity array
+  in bounded chunks directly into the worker's configured backing. Never
+  approximate or omit the flow-scale numerator/denominator to save transport.

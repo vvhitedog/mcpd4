@@ -395,6 +395,9 @@ struct WorkerStatusState {
     case mcpd4::MessageType::SOLVE_ROUND_REQUEST:
     case mcpd4::MessageType::SCALE_OBJECTIVE:
     case mcpd4::MessageType::REPLACE_PARTITION_CAPACITIES:
+    case mcpd4::MessageType::PARTITION_CAPACITY_UPDATE_BEGIN:
+    case mcpd4::MessageType::PARTITION_CAPACITY_UPDATE_CHUNK:
+    case mcpd4::MessageType::PARTITION_CAPACITY_UPDATE_END:
     case mcpd4::MessageType::ALPHA_UPDATE:
     case mcpd4::MessageType::STOP:
     case mcpd4::MessageType::SOLVE_ROUND_BATCH_REQUEST:
@@ -436,7 +439,11 @@ struct WorkerStatusState {
       rpc_bytes.scale_objective_rx_bytes += bytes;
       break;
     case mcpd4::MessageType::REPLACE_PARTITION_CAPACITIES:
+    case mcpd4::MessageType::PARTITION_CAPACITY_UPDATE_BEGIN:
+    case mcpd4::MessageType::PARTITION_CAPACITY_UPDATE_CHUNK:
+    case mcpd4::MessageType::PARTITION_CAPACITY_UPDATE_END:
       rpc_bytes.capacity_update_rx_bytes += bytes;
+      ++rpc_bytes.capacity_update_rx_frame_count;
       break;
     case mcpd4::MessageType::STOP:
       rpc_bytes.stop_rx_bytes += bytes;
@@ -523,6 +530,8 @@ struct WorkerStatusState {
         << rpc_bytes.scale_objective_rx_bytes
         << " rpc_capacity_update_rx_bytes "
         << rpc_bytes.capacity_update_rx_bytes
+        << " rpc_capacity_update_rx_frame_count "
+        << rpc_bytes.capacity_update_rx_frame_count
         << " rpc_full_labels_request_rx_bytes "
         << rpc_bytes.full_labels_request_rx_bytes
         << " rpc_full_labels_result_tx_bytes "
