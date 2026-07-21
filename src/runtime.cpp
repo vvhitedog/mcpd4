@@ -503,6 +503,32 @@ void TcpPartitionWorker::scaleObjective(long factor,
   ++timing_stats_.scale_objective_rpc_count;
 }
 
+void TcpPartitionWorker::scaleObjectivePartitions(
+    const std::vector<int> &partition_ids, long factor,
+    bool saturate_capacity_overflow) {
+  if (partition_ids.empty()) {
+    throw std::runtime_error(
+        "objective scaling requires at least one partition id");
+  }
+  const auto start = std::chrono::steady_clock::now();
+  ScaleObjectiveMessage message;
+  message.partition_ids = partition_ids;
+  message.factor = factor;
+  message.saturate_capacity_overflow = saturate_capacity_overflow;
+  const auto frame = encodeScaleObjective(message);
+  FrameTransferStats transfer;
+  sendFrameBytes(socket_, frame, compression_, &transfer);
+  recordFrameSent(&timing_stats_.rpc_bytes, MessageType::SCALE_OBJECTIVE,
+                  transfer);
+  (void)receiveReadyOrThrow(socket_, &timing_stats_.rpc_bytes,
+                            compression_);
+  for (const int partition_id : partition_ids) {
+    temporal_state_.resetPartition(partition_id);
+  }
+  timing_stats_.scale_objective_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.scale_objective_rpc_count;
+}
+
 void TcpPartitionWorker::replacePartitionCapacities(
     const mcpd3::PartitionCapacityUpdate &update) {
   const auto start = std::chrono::steady_clock::now();
@@ -1074,9 +1100,18 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
             status_hooks.on_scale_objective(
                 message.factor, message.saturate_capacity_overflow);
           }
-          worker->scaleObjective(message.factor,
-                                 message.saturate_capacity_overflow);
-          temporal_state.reset();
+          if (message.partition_ids.empty()) {
+            worker->scaleObjective(message.factor,
+                                   message.saturate_capacity_overflow);
+            temporal_state.reset();
+          } else {
+            worker->scaleObjectivePartitions(
+                message.partition_ids, message.factor,
+                message.saturate_capacity_overflow);
+            for (const int partition_id : message.partition_ids) {
+              temporal_state.resetPartition(partition_id);
+            }
+          }
           if (status_hooks.on_phase) {
             status_hooks.on_phase("connected");
           }

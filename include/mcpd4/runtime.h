@@ -14,7 +14,7 @@
 
 namespace mcpd4 {
 
-constexpr std::uint32_t kProtocolVersion = 13;
+constexpr std::uint32_t kProtocolVersion = 14;
 constexpr std::uint64_t kFeatureSnappyCompression = 1ULL << 0;
 
 struct RpcByteStats {
@@ -107,6 +107,9 @@ public:
       const std::vector<mcpd3::PartitionSolveRequest> &requests) override;
   void scaleObjective(long factor,
                       bool saturate_capacity_overflow = false) override;
+  void scaleObjectivePartitions(
+      const std::vector<int> &partition_ids, long factor,
+      bool saturate_capacity_overflow = false) override;
   void replacePartitionCapacities(
       const mcpd3::PartitionCapacityUpdate &update) override;
   void copyFullLabels(int partition_id, std::size_t offset,

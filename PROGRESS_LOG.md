@@ -2351,3 +2351,16 @@
 - The 70,000-parallel-edge remote test forces six update frames in both plain
   and Snappy modes and verifies that a 2:1 warm-flow scale doubles the exact
   lower bound.
+
+## 2026-07-21 02:17 PDT - Workspace-safe objective promotion
+
+- Advanced the wire protocol to version 14 so objective-scale promotion may
+  name the exact partitions owned by one coordinator workspace. An empty ID
+  list retains the dedicated-worker global operation.
+- Scoped promotion resets temporal delta state only for affected partitions;
+  unrelated UP/DOWN workspace history remains valid on a shared TCP worker.
+- Added serialization and live TCP regressions for selected, unselected,
+  global, empty, duplicate, and unknown partition selections. The tests also
+  exposed and fixed partial mutation when an invalid ID followed a valid ID.
+- MCPD3 passes 2/2 CTest targets. MCPD4 protocol and TCP loopback tests pass;
+  the complete MCPD4 suite is run again after committing the upstream unit.

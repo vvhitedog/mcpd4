@@ -1158,6 +1158,8 @@ std::vector<mcpd3::PartitionSolveResult> decodeSolveRoundBatchResult(
 std::vector<std::uint8_t> encodeScaleObjective(
     const ScaleObjectiveMessage &message) {
   Writer writer;
+  writer.writeVector<int>(message.partition_ids,
+                          [&](int value) { writer.writeI32(value); });
   writer.writeI64(message.factor);
   writer.writeBool(message.saturate_capacity_overflow);
   return encodeFrame(MessageType::SCALE_OBJECTIVE, writer.bytes());
@@ -1168,6 +1170,8 @@ ScaleObjectiveMessage decodeScaleObjective(
   auto decoded = decodeExpectedFrame(frame, MessageType::SCALE_OBJECTIVE);
   Reader reader(decoded.payload);
   ScaleObjectiveMessage message;
+  message.partition_ids =
+      reader.readVector<int>([&] { return reader.readI32(); });
   message.factor = reader.readI64();
   message.saturate_capacity_overflow = reader.readBool();
   requireDone(reader);

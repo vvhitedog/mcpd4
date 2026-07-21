@@ -716,6 +716,78 @@ void remoteWorkerScalesLoadedObjective() {
   }
 }
 
+void remoteWorkerScopesObjectiveScalingToSelectedPartitions() {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(&listener, &client, "scoped-scale-worker");
+  try {
+    for (int partition_id = 0; partition_id < 2; ++partition_id) {
+      mcpd3::PartitionPackage package;
+      package.partition_id = partition_id;
+      package.local_node_count = 1;
+      package.terminal_capacities = {-7 - partition_id};
+      package.local_to_global = {5 + partition_id};
+      package.constraint_endpoints.push_back(
+          mcpd3::ConstraintEndpointBinding{
+              /*constraint_id=*/7 + partition_id,
+              /*global_node_id=*/5 + partition_id,
+              /*local_index=*/0,
+              /*is_source=*/true,
+              /*alpha=*/-7 - partition_id,
+              /*last_alpha=*/-7 - partition_id,
+              /*alpha_momentum=*/0});
+      worker->loadPartition(package);
+    }
+
+    auto solve = [&](int partition_id, long round_id) {
+      mcpd3::PartitionSolveRequest request;
+      request.round_id = round_id;
+      request.partition_id = partition_id;
+      return worker->solveRound(request);
+    };
+    const auto before_selected = solve(0, 1);
+    const auto before_unselected = solve(1, 1);
+
+    worker->scaleObjectivePartitions({0}, 10);
+
+    const auto after_selected = solve(0, 2);
+    const auto after_unselected = solve(1, 2);
+    require(before_selected.lower_bound != 0,
+            "scoped scale test needs a nonzero selected lower bound");
+    require(after_selected.lower_bound == before_selected.lower_bound * 10,
+            "scoped remote scale should rescale the selected partition");
+    require(after_unselected.lower_bound == before_unselected.lower_bound,
+            "scoped remote scale must not alter an unselected partition");
+
+    requireThrowsContaining(
+        [&] { worker->scaleObjectivePartitions({99}, 2); },
+        "unknown partition id",
+        "scoped remote scale should reject an unknown partition");
+    requireThrowsContaining(
+        [&] { worker->scaleObjectivePartitions({0, 0}, 2); },
+        "duplicate objective scale partition id",
+        "scoped remote scale should reject duplicate partitions");
+    requireThrowsContaining(
+        [&] { worker->scaleObjectivePartitions({}, 2); },
+        "at least one partition id",
+        "scoped remote scale should reject an empty selection");
+
+    worker->scaleObjective(2);
+    const auto after_global_selected = solve(0, 3);
+    const auto after_global_unselected = solve(1, 3);
+    require(after_global_selected.lower_bound ==
+                after_selected.lower_bound * 2,
+            "global remote scale should still alter the selected partition");
+    require(after_global_unselected.lower_bound ==
+                after_unselected.lower_bound * 2,
+            "global remote scale should still alter the other partition");
+    stopAndJoin(worker.get(), client);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    throw;
+  }
+}
+
 void remoteWorkerReplacesCapacitiesAndPreservesWarmState() {
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
@@ -1522,6 +1594,7 @@ int main() {
     twoRemoteWorkersSolveCollectivePcgSystem();
     loadPartitionDisconnectReportsWorkerAndPartitionContext();
     remoteWorkerScalesLoadedObjective();
+    remoteWorkerScopesObjectiveScalingToSelectedPartitions();
     remoteWorkerReplacesCapacitiesAndPreservesWarmState();
     remoteWorkerFileBacksCompleteSolverState();
     legacyStreamingAliasUsesPersistentFileBackedWorker();

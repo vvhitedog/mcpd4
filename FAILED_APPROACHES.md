@@ -660,3 +660,10 @@
 - Keep the exact refresh operation unchanged, but transfer each capacity array
   in bounded chunks directly into the worker's configured backing. Never
   approximate or omit the flow-scale numerator/denominator to save transport.
+
+## 2026-07-21 - Validate scoped operations while mutating
+
+- Do not validate and scale one partition at a time. A later duplicate or
+  unknown partition then leaves earlier partitions scaled even though the RPC
+  reports failure, corrupting persistent workspace state.
+- Resolve and validate the complete partition selection first, then mutate it.

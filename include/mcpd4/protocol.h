@@ -202,6 +202,8 @@ struct ReadyMessage {
 };
 
 struct ScaleObjectiveMessage {
+  // Empty preserves the historical command that scales every loaded partition.
+  std::vector<int> partition_ids;
   std::int64_t factor = 1;
   bool saturate_capacity_overflow = false;
 };

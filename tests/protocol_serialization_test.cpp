@@ -1106,14 +1106,23 @@ void deltaSolveRoundBatchResultShrinksRepeatedLabels() {
 
 void roundTripsScaleObjective() {
   mcpd4::ScaleObjectiveMessage message;
+  message.partition_ids = {3, 7};
   message.factor = 10;
   message.saturate_capacity_overflow = true;
   const auto decoded = mcpd4::decodeScaleObjective(
       mcpd4::encodeScaleObjective(message));
+  require(decoded.partition_ids == message.partition_ids,
+          "scale objective partition ids mismatch");
   require(decoded.factor == message.factor, "scale objective factor mismatch");
   require(decoded.saturate_capacity_overflow ==
               message.saturate_capacity_overflow,
           "scale objective saturation flag mismatch");
+
+  message.partition_ids.clear();
+  const auto global = mcpd4::decodeScaleObjective(
+      mcpd4::encodeScaleObjective(message));
+  require(global.partition_ids.empty(),
+          "empty scale objective partition ids should round-trip");
 }
 
 void roundTripsPartitionCapacityUpdate() {
