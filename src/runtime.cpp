@@ -18,6 +18,7 @@ namespace mcpd4 {
 namespace {
 
 constexpr std::size_t kPartitionPackageChunkElements = 64 * 1024;
+constexpr std::size_t kFullLabelChunkElements = 64 * 1024;
 
 bool hostIsLittleEndian() {
   const std::uint16_t value = 1;
@@ -94,6 +95,14 @@ void recordFrameSent(RpcByteStats *stats, MessageType type,
   case MessageType::SOLVE_ROUND_BATCH_RESULT:
     stats->solve_result_tx_bytes += bytes;
     break;
+  case MessageType::FULL_LABELS_REQUEST:
+    stats->full_labels_request_tx_bytes += bytes;
+    break;
+  case MessageType::FULL_LABELS_CHUNK:
+  case MessageType::FULL_LABELS_END:
+    stats->full_labels_result_tx_bytes += bytes;
+    ++stats->full_labels_result_tx_frame_count;
+    break;
   case MessageType::SCALE_OBJECTIVE:
     stats->scale_objective_tx_bytes += bytes;
     break;
@@ -162,6 +171,14 @@ void recordFrameReceived(RpcByteStats *stats, MessageType type,
   case MessageType::SOLVE_ROUND_RESULT:
   case MessageType::SOLVE_ROUND_BATCH_RESULT:
     stats->solve_result_rx_bytes += bytes;
+    break;
+  case MessageType::FULL_LABELS_REQUEST:
+    stats->full_labels_request_rx_bytes += bytes;
+    break;
+  case MessageType::FULL_LABELS_CHUNK:
+  case MessageType::FULL_LABELS_END:
+    stats->full_labels_result_rx_bytes += bytes;
+    ++stats->full_labels_result_rx_frame_count;
     break;
   case MessageType::SCALE_OBJECTIVE:
     stats->scale_objective_rx_bytes += bytes;
@@ -281,6 +298,13 @@ std::uint64_t elapsedUs(std::chrono::steady_clock::time_point start) {
       std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start)
           .count());
+}
+
+std::size_t checkedSizeT(std::uint64_t value, const char *name) {
+  if (value > std::numeric_limits<std::size_t>::max()) {
+    throw std::runtime_error(std::string(name) + " exceeds host size range");
+  }
+  return static_cast<std::size_t>(value);
 }
 
 } // namespace
@@ -482,6 +506,65 @@ void TcpPartitionWorker::replacePartitionCapacities(
   temporal_state_.resetPartition(update.partition_id);
   timing_stats_.capacity_update_rpc_wall_us += elapsedUs(start);
   ++timing_stats_.capacity_update_rpc_count;
+}
+
+void TcpPartitionWorker::copyFullLabels(
+    int partition_id, std::size_t offset, mcpd3::NodeLabel *destination,
+    std::size_t count) {
+  if (count != 0 && destination == nullptr) {
+    throw std::runtime_error("full label destination must not be null");
+  }
+  if (count > std::numeric_limits<std::size_t>::max() - offset) {
+    throw std::overflow_error("full label range overflow");
+  }
+  const auto start = std::chrono::steady_clock::now();
+  const auto request_frame = encodeFullLabelsRequest(FullLabelsRequest{
+      partition_id, static_cast<std::uint64_t>(offset),
+      static_cast<std::uint64_t>(count)});
+  FrameTransferStats transfer;
+  sendFrameBytes(socket_, request_frame, compression_, &transfer);
+  recordFrameSent(&timing_stats_.rpc_bytes, MessageType::FULL_LABELS_REQUEST,
+                  transfer);
+
+  const auto expected_end = offset + count;
+  auto next_offset = offset;
+  while (true) {
+    std::vector<std::uint8_t> frame_bytes;
+    const auto frame = receiveTypedFrame(socket_, &frame_bytes,
+                                         &timing_stats_.rpc_bytes,
+                                         compression_);
+    if (frame.type == MessageType::ERROR) {
+      throw remoteError(frame_bytes);
+    }
+    if (frame.type == MessageType::FULL_LABELS_END) {
+      const auto end = decodeFullLabelsEnd(frame_bytes);
+      if (end.partition_id != partition_id) {
+        throw std::runtime_error("full label end partition id mismatch");
+      }
+      if (next_offset != expected_end) {
+        throw std::runtime_error("full label transfer ended early");
+      }
+      break;
+    }
+    if (frame.type != MessageType::FULL_LABELS_CHUNK) {
+      throw std::runtime_error("expected FULL_LABELS_CHUNK from worker");
+    }
+    auto chunk = decodeFullLabelsChunk(frame_bytes);
+    if (chunk.partition_id != partition_id) {
+      throw std::runtime_error("full label chunk partition id mismatch");
+    }
+    if (chunk.offset != next_offset) {
+      throw std::runtime_error("full label chunk offset is not contiguous");
+    }
+    if (chunk.labels.size() > expected_end - next_offset) {
+      throw std::runtime_error("full label chunk exceeds requested range");
+    }
+    std::copy(chunk.labels.begin(), chunk.labels.end(),
+              destination + (next_offset - offset));
+    next_offset += chunk.labels.size();
+  }
+  timing_stats_.full_labels_rpc_wall_us += elapsedUs(start);
+  ++timing_stats_.full_labels_rpc_count;
 }
 
 void TcpPartitionWorker::loadLinearStructure(
@@ -838,6 +921,52 @@ void runWorkerClient(const std::string &host, std::uint16_t port,
           load_complete_package(std::move(package),
                                 package_transfer_logical_bytes);
           package_transfer_logical_bytes = 0;
+        }
+        break;
+      case MessageType::FULL_LABELS_REQUEST:
+        {
+          const auto request = decodeFullLabelsRequest(frame_bytes);
+          const auto total = worker->fullLabelCount(request.partition_id);
+          const auto offset = checkedSizeT(request.offset, "full label offset");
+          const auto count = checkedSizeT(request.count, "full label count");
+          if (offset > total || count > total - offset) {
+            throw std::runtime_error(
+                "full label request range is outside partition");
+          }
+          if (status_hooks.on_phase) {
+            status_hooks.on_phase("recovering_labels");
+          }
+          std::vector<mcpd3::NodeLabel> labels;
+          for (std::size_t sent = 0; sent < count;) {
+            const auto chunk_count =
+                std::min(kFullLabelChunkElements, count - sent);
+            labels.resize(chunk_count);
+            worker->copyFullLabels(request.partition_id, offset + sent,
+                                   labels.data(), chunk_count);
+            FullLabelsChunk chunk;
+            chunk.partition_id = request.partition_id;
+            chunk.offset = offset + sent;
+            chunk.labels = labels;
+            const auto chunk_frame = encodeFullLabelsChunk(chunk);
+            FrameTransferStats transfer;
+            sendFrameBytes(socket, chunk_frame, compression, &transfer);
+            if (status_hooks.on_frame_sent) {
+              status_hooks.on_frame_sent(MessageType::FULL_LABELS_CHUNK,
+                                         transfer);
+            }
+            sent += chunk_count;
+          }
+          const auto end_frame = encodeFullLabelsEnd(
+              FullLabelsEnd{request.partition_id});
+          FrameTransferStats end_transfer;
+          sendFrameBytes(socket, end_frame, compression, &end_transfer);
+          if (status_hooks.on_frame_sent) {
+            status_hooks.on_frame_sent(MessageType::FULL_LABELS_END,
+                                       end_transfer);
+          }
+          if (status_hooks.on_phase) {
+            status_hooks.on_phase("connected");
+          }
         }
         break;
       case MessageType::SOLVE_ROUND_REQUEST:

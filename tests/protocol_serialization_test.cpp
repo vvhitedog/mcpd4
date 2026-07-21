@@ -490,6 +490,81 @@ void rejectsMalformedMultipartPartitionPackages() {
       "multipart reference label mismatch should fail");
 }
 
+void roundTripsBoundedFullLabels() {
+  const mcpd4::FullLabelsRequest request{/*partition_id=*/7,
+                                         /*offset=*/1,
+                                         /*count=*/3};
+  const auto decoded_request = mcpd4::decodeFullLabelsRequest(
+      mcpd4::encodeFullLabelsRequest(request));
+  require(decoded_request.partition_id == request.partition_id &&
+              decoded_request.offset == request.offset &&
+              decoded_request.count == request.count,
+          "full label request mismatch");
+
+  mcpd4::FullLabelsChunk chunk;
+  chunk.partition_id = 7;
+  chunk.offset = 1;
+  chunk.labels = {
+      mcpd3::NodeLabel{/*global_node_id=*/20, /*local_index=*/1, /*label=*/0},
+      mcpd3::NodeLabel{/*global_node_id=*/30, /*local_index=*/2, /*label=*/1}};
+  const auto decoded_chunk = mcpd4::decodeFullLabelsChunk(
+      mcpd4::encodeFullLabelsChunk(chunk));
+  require(decoded_chunk.partition_id == chunk.partition_id &&
+              decoded_chunk.offset == chunk.offset &&
+              decoded_chunk.labels.size() == chunk.labels.size(),
+          "full label chunk metadata mismatch");
+  for (std::size_t i = 0; i < chunk.labels.size(); ++i) {
+    requireNodeLabelEqual(decoded_chunk.labels[i], chunk.labels[i]);
+  }
+
+  const mcpd4::FullLabelsEnd end{/*partition_id=*/7};
+  require(mcpd4::decodeFullLabelsEnd(mcpd4::encodeFullLabelsEnd(end))
+              .partition_id == end.partition_id,
+          "full label end mismatch");
+}
+
+void rejectsMalformedBoundedFullLabels() {
+  requireThrows(
+      [] {
+        (void)mcpd4::decodeFullLabelsRequest(mcpd4::encodeFullLabelsRequest(
+            mcpd4::FullLabelsRequest{/*partition_id=*/-1,
+                                     /*offset=*/0,
+                                     /*count=*/0}));
+      },
+      "negative full label request partition should fail");
+  requireThrows(
+      [] {
+        (void)mcpd4::encodeFullLabelsChunk(mcpd4::FullLabelsChunk{});
+      },
+      "empty full label chunk should fail");
+  mcpd4::FullLabelsChunk non_binary;
+  non_binary.partition_id = 1;
+  non_binary.labels.push_back(
+      mcpd3::NodeLabel{/*global_node_id=*/1, /*local_index=*/0, /*label=*/2});
+  requireThrows([&] { (void)mcpd4::encodeFullLabelsChunk(non_binary); },
+                "non-binary full label chunk should fail encoding");
+
+  mcpd4::FullLabelsChunk valid;
+  valid.partition_id = 1;
+  valid.labels.push_back(
+      mcpd3::NodeLabel{/*global_node_id=*/1, /*local_index=*/0, /*label=*/1});
+  auto malformed_label = mcpd4::encodeFullLabelsChunk(valid);
+  malformed_label[36] = 2;
+  requireThrows([&] { (void)mcpd4::decodeFullLabelsChunk(malformed_label); },
+                "non-binary full label chunk should fail decoding");
+
+  auto truncated = mcpd4::encodeFullLabelsChunk(valid);
+  truncated.pop_back();
+  requireThrows([&] { (void)mcpd4::decodeFullLabelsChunk(truncated); },
+                "truncated full label chunk should fail");
+  requireThrows(
+      [] {
+        (void)mcpd4::decodeFullLabelsEnd(mcpd4::encodeFullLabelsEnd(
+            mcpd4::FullLabelsEnd{/*partition_id=*/-1}));
+      },
+      "negative full label end partition should fail");
+}
+
 void roundTripsReady() {
   mcpd4::ReadyMessage message;
   message.worker_name = "worker-ready";
@@ -1289,6 +1364,8 @@ int main() {
     roundTripsPartitionPackage();
     roundTripsMappedMultipartPartitionPackage();
     rejectsMalformedMultipartPartitionPackages();
+    roundTripsBoundedFullLabels();
+    rejectsMalformedBoundedFullLabels();
     roundTripsReady();
     roundTripsSolveRoundRequest();
     roundTripsSolveRoundBatchRequest();

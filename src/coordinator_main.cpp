@@ -153,6 +153,16 @@ void addRpcByteStats(mcpd4::RpcByteStats *total,
   total->solve_result_rx_bytes += stats.solve_result_rx_bytes;
   total->scale_objective_tx_bytes += stats.scale_objective_tx_bytes;
   total->scale_objective_rx_bytes += stats.scale_objective_rx_bytes;
+  total->capacity_update_tx_bytes += stats.capacity_update_tx_bytes;
+  total->capacity_update_rx_bytes += stats.capacity_update_rx_bytes;
+  total->full_labels_request_tx_bytes += stats.full_labels_request_tx_bytes;
+  total->full_labels_request_rx_bytes += stats.full_labels_request_rx_bytes;
+  total->full_labels_result_tx_bytes += stats.full_labels_result_tx_bytes;
+  total->full_labels_result_rx_bytes += stats.full_labels_result_rx_bytes;
+  total->full_labels_result_tx_frame_count +=
+      stats.full_labels_result_tx_frame_count;
+  total->full_labels_result_rx_frame_count +=
+      stats.full_labels_result_rx_frame_count;
   total->ready_tx_bytes += stats.ready_tx_bytes;
   total->ready_rx_bytes += stats.ready_rx_bytes;
   total->stop_tx_bytes += stats.stop_tx_bytes;
@@ -454,6 +464,15 @@ public:
     insertFinal("rpc_partition_load_tx_frame_count",
                 std::to_string(rpc_bytes.partition_load_tx_frame_count),
                 "Partition package frames transmitted.");
+    insertFinal("rpc_full_labels_request_tx_bytes",
+                std::to_string(rpc_bytes.full_labels_request_tx_bytes),
+                "Logical bounded final-label request bytes transmitted.");
+    insertFinal("rpc_full_labels_result_rx_bytes",
+                std::to_string(rpc_bytes.full_labels_result_rx_bytes),
+                "Logical bounded final-label result bytes received.");
+    insertFinal("rpc_full_labels_result_rx_frame_count",
+                std::to_string(rpc_bytes.full_labels_result_rx_frame_count),
+                "Final-label data and end frames received.");
     insertFinal("rpc_solve_request_tx_bytes",
                 std::to_string(rpc_bytes.solve_request_tx_bytes),
                 "Logical solve request bytes transmitted.");
@@ -1033,6 +1052,12 @@ private:
         << rpc_bytes.partition_load_tx_bytes
         << " rpc_partition_load_tx_frame_count "
         << rpc_bytes.partition_load_tx_frame_count
+        << " rpc_full_labels_request_tx_bytes "
+        << rpc_bytes.full_labels_request_tx_bytes
+        << " rpc_full_labels_result_rx_bytes "
+        << rpc_bytes.full_labels_result_rx_bytes
+        << " rpc_full_labels_result_rx_frame_count "
+        << rpc_bytes.full_labels_result_rx_frame_count
         << " rpc_solve_request_tx_bytes "
         << rpc_bytes.solve_request_tx_bytes
         << " rpc_solve_result_rx_bytes "
@@ -1725,6 +1750,12 @@ void printTiming(const RuntimeTiming &timing,
             << rpc_bytes.partition_load_tx_bytes << "\n";
   std::cout << "rpc_partition_load_tx_frame_count "
             << rpc_bytes.partition_load_tx_frame_count << "\n";
+  std::cout << "rpc_full_labels_request_tx_bytes "
+            << rpc_bytes.full_labels_request_tx_bytes << "\n";
+  std::cout << "rpc_full_labels_result_rx_bytes "
+            << rpc_bytes.full_labels_result_rx_bytes << "\n";
+  std::cout << "rpc_full_labels_result_rx_frame_count "
+            << rpc_bytes.full_labels_result_rx_frame_count << "\n";
   std::cout << "rpc_solve_request_tx_bytes "
             << rpc_bytes.solve_request_tx_bytes << "\n";
   std::cout << "rpc_solve_result_rx_bytes "
@@ -1838,6 +1869,12 @@ void printProgress(
             << rpc_bytes.partition_load_tx_bytes
             << " rpc_partition_load_tx_frame_count "
             << rpc_bytes.partition_load_tx_frame_count
+            << " rpc_full_labels_request_tx_bytes "
+            << rpc_bytes.full_labels_request_tx_bytes
+            << " rpc_full_labels_result_rx_bytes "
+            << rpc_bytes.full_labels_result_rx_bytes
+            << " rpc_full_labels_result_rx_frame_count "
+            << rpc_bytes.full_labels_result_rx_frame_count
             << " rpc_solve_request_tx_bytes "
             << rpc_bytes.solve_request_tx_bytes
             << " rpc_solve_result_rx_bytes "
@@ -1884,6 +1921,12 @@ void printProgress(
               << stats.rpc_bytes.partition_load_tx_bytes
               << " rpc_partition_load_tx_frame_count "
               << stats.rpc_bytes.partition_load_tx_frame_count
+              << " rpc_full_labels_request_tx_bytes "
+              << stats.rpc_bytes.full_labels_request_tx_bytes
+              << " rpc_full_labels_result_rx_bytes "
+              << stats.rpc_bytes.full_labels_result_rx_bytes
+              << " rpc_full_labels_result_rx_frame_count "
+              << stats.rpc_bytes.full_labels_result_rx_frame_count
               << " rpc_solve_request_tx_bytes "
               << stats.rpc_bytes.solve_request_tx_bytes
               << " rpc_solve_result_rx_bytes "

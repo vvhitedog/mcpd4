@@ -47,6 +47,9 @@ bool isKnownMessageType(std::uint32_t value) {
   case MessageType::PARTITION_PACKAGE_BEGIN:
   case MessageType::PARTITION_PACKAGE_CHUNK:
   case MessageType::PARTITION_PACKAGE_END:
+  case MessageType::FULL_LABELS_REQUEST:
+  case MessageType::FULL_LABELS_CHUNK:
+  case MessageType::FULL_LABELS_END:
     return true;
   }
   return false;
@@ -812,6 +815,84 @@ PartitionPackageTransferEnd decodePartitionPackageTransferEnd(
   PartitionPackageTransferEnd message;
   message.partition_id = reader.readI32();
   requireDone(reader);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeFullLabelsRequest(
+    const FullLabelsRequest &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writer.writeU64(message.offset);
+  writer.writeU64(message.count);
+  return encodeFrame(MessageType::FULL_LABELS_REQUEST, writer.bytes());
+}
+
+FullLabelsRequest decodeFullLabelsRequest(
+    const std::vector<std::uint8_t> &frame) {
+  auto decoded = decodeExpectedFrame(frame, MessageType::FULL_LABELS_REQUEST);
+  Reader reader(decoded.payload);
+  FullLabelsRequest message;
+  message.partition_id = reader.readI32();
+  message.offset = reader.readU64();
+  message.count = reader.readU64();
+  requireDone(reader);
+  require(message.partition_id >= 0,
+          "full label request partition id must be non-negative");
+  (void)checkedContainerSize(message.offset);
+  (void)checkedContainerSize(message.count);
+  return message;
+}
+
+std::vector<std::uint8_t> encodeFullLabelsChunk(
+    const FullLabelsChunk &message) {
+  require(!message.labels.empty(), "full label chunk must not be empty");
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  writer.writeU64(message.offset);
+  writer.writeVector<mcpd3::NodeLabel>(
+      message.labels, [&](const auto &label) {
+        require(label.label == 0 || label.label == 1,
+                "full label chunk contains a non-binary label");
+        writeNodeLabel(&writer, label);
+      });
+  return encodeFrame(MessageType::FULL_LABELS_CHUNK, writer.bytes());
+}
+
+FullLabelsChunk decodeFullLabelsChunk(
+    const std::vector<std::uint8_t> &frame) {
+  auto decoded = decodeExpectedFrame(frame, MessageType::FULL_LABELS_CHUNK);
+  Reader reader(decoded.payload);
+  FullLabelsChunk message;
+  message.partition_id = reader.readI32();
+  message.offset = reader.readU64();
+  message.labels = reader.readVector<mcpd3::NodeLabel>([&] {
+    auto label = readNodeLabel(&reader);
+    require(label.label == 0 || label.label == 1,
+            "full label chunk contains a non-binary label");
+    return label;
+  });
+  requireDone(reader);
+  require(message.partition_id >= 0,
+          "full label chunk partition id must be non-negative");
+  require(!message.labels.empty(), "full label chunk must not be empty");
+  return message;
+}
+
+std::vector<std::uint8_t> encodeFullLabelsEnd(
+    const FullLabelsEnd &message) {
+  Writer writer;
+  writer.writeI32(message.partition_id);
+  return encodeFrame(MessageType::FULL_LABELS_END, writer.bytes());
+}
+
+FullLabelsEnd decodeFullLabelsEnd(const std::vector<std::uint8_t> &frame) {
+  auto decoded = decodeExpectedFrame(frame, MessageType::FULL_LABELS_END);
+  Reader reader(decoded.payload);
+  FullLabelsEnd message;
+  message.partition_id = reader.readI32();
+  requireDone(reader);
+  require(message.partition_id >= 0,
+          "full label end partition id must be non-negative");
   return message;
 }
 

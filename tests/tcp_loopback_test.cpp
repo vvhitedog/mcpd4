@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -1123,7 +1124,212 @@ void remoteWorkerUsesSnappyCompression() {
   }
 }
 
+void remoteWorkerStreamsLargeFinalLabelsIntoMappedStorage() {
+  constexpr std::size_t node_count = 150000;
+  const auto scratch =
+      std::filesystem::temp_directory_path() /
+      ("mcpd4-full-label-stream-test-" +
+       std::to_string(std::chrono::steady_clock::now()
+                          .time_since_epoch()
+                          .count()));
+  std::filesystem::create_directories(scratch);
+  mcpd4::WorkerRuntimeOptions runtime_options;
+  runtime_options.solver_storage.mode =
+      mcpd3::SolverStorageMode::FILE_BACKED_MMAP;
+  runtime_options.solver_storage.directory = scratch.string();
+
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  WorkerClientThread *client = nullptr;
+  auto worker = startRemoteWorker(
+      &listener, &client, "full-label-stream-worker",
+      mcpd4::TransportCompression::NONE, runtime_options);
+  try {
+    mcpd3::PartitionPackage package;
+    package.partition_id = 4;
+    package.local_node_count = static_cast<int>(node_count);
+    package.terminal_capacities.resize(node_count);
+    package.local_to_global.resize(node_count);
+    for (std::size_t node = 0; node < node_count; ++node) {
+      package.terminal_capacities[node] = node % 2 == 0 ? 1 : -1;
+      package.local_to_global[node] = static_cast<int>(1000000 + node);
+    }
+    worker->loadPartition(package);
+
+    mcpd3::PartitionSolveRequest request;
+    request.round_id = 1;
+    request.partition_id = package.partition_id;
+    const auto solve_result = worker->solveRound(request);
+    require(solve_result.full_labels.empty(),
+            "bounded recovery setup must not return resident full labels");
+
+    mcpd3::SolverStorageOptions label_storage;
+    label_storage.mode = mcpd3::SolverStorageMode::FILE_BACKED_MMAP;
+    label_storage.directory = scratch.string();
+    mcpd3::SolverArray<mcpd3::NodeLabel> labels(
+        node_count, label_storage, "tcp_full_labels");
+    worker->copyFullLabels(package.partition_id, /*offset=*/0,
+                           labels.data(), labels.size());
+    require(labels.isFileBacked(),
+            "large remote labels should land directly in mapped storage");
+    require(labels[0].global_node_id == 1000000 &&
+                labels[0].local_index == 0 &&
+                (labels[0].label == 0 || labels[0].label == 1) &&
+                labels[node_count - 1].global_node_id ==
+                    static_cast<int>(1000000 + node_count - 1) &&
+                labels[node_count - 1].local_index ==
+                    static_cast<int>(node_count - 1),
+            "streamed full labels should preserve endpoint metadata");
+    const auto &stats = worker->timingStats();
+    require(stats.full_labels_rpc_count == 1,
+            "large full label recovery should use one streaming request");
+    require(stats.rpc_bytes.full_labels_result_rx_frame_count == 4,
+            "150,000 labels should arrive as three chunks and one end frame");
+
+    std::vector<mcpd3::NodeLabel> partial(3);
+    worker->copyFullLabels(package.partition_id, /*offset=*/65535,
+                           partial.data(), partial.size());
+    require(partial[0].local_index == 65535 &&
+                partial[2].local_index == 65537,
+            "remote full label recovery should preserve partial ranges");
+    requireThrowsContaining(
+        [&] {
+          mcpd3::NodeLabel label;
+          worker->copyFullLabels(package.partition_id, node_count, &label, 1);
+        },
+        "outside partition",
+        "remote worker should reject an out-of-range full label request");
+    requireThrowsContaining(
+        [&] {
+          worker->copyFullLabels(/*partition_id=*/999, /*offset=*/0, nullptr,
+                                 /*count=*/0);
+        },
+        "unknown partition",
+        "remote worker should reject an unknown full label partition");
+    requireThrows(
+        [&] {
+          worker->copyFullLabels(package.partition_id, /*offset=*/0, nullptr,
+                                 /*count=*/1);
+        },
+        "remote label recovery should reject a null destination locally");
+    stopAndJoin(worker.get(), client);
+    std::filesystem::remove_all(scratch);
+  } catch (...) {
+    stopAndJoin(worker.get(), client);
+    std::filesystem::remove_all(scratch);
+    throw;
+  }
+}
+
+void remoteLabelResponseFails(
+    const std::function<std::vector<std::vector<std::uint8_t>>(
+        const mcpd4::FullLabelsRequest &)> &response_frames,
+    const std::string &expected_error, const std::string &worker_name) {
+  auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
+  const auto port = mcpd4::localPort(listener);
+  std::exception_ptr client_exception;
+  std::thread client([&] {
+    try {
+      auto socket = mcpd4::connectTcp("127.0.0.1", port);
+      mcpd4::sendFrameBytes(socket, mcpd4::encodeHello(makeHello(worker_name)));
+      const auto request = mcpd4::decodeFullLabelsRequest(
+          mcpd4::receiveFrameBytes(socket));
+      for (const auto &frame : response_frames(request)) {
+        mcpd4::sendFrameBytes(socket, frame);
+      }
+      (void)mcpd4::decodeStop(mcpd4::receiveFrameBytes(socket));
+    } catch (...) {
+      client_exception = std::current_exception();
+    }
+  });
+  auto worker = mcpd4::acceptTcpPartitionWorker(&listener, 2s);
+  try {
+    mcpd3::NodeLabel label;
+    requireThrowsContaining(
+        [&] {
+          worker->copyFullLabels(/*partition_id=*/4, /*offset=*/0, &label,
+                                 /*count=*/1);
+        },
+        expected_error, "malformed full label stream should fail");
+    worker->stop(/*reason=*/0, "test complete");
+    client.join();
+    if (client_exception) {
+      std::rethrow_exception(client_exception);
+    }
+  } catch (...) {
+    worker->stop(/*reason=*/1, "test failed");
+    if (client.joinable()) {
+      client.join();
+    }
+    throw;
+  }
+}
+
+void tcpWorkerRejectsMalformedFullLabelResponses() {
+  const auto one_label = [] {
+    return mcpd3::NodeLabel{/*global_node_id=*/10,
+                            /*local_index=*/0,
+                            /*label=*/1};
+  };
+  remoteLabelResponseFails(
+      [&](const auto &request) {
+        mcpd4::FullLabelsChunk chunk;
+        chunk.partition_id = request.partition_id + 1;
+        chunk.offset = request.offset;
+        chunk.labels = {one_label()};
+        return std::vector<std::vector<std::uint8_t>>{
+            mcpd4::encodeFullLabelsChunk(chunk)};
+      },
+      "chunk partition id mismatch", "wrong-label-partition-worker");
+  remoteLabelResponseFails(
+      [&](const auto &request) {
+        mcpd4::FullLabelsChunk chunk;
+        chunk.partition_id = request.partition_id;
+        chunk.offset = request.offset + 1;
+        chunk.labels = {one_label()};
+        return std::vector<std::vector<std::uint8_t>>{
+            mcpd4::encodeFullLabelsChunk(chunk)};
+      },
+      "offset is not contiguous", "wrong-label-offset-worker");
+  remoteLabelResponseFails(
+      [&](const auto &request) {
+        mcpd4::FullLabelsChunk chunk;
+        chunk.partition_id = request.partition_id;
+        chunk.offset = request.offset;
+        chunk.labels = {one_label(), one_label()};
+        return std::vector<std::vector<std::uint8_t>>{
+            mcpd4::encodeFullLabelsChunk(chunk)};
+      },
+      "exceeds requested range", "oversized-label-chunk-worker");
+  remoteLabelResponseFails(
+      [&](const auto &request) {
+        return std::vector<std::vector<std::uint8_t>>{
+            mcpd4::encodeFullLabelsEnd(
+                mcpd4::FullLabelsEnd{request.partition_id})};
+      },
+      "ended early", "early-label-end-worker");
+  remoteLabelResponseFails(
+      [&](const auto &request) {
+        return std::vector<std::vector<std::uint8_t>>{
+            mcpd4::encodeFullLabelsEnd(
+                mcpd4::FullLabelsEnd{request.partition_id + 1})};
+      },
+      "end partition id mismatch", "wrong-label-end-worker");
+  remoteLabelResponseFails(
+      [&](const auto &) {
+        return std::vector<std::vector<std::uint8_t>>{
+            mcpd4::encodeReady(mcpd4::ReadyMessage{"unexpected"})};
+      },
+      "expected FULL_LABELS_CHUNK", "unexpected-label-frame-worker");
+}
+
 void remoteWorkerCoordinatorSolvesRegularizedAgreement() {
+  const auto scratch =
+      std::filesystem::temp_directory_path() /
+      ("mcpd4-coordinator-label-test-" +
+       std::to_string(std::chrono::steady_clock::now()
+                          .time_since_epoch()
+                          .count()));
+  std::filesystem::create_directories(scratch);
   auto listener = mcpd4::listenTcpLoopback(/*port=*/0);
   WorkerClientThread *client = nullptr;
   auto remote = startRemoteWorker(&listener, &client, "coordinator-worker");
@@ -1140,6 +1346,10 @@ void remoteWorkerCoordinatorSolvesRegularizedAgreement() {
     options.enable_group_stopping = false;
     options.use_momentum = false;
     options.objective_scale = 10000;
+    options.collect_final_labels = true;
+    options.final_label_storage.mode =
+        mcpd3::SolverStorageMode::FILE_BACKED_MMAP;
+    options.final_label_storage.directory = scratch.string();
     mcpd3::PartitionWorkerCoordinator coordinator(
         makeTieBreakRegularizationPackages(), std::move(workers), options);
 
@@ -1153,15 +1363,22 @@ void remoteWorkerCoordinatorSolvesRegularizedAgreement() {
             "remote worker coordinator should finish with no disagreement");
     require(result.final_regularization_budget == 10,
             "remote worker should preserve regularization diagnostics");
+    require(result.final_labels.isFileBacked() &&
+                result.final_labels.size() == 2 &&
+                result.final_labels[0].label == result.final_labels[1].label,
+            "remote coordinator should recover agreeing labels into mapping");
     require(remote_ptr->timingStats().solve_batch_rpc_count ==
-                result.total_iterations,
-            "single remote worker should receive one solve batch per round");
+                result.total_iterations + 1,
+            "final label recovery should perform the same final local solve");
     require(remote_ptr->timingStats().partition_solve_call_count ==
-                result.total_iterations * 2,
+                result.total_iterations * 2 + 2,
             "single remote worker should solve both partitions in each batch");
+    require(remote_ptr->timingStats().full_labels_rpc_count == 2,
+            "coordinator should stream each partition labeling separately");
     remote_ptr->stop(/*reason=*/0, "coordinator test complete");
     client->joinAndRethrow();
     delete client;
+    std::filesystem::remove_all(scratch);
   } catch (...) {
     if (remote_ptr != nullptr) {
       remote_ptr->stop(/*reason=*/1, "coordinator test failed");
@@ -1170,6 +1387,7 @@ void remoteWorkerCoordinatorSolvesRegularizedAgreement() {
       client->joinAndRethrow();
       delete client;
     }
+    std::filesystem::remove_all(scratch);
     throw;
   }
 }
@@ -1253,6 +1471,8 @@ int main() {
     remoteWorkerSolvesExplicitBatch();
     remoteWorkerDeltaEncodingReducesRepeatedSolveBytes();
     remoteWorkerUsesSnappyCompression();
+    remoteWorkerStreamsLargeFinalLabelsIntoMappedStorage();
+    tcpWorkerRejectsMalformedFullLabelResponses();
     remoteWorkerCoordinatorSolvesRegularizedAgreement();
     remoteWorkerCoordinatorPromotesObjectiveScale();
   } catch (const std::exception &e) {

@@ -380,6 +380,11 @@ struct WorkerStatusState {
     case mcpd4::MessageType::SOLVE_ROUND_BATCH_RESULT:
       rpc_bytes.solve_result_tx_bytes += bytes;
       break;
+    case mcpd4::MessageType::FULL_LABELS_CHUNK:
+    case mcpd4::MessageType::FULL_LABELS_END:
+      rpc_bytes.full_labels_result_tx_bytes += bytes;
+      ++rpc_bytes.full_labels_result_tx_frame_count;
+      break;
     case mcpd4::MessageType::ERROR:
       rpc_bytes.error_tx_bytes += bytes;
       break;
@@ -393,6 +398,7 @@ struct WorkerStatusState {
     case mcpd4::MessageType::ALPHA_UPDATE:
     case mcpd4::MessageType::STOP:
     case mcpd4::MessageType::SOLVE_ROUND_BATCH_REQUEST:
+    case mcpd4::MessageType::FULL_LABELS_REQUEST:
       break;
     }
   }
@@ -423,6 +429,9 @@ struct WorkerStatusState {
     case mcpd4::MessageType::SOLVE_ROUND_BATCH_REQUEST:
       rpc_bytes.solve_request_rx_bytes += bytes;
       break;
+    case mcpd4::MessageType::FULL_LABELS_REQUEST:
+      rpc_bytes.full_labels_request_rx_bytes += bytes;
+      break;
     case mcpd4::MessageType::SCALE_OBJECTIVE:
       rpc_bytes.scale_objective_rx_bytes += bytes;
       break;
@@ -438,6 +447,8 @@ struct WorkerStatusState {
     case mcpd4::MessageType::ALPHA_UPDATE:
     case mcpd4::MessageType::ERROR:
     case mcpd4::MessageType::SOLVE_ROUND_BATCH_RESULT:
+    case mcpd4::MessageType::FULL_LABELS_CHUNK:
+    case mcpd4::MessageType::FULL_LABELS_END:
       break;
     }
   }
@@ -510,6 +521,14 @@ struct WorkerStatusState {
         << rpc_bytes.solve_result_tx_bytes
         << " rpc_scale_objective_rx_bytes "
         << rpc_bytes.scale_objective_rx_bytes
+        << " rpc_capacity_update_rx_bytes "
+        << rpc_bytes.capacity_update_rx_bytes
+        << " rpc_full_labels_request_rx_bytes "
+        << rpc_bytes.full_labels_request_rx_bytes
+        << " rpc_full_labels_result_tx_bytes "
+        << rpc_bytes.full_labels_result_tx_bytes
+        << " rpc_full_labels_result_tx_frame_count "
+        << rpc_bytes.full_labels_result_tx_frame_count
         << " rpc_ready_tx_bytes " << rpc_bytes.ready_tx_bytes
         << " rpc_stop_rx_bytes " << rpc_bytes.stop_rx_bytes
         << " rpc_error_tx_bytes " << rpc_bytes.error_tx_bytes

@@ -641,3 +641,13 @@
 - Keep assigned solvers alive and change only array backing. The old streaming
   CLI names may remain as compatibility aliases, but cache-size requests must
   not re-enable eviction.
+
+## 2026-07-20 - Returning the final cut in solve-result frames
+
+- Do not set `return_full_labels` on the final remote solve and decode one
+  partition-sized result frame. That duplicates labels at the worker, wire
+  codec, coordinator, and final PU result.
+- Perform the same final local solve without embedded full labels, then stream
+  the already-solved labeling in bounded ranges into the configured final
+  backing. Final-label transport must validate contiguous offsets and exact
+  completion before exposing the result.

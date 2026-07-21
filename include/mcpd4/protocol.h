@@ -57,6 +57,9 @@ enum class MessageType : std::uint32_t {
   PARTITION_PACKAGE_BEGIN = 25,
   PARTITION_PACKAGE_CHUNK = 26,
   PARTITION_PACKAGE_END = 27,
+  FULL_LABELS_REQUEST = 28,
+  FULL_LABELS_CHUNK = 29,
+  FULL_LABELS_END = 30,
 };
 
 enum class PartitionPackageSection : std::uint32_t {
@@ -95,6 +98,22 @@ struct PartitionPackageTransferChunk {
 };
 
 struct PartitionPackageTransferEnd {
+  int partition_id = -1;
+};
+
+struct FullLabelsRequest {
+  int partition_id = -1;
+  std::uint64_t offset = 0;
+  std::uint64_t count = 0;
+};
+
+struct FullLabelsChunk {
+  int partition_id = -1;
+  std::uint64_t offset = 0;
+  std::vector<mcpd3::NodeLabel> labels;
+};
+
+struct FullLabelsEnd {
   int partition_id = -1;
 };
 
@@ -246,6 +265,17 @@ std::vector<std::uint8_t> encodePartitionPackageTransferEnd(
     const PartitionPackageTransferEnd &message);
 PartitionPackageTransferEnd decodePartitionPackageTransferEnd(
     const std::vector<std::uint8_t> &frame);
+
+std::vector<std::uint8_t> encodeFullLabelsRequest(
+    const FullLabelsRequest &message);
+FullLabelsRequest decodeFullLabelsRequest(
+    const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodeFullLabelsChunk(
+    const FullLabelsChunk &message);
+FullLabelsChunk decodeFullLabelsChunk(const std::vector<std::uint8_t> &frame);
+std::vector<std::uint8_t> encodeFullLabelsEnd(
+    const FullLabelsEnd &message);
+FullLabelsEnd decodeFullLabelsEnd(const std::vector<std::uint8_t> &frame);
 
 std::vector<std::uint8_t> encodeReady(const ReadyMessage &message);
 ReadyMessage decodeReady(const std::vector<std::uint8_t> &frame);

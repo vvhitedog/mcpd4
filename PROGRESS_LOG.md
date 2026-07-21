@@ -2318,3 +2318,21 @@
   700,375 logical bytes compressed to 33,407 wire bytes in the test run.
 - MCPD4 passes all 6 CTest targets, including protocol serialization, TCP
   loopback, and process integration.
+
+## 2026-07-20 23:56 PDT - Bounded mapped final-label recovery
+
+- Advanced MCPD3 to recover final local labels by validated offset/count
+  copies into a configurable mapped coordinator result without changing the
+  final local solve, alpha state, regularization, or package ordering.
+- Advanced the wire protocol to version 12 with one final-label request and a
+  bounded stream of 64K-label chunks plus an end marker. Full labels no longer
+  inflate a solve-result frame or require a complete worker/coordinator staging
+  vector.
+- Added dedicated label-recovery timing, byte, and frame telemetry to worker,
+  coordinator, status, and final output.
+- A 150,000-node remote regression arrives as three chunks plus one end frame
+  directly into mapped storage. Partial ranges, unknown partitions, invalid
+  ranges, null destinations, wrong IDs/offsets, oversized chunks, early ends,
+  and unexpected response frames are covered.
+- MCPD4 passes 6/6 and the Phase integration passes 58/58 with explicit mapped
+  final-label diagnostics.

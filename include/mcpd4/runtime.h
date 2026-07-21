@@ -14,7 +14,7 @@
 
 namespace mcpd4 {
 
-constexpr std::uint32_t kProtocolVersion = 11;
+constexpr std::uint32_t kProtocolVersion = 12;
 constexpr std::uint64_t kFeatureSnappyCompression = 1ULL << 0;
 
 struct RpcByteStats {
@@ -42,6 +42,12 @@ struct RpcByteStats {
   std::uint64_t scale_objective_rx_bytes = 0;
   std::uint64_t capacity_update_tx_bytes = 0;
   std::uint64_t capacity_update_rx_bytes = 0;
+  std::uint64_t full_labels_request_tx_bytes = 0;
+  std::uint64_t full_labels_request_rx_bytes = 0;
+  std::uint64_t full_labels_result_tx_bytes = 0;
+  std::uint64_t full_labels_result_rx_bytes = 0;
+  std::uint64_t full_labels_result_tx_frame_count = 0;
+  std::uint64_t full_labels_result_rx_frame_count = 0;
   std::uint64_t ready_tx_bytes = 0;
   std::uint64_t ready_rx_bytes = 0;
   std::uint64_t stop_tx_bytes = 0;
@@ -58,11 +64,13 @@ struct TcpPartitionWorkerTimingStats {
   std::uint64_t solve_round_worker_wall_us = 0;
   std::uint64_t scale_objective_rpc_wall_us = 0;
   std::uint64_t capacity_update_rpc_wall_us = 0;
+  std::uint64_t full_labels_rpc_wall_us = 0;
   long load_partition_rpc_count = 0;
   long partition_solve_call_count = 0;
   long solve_batch_rpc_count = 0;
   long scale_objective_rpc_count = 0;
   long capacity_update_rpc_count = 0;
+  long full_labels_rpc_count = 0;
   std::uint64_t linear_rpc_wall_us = 0;
   long linear_structure_rpc_count = 0;
   long linear_system_rpc_count = 0;
@@ -99,6 +107,9 @@ public:
                       bool saturate_capacity_overflow = false) override;
   void replacePartitionCapacities(
       const mcpd3::PartitionCapacityUpdate &update) override;
+  void copyFullLabels(int partition_id, std::size_t offset,
+                      mcpd3::NodeLabel *destination,
+                      std::size_t count) override;
 
   void loadLinearStructure(const LinearStructureMessage &message);
   void loadLinearSystem(const LinearSystemValuesMessage &message);

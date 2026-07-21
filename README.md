@@ -758,6 +758,10 @@ Useful fields:
   workers.
 - `rpc_partition_load_tx_frame_count`: number of metadata, data-chunk, and end
   frames used to send partition packages.
+- `rpc_full_labels_request_tx_bytes`, `rpc_full_labels_result_rx_bytes`, and
+  `rpc_full_labels_result_rx_frame_count`: bounded final-cut recovery traffic.
+  Full labels stream directly into the coordinator's configured result
+  backing; they are not embedded in the final solve-result frame.
 - `rpc_solve_request_tx_bytes`: repeated solve request bytes sent during the
   optimization loop.
 - `rpc_solve_result_rx_bytes`: repeated solve result bytes received during
